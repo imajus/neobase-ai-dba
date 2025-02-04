@@ -8,8 +8,6 @@
 <img width="1706" alt="Screenshot 2025-02-05 at 12 40 11 AM" src="https://github.com/user-attachments/assets/0802352c-7442-40a7-8f82-3434701cb118" />
 <img width="1708" alt="Screenshot 2025-02-05 at 12 39 54 AM" src="https://github.com/user-attachments/assets/8f6efd47-9851-44a5-a33d-73629ad4dcdc" />
 
-
-
 ## Features
 
 - **AI-Powered Queries**: Generate and optimize SQL queries using natural language prompts.
@@ -20,6 +18,15 @@
 - **Query Optimization**: Get AI-driven suggestions to improve query performance.
 - **Schema Management**: Create indexes, views, and manage schemas effortlessly.
 - **Self-Hosted & Open Source**: Deploy on your infrastructure with full control.
+
+## Currently Supported DBs
+- PostgreSQL
+- MySQL
+- MongoDB
+- Neo4j DB
+- Redis
+- Clickhouse
+
 
 ## Tech Stack
 
