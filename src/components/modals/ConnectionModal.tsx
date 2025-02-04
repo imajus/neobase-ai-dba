@@ -2,11 +2,14 @@ import { AlertCircle, ChevronDown, X } from 'lucide-react';
 import React, { useState } from 'react';
 
 interface ConnectionModalProps {
+  initialData?: ConnectionFormData;
   onClose: () => void;
   onSubmit: (data: ConnectionFormData) => void;
+  onEdit?: (data: ConnectionFormData) => void;
 }
 
 export interface ConnectionFormData {
+  id: string;
   type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
   host: string;
   port: string;
@@ -23,17 +26,22 @@ interface FormErrors {
 }
 
 export default function ConnectionModal({
+  initialData,
   onClose,
   onSubmit,
+  onEdit,
 }: ConnectionModalProps) {
-  const [formData, setFormData] = useState<ConnectionFormData>({
-    type: 'postgresql',
-    host: '',
-    port: '',
-    username: '',
-    password: '',
-    database: '',
-  });
+  const [formData, setFormData] = useState<ConnectionFormData>(
+    initialData || {
+      id: '',
+      type: 'postgresql',
+      host: '',
+      port: '',
+      username: '',
+      password: '',
+      database: '',
+    }
+  );
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -101,7 +109,7 @@ export default function ConnectionModal({
     });
 
     if (!hasErrors) {
-      onSubmit(formData);
+      onEdit?.(formData) ?? onSubmit(formData);
     }
   };
 
@@ -279,7 +287,7 @@ export default function ConnectionModal({
 
           <div className="flex gap-4 pt-4">
             <button type="submit" className="neo-button flex-1">
-              Connect
+              {onEdit ? 'Save & Reconnect' : 'Connect'}
             </button>
             <button
               type="button"

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
+import ConnectionModal, { ConnectionFormData } from '../modals/ConnectionModal';
 
 const toastStyle = {
   style: {
@@ -35,14 +36,14 @@ export interface Message {
 }
 
 interface ChatWindowProps {
-  connectionName: string;
-  connectionType: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
+  connection: ConnectionFormData;
   isExpanded: boolean;
   messages: Message[];
   onSendMessage: (message: string) => void;
   setMessages?: (messages: Message[]) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
+  onEditConnection?: (id: string, data: ConnectionFormData) => void;
 }
 
 interface QueryState {
@@ -51,14 +52,14 @@ interface QueryState {
 }
 
 export default function ChatWindow({
-  connectionName,
-  connectionType,
+  connection,
   isExpanded,
   messages,
   setMessages,
   onSendMessage,
   onClearChat,
   onCloseConnection,
+  onEditConnection,
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [input, setInput] = useState('');
@@ -73,7 +74,8 @@ export default function ChatWindow({
   const [isConnecting, setIsConnecting] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-
+  const [showEditConnection, setShowEditConnection] = useState(false);
+  const [_connection, setConnection] = useState(connection);
   useEffect(() => {
     // Simulate connection establishment
     const timer = setTimeout(() => {
@@ -139,6 +141,7 @@ export default function ChatWindow({
     toast.success('Copied to clipboard!', toastStyle);
   };
 
+
   const renderTableView = (data: any[]) => {
     if (!data.length) return null;
     const columns = Object.keys(data[0]);
@@ -185,8 +188,8 @@ export default function ChatWindow({
       }`}>
       <div className="fixed top-0 left-0 right-0 md:relative md:left-auto md:right-auto bg-white border-b-4 border-black h-16 px-4 flex justify-between items-center mt-16 md:mt-0 z-20">
         <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
-          <DatabaseLogo type={connectionType} size={32} className="transition-transform hover:scale-110" />
-          <h2 className="text-lg md:text-2xl font-bold truncate">{connectionName}</h2>
+          <DatabaseLogo type={_connection.type} size={32} className="transition-transform hover:scale-110" />
+          <h2 className="text-lg md:text-2xl font-bold truncate">{_connection.database}</h2>
           {isConnecting ? (
             <span className="text-yellow-600 text-sm font-medium bg-yellow-100 px-2 py-1 rounded flex items-center gap-2">
               <Loader className="w-3 h-3 animate-spin" />
@@ -209,6 +212,13 @@ export default function ChatWindow({
             title="Clear chat"
           >
             <Eraser className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setShowEditConnection(true)}
+            className="p-2 hover:bg-neo-gray rounded-lg transition-colors hidden md:block neo-border text-gray-800"
+            title="Edit connection"
+          >
+            <Pencil className="w-5 h-5" />
           </button>
           {isConnected ? (
             <button
@@ -672,6 +682,33 @@ export default function ChatWindow({
           onConfirm={handleDisconnect}
           onCancel={() => setShowCloseConfirm(false)}
         />
+      )}
+
+      {showEditConnection && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <ConnectionModal
+            initialData={{
+              id: _connection.id,
+              type: _connection.type,
+              host: _connection.host,
+              port: _connection.port.toString(),
+              database: _connection.database,
+              username: _connection.username,
+              password: '', // Don't pre-fill password for security
+            }}
+            onClose={() => setShowEditConnection(false)}
+            onEdit={(data) => {
+              onEditConnection?.(_connection.id, data);
+              // Update connection in state
+              setConnection(data);
+              setShowEditConnection(false);
+            }}
+            onSubmit={(data) => {
+              onEditConnection?.(_connection.id, data);
+              setShowEditConnection(false);
+            }}
+          />
+        </div>
       )}
     </div>
 

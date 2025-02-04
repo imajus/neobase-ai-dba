@@ -9,6 +9,7 @@ import {
 import { useCallback, useState } from 'react';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
+import { ConnectionFormData } from '../modals/ConnectionModal';
 import DeleteConnectionModal from '../modals/DeleteConnectionModal';
 
 export interface Connection {
@@ -20,7 +21,7 @@ export interface Connection {
 interface SidebarProps {
   isExpanded: boolean;
   onToggleExpand: () => void;
-  connections: Connection[];
+  connections: ConnectionFormData[];
   onSelectConnection: (id: string) => void;
   onAddConnection: () => void;
   onLogout: () => void;
@@ -39,7 +40,7 @@ export default function Sidebar({
   selectedConnectionId,
 }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [connectionToDelete, setConnectionToDelete] = useState<Connection | null>(null);
+  const [connectionToDelete, setConnectionToDelete] = useState<ConnectionFormData | null>(null);
 
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
@@ -50,7 +51,7 @@ export default function Sidebar({
     setShowLogoutConfirm(false);
   };
 
-  const handleDeleteClick = useCallback((connection: Connection) => {
+  const handleDeleteClick = useCallback((connection: ConnectionFormData) => {
     setConnectionToDelete(connection);
   }, []);
 
@@ -84,7 +85,7 @@ export default function Sidebar({
                   onClick={() => onSelectConnection(connection.id)}
                   className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnectionId === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
                     }`}
-                  title={connection.name}
+                  title={connection.database}
                 >
                   <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
                     <DatabaseLogo
@@ -95,7 +96,7 @@ export default function Sidebar({
                     <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
                       }`}>
                       <div className="text-left">
-                        <h3 className="font-bold text-lg leading-tight">{connection.name}</h3>
+                        <h3 className="font-bold text-lg leading-tight">{connection.database}</h3>
                         <p className="text-gray-600 capitalize text-sm">{connection.type}</p>
                       </div>
                     </div>
@@ -201,7 +202,7 @@ export default function Sidebar({
       {connectionToDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <DeleteConnectionModal
-            connectionName={connectionToDelete.name}
+            connectionName={connectionToDelete.database}
             onConfirm={handleDeleteConfirm}
             onCancel={() => setConnectionToDelete(null)}
           />

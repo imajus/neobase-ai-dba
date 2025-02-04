@@ -3,14 +3,14 @@ import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow, { Message } from './components/chat/ChatWindow';
-import Sidebar, { Connection } from './components/dashboard/Sidebar';
-import ConnectionModal from './components/modals/ConnectionModal';
+import Sidebar from './components/dashboard/Sidebar';
+import ConnectionModal, { ConnectionFormData } from './components/modals/ConnectionModal';
 import { LoginFormData, SignupFormData } from './types/auth';
 
 // Mock data for demonstration
-const mockConnections = [
-  { id: '1', name: 'Production DB', type: 'postgresql' as const },
-  { id: '2', name: 'Development DB', type: 'mysql' as const },
+const mockConnections: ConnectionFormData[] = [
+  { id: '1', type: 'postgresql' as const, host: 'localhost', port: '5432', username: 'postgres', password: 'postgres', database: 'Nps-uat' },
+  { id: '2', type: 'mysql' as const, host: 'localhost', port: '3306', username: 'root', password: 'root', database: 'Jobprot-dev' },
 ];
 
 const mockMessages = [
@@ -103,7 +103,7 @@ ORDER BY t.created_at DESC;`,
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
-  const [connections, setConnections] = useState<Connection[]>(mockConnections);
+  const [connections, setConnections] = useState<ConnectionFormData[]>(mockConnections);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>();
   const [messages, setMessages] = useState<Message[]>(mockMessages);
@@ -141,6 +141,25 @@ function App() {
     if (selectedConnectionId === id) {
       setSelectedConnectionId(undefined);
     }
+  };
+
+  const handleEditConnection = (id: string, data: ConnectionFormData) => {
+    setConnections(prev => prev.map(conn => {
+      if (conn.id === id) {
+        return {
+          ...conn,
+          id: data.id,
+          type: data.type,
+          host: data.host,
+          port: data.port,
+          database: data.database,
+          username: data.username,
+          password: data.password,
+          name: data.database, // Update name if using database name as connection name
+        };
+      }
+      return conn;
+    }));
   };
 
   const generateAIResponse = async (userMessage: string) => {
@@ -250,8 +269,7 @@ function App() {
 
       {selectedConnection ? (
         <ChatWindow
-          connectionName={selectedConnection.name}
-          connectionType={selectedConnection.type}
+          connection={selectedConnection}
           isExpanded={isSidebarExpanded}
           messages={messages}
           setMessages={setMessages}
@@ -266,6 +284,7 @@ function App() {
           }}
           onClearChat={handleClearChat}
           onCloseConnection={handleCloseConnection}
+          onEditConnection={handleEditConnection}
         />
       ) : (
         <div className={`
@@ -403,12 +422,11 @@ function App() {
         <ConnectionModal
           onClose={() => setShowConnectionModal(false)}
           onSubmit={(data) => {
-            const newConnection = {
+            const newConnection: ConnectionFormData = {
               id: Date.now().toString(),
-              name: data.database,
               type: data.type,
               host: data.host,
-              port: parseInt(data.port),
+              port: data.port,
               database: data.database,
               username: data.username,
               password: data.password,
