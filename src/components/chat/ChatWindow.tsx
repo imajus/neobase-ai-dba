@@ -614,6 +614,15 @@ export default function ChatWindow({
         )}
       </div>
 
+      <style>
+        {`
+          @media (width: 1440px) {
+            .chat-input-1440 {
+              margin-left: ${isExpanded ? '20rem' : 'auto'};
+            }
+          }
+        `}
+      </style>
       <form
         onSubmit={handleSubmit}
         className={`
@@ -624,7 +633,7 @@ export default function ChatWindow({
           ${isExpanded ? '' : 'md:left-[5rem]'}
         `}
       >
-        <div className="max-w-5xl mx-auto flex gap-4">
+        <div className="max-w-5xl mx-auto flex gap-4 chat-input-1440">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -700,7 +709,7 @@ export default function ChatWindow({
               setShowEditConnection(false);
             }}
             onSubmit={(data) => {
-              onEditConnection?.(data.id, data);
+              onEditConnection?.(connection.id, data);
               setShowEditConnection(false);
             }}
           />
