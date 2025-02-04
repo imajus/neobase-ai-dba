@@ -1,23 +1,22 @@
-import React from 'react';
-
 interface DatabaseLogoProps {
   type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
   size?: number;
   className?: string;
 }
 
+// Import all logos using Vite's import.meta.env.BASE_URL
 const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
-  postgresql: 'https://www.postgresql.org/media/img/about/press/elephant.png',
-  mysql: 'https://labs.mysql.com/common/logos/mysql-logo.svg',
-  mongodb: 'https://www.mongodb.com/assets/images/global/leaf.png',
-  redis: 'https://redis.io/images/redis-white.png',
-  clickhouse: 'https://clickhouse.com/images/ch_logo.svg',
-  neo4j: 'https://dist.neo4j.com/wp-content/uploads/20230926085635/neo4j-logo-2023.svg'
+  postgresql: `${import.meta.env.BASE_URL}postgresql-logo.png`,
+  mysql: `${import.meta.env.BASE_URL}mysql-logo.png`,
+  mongodb: `${import.meta.env.BASE_URL}mongodb-logo.png`,
+  redis: `${import.meta.env.BASE_URL}redis-logo.svg`,
+  clickhouse: `${import.meta.env.BASE_URL}clickhouse-logo.svg`,
+  neo4j: `${import.meta.env.BASE_URL}neo4j-logo.png`
 };
 
 export default function DatabaseLogo({ type, size = 24, className = '' }: DatabaseLogoProps) {
   return (
-    <div 
+    <div
       className={`relative flex items-center justify-center ${className}`}
       style={{ width: size, height: size }}
     >

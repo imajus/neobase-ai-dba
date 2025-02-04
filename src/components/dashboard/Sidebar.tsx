@@ -26,7 +26,7 @@ interface SidebarProps {
   onAddConnection: () => void;
   onLogout: () => void;
   onDeleteConnection?: (id: string) => void;
-  selectedConnectionId?: string;
+  selectedConnection?: ConnectionFormData;
 }
 
 export default function Sidebar({
@@ -37,7 +37,7 @@ export default function Sidebar({
   onAddConnection,
   onLogout,
   onDeleteConnection,
-  selectedConnectionId,
+  selectedConnection,
 }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [connectionToDelete, setConnectionToDelete] = useState<ConnectionFormData | null>(null);
@@ -83,7 +83,7 @@ export default function Sidebar({
               <div className={`relative group ${!isExpanded ? 'md:w-12 md:h-12' : ''}`}>
                 <button
                   onClick={() => onSelectConnection(connection.id)}
-                  className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnectionId === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
+                  className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
                     }`}
                   title={connection.database}
                 >
@@ -91,7 +91,7 @@ export default function Sidebar({
                     <DatabaseLogo
                       type={connection.type}
                       size={28}
-                      className={`transition-transform ${selectedConnectionId === connection.id ? 'scale-110' : ''}`}
+                      className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
                     />
                     <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
                       }`}>

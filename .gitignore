@@ -1,3 +1,9 @@
 .env
 dist/
 node_modules/
+
+# Database logos
+public/*.svg
+public/*.png
+!public/clickhouse-logo.svg
+!public/redis-logo.svg

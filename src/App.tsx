@@ -105,7 +105,7 @@ function App() {
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [connections, setConnections] = useState<ConnectionFormData[]>(mockConnections);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
-  const [selectedConnectionId, setSelectedConnectionId] = useState<string>();
+  const [selectedConnection, setSelectedConnection] = useState<ConnectionFormData>();
   const [messages, setMessages] = useState<Message[]>(mockMessages);
 
   const handleLogin = (data: LoginFormData) => {
@@ -124,7 +124,7 @@ function App() {
 
   const handleLogout = () => {
     setIsAuthenticated(false);
-    setSelectedConnectionId(undefined);
+    setSelectedConnection(undefined);
     setMessages(mockMessages);
   };
 
@@ -133,13 +133,13 @@ function App() {
   };
 
   const handleCloseConnection = () => {
-    setSelectedConnectionId(undefined);
+    setSelectedConnection(undefined);
   };
 
   const handleDeleteConnection = (id: string) => {
     setConnections(prev => prev.filter(conn => conn.id !== id));
-    if (selectedConnectionId === id) {
-      setSelectedConnectionId(undefined);
+    if (selectedConnection?.id === id) {
+      setSelectedConnection(undefined);
     }
   };
 
@@ -155,11 +155,11 @@ function App() {
           database: data.database,
           username: data.username,
           password: data.password,
-          name: data.database, // Update name if using database name as connection name
         };
       }
       return conn;
     }));
+    setSelectedConnection(data);
   };
 
   const generateAIResponse = async (userMessage: string) => {
@@ -244,10 +244,6 @@ function App() {
     return <AuthForm onLogin={handleLogin} onSignup={handleSignup} />;
   }
 
-  const selectedConnection = mockConnections.find(
-    (conn) => conn.id === selectedConnectionId
-  );
-
   return (
     <div className="flex flex-col md:flex-row bg-[#FFDB58]/10 min-h-screen">
       <div className="fixed top-0 left-0 right-0 h-16 bg-white border-b-4 border-black md:hidden z-50 flex items-center justify-center">
@@ -260,10 +256,12 @@ function App() {
         isExpanded={isSidebarExpanded}
         onToggleExpand={() => setIsSidebarExpanded(!isSidebarExpanded)}
         connections={connections}
-        onSelectConnection={setSelectedConnectionId}
+        onSelectConnection={(id) => {
+          setSelectedConnection(connections.find(conn => conn.id === id));
+        }}
         onAddConnection={handleAddConnection}
         onLogout={handleLogout}
-        selectedConnectionId={selectedConnectionId}
+        selectedConnection={selectedConnection}
         onDeleteConnection={handleDeleteConnection}
       />
 
@@ -316,7 +314,7 @@ function App() {
           {/* Features Cards */}
           <div className="w-full max-w-4xl mx-auto grid md:grid-cols-3 gap-6 mb-12">
             <button
-              onClick={() => setSelectedConnectionId(connections[0]?.id)}
+              onClick={() => setSelectedConnection(connections[0])}
               className="
                 neo-border 
                 bg-white 
@@ -373,7 +371,7 @@ function App() {
             </button>
 
             <button
-              onClick={() => setSelectedConnectionId(connections[0]?.id)}
+              onClick={() => setSelectedConnection(connections[0])}
               className="
                 neo-border 
                 bg-white 

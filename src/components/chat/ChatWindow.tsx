@@ -75,7 +75,6 @@ export default function ChatWindow({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showEditConnection, setShowEditConnection] = useState(false);
-  const [_connection, setConnection] = useState(connection);
   useEffect(() => {
     // Simulate connection establishment
     const timer = setTimeout(() => {
@@ -133,14 +132,13 @@ export default function ChatWindow({
 
   const handleDisconnect = useCallback(() => {
     onCloseConnection();
-    setShowCloseConfirm(false);
+    handleCloseConfirm();
   }, [onCloseConnection]);
 
   const handleCopyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success('Copied to clipboard!', toastStyle);
   };
-
 
   const renderTableView = (data: any[]) => {
     if (!data.length) return null;
@@ -188,8 +186,8 @@ export default function ChatWindow({
       }`}>
       <div className="fixed top-0 left-0 right-0 md:relative md:left-auto md:right-auto bg-white border-b-4 border-black h-16 px-4 flex justify-between items-center mt-16 md:mt-0 z-20">
         <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
-          <DatabaseLogo type={_connection.type} size={32} className="transition-transform hover:scale-110" />
-          <h2 className="text-lg md:text-2xl font-bold truncate">{_connection.database}</h2>
+          <DatabaseLogo type={connection.type} size={32} className="transition-transform hover:scale-110" />
+          <h2 className="text-lg md:text-2xl font-bold truncate">{connection.database}</h2>
           {isConnecting ? (
             <span className="text-yellow-600 text-sm font-medium bg-yellow-100 px-2 py-1 rounded flex items-center gap-2">
               <Loader className="w-3 h-3 animate-spin" />
@@ -688,23 +686,21 @@ export default function ChatWindow({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <ConnectionModal
             initialData={{
-              id: _connection.id,
-              type: _connection.type,
-              host: _connection.host,
-              port: _connection.port.toString(),
-              database: _connection.database,
-              username: _connection.username,
+              id: connection.id,
+              type: connection.type,
+              host: connection.host,
+              port: connection.port.toString(),
+              database: connection.database,
+              username: connection.username,
               password: '', // Don't pre-fill password for security
             }}
             onClose={() => setShowEditConnection(false)}
             onEdit={(data) => {
-              onEditConnection?.(_connection.id, data);
-              // Update connection in state
-              setConnection(data);
+              onEditConnection?.(data.id, data);
               setShowEditConnection(false);
             }}
             onSubmit={(data) => {
-              onEditConnection?.(_connection.id, data);
+              onEditConnection?.(data.id, data);
               setShowEditConnection(false);
             }}
           />
