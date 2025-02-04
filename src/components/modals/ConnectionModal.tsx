@@ -137,7 +137,7 @@ export default function ConnectionModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed mt-14 inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white neo-border rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b-4 border-black mb-2">
           <h2 className="text-2xl font-bold">New Database Connection</h2>
