@@ -288,15 +288,33 @@ function App() {
               Welcome to NeoBase
             </h1>
             <p className="text-xl text-gray-600 mb-2 max-w-2xl mx-auto">
-              Transform how you interact with your databases using natural language.
+              Your AI-powered interface for seamless database interactions.
               <br />
-              No more complex queries - just ask questions and get instant insights.
+              From SQL to NoSQL, explore and analyze your data through natural conversations.
             </p>
           </div>
 
           {/* Features Cards */}
           <div className="w-full max-w-4xl mx-auto grid md:grid-cols-3 gap-6 mb-12">
-            <div className="neo-border bg-white p-6 rounded-lg">
+            <button
+              onClick={() => setSelectedConnectionId(connections[0]?.id)}
+              className="
+                neo-border 
+                bg-white 
+                p-6 
+                rounded-lg
+                text-left
+                transition-all
+                duration-300
+                hover:-translate-y-1
+                hover:shadow-lg
+                hover:bg-[#FFDB58]/5
+                active:translate-y-0
+                disabled:opacity-50
+                disabled:cursor-not-allowed
+              "
+              disabled={!connections.length}
+            >
               <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
                 <MessageSquare className="w-6 h-6 text-black" />
               </div>
@@ -304,11 +322,26 @@ function App() {
                 Natural Language Queries
               </h3>
               <p className="text-gray-600">
-                Talk to your database in plain English. NeoBase translates your questions into SQL queries automatically.
+                Talk to your database in plain English. NeoBase translates your questions into database queries automatically.
               </p>
-            </div>
+            </button>
 
-            <div className="neo-border bg-white p-6 rounded-lg">
+            <button
+              onClick={handleAddConnection}
+              className="
+                neo-border 
+                bg-white 
+                p-6 
+                rounded-lg
+                text-left
+                transition-all
+                duration-300
+                hover:-translate-y-1
+                hover:shadow-lg
+                hover:bg-[#FFDB58]/5
+                active:translate-y-0
+              "
+            >
               <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
                 <Database className="w-6 h-6 text-black" />
               </div>
@@ -318,9 +351,27 @@ function App() {
               <p className="text-gray-600">
                 Connect to PostgreSQL, MySQL, MongoDB, Redis, and more. One interface for all your databases.
               </p>
-            </div>
+            </button>
 
-            <div className="neo-border bg-white p-6 rounded-lg">
+            <button
+              onClick={() => setSelectedConnectionId(connections[0]?.id)}
+              className="
+                neo-border 
+                bg-white 
+                p-6 
+                rounded-lg
+                text-left
+                transition-all
+                duration-300
+                hover:-translate-y-1
+                hover:shadow-lg
+                hover:bg-[#FFDB58]/5
+                active:translate-y-0
+                disabled:opacity-50
+                disabled:cursor-not-allowed
+              "
+              disabled={!connections.length}
+            >
               <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
                 <LineChart className="w-6 h-6 text-black" />
               </div>
@@ -330,7 +381,7 @@ function App() {
               <p className="text-gray-600">
                 View your data in tables or JSON format. Execute queries and see results in real-time.
               </p>
-            </div>
+            </button>
           </div>
 
           {/* CTA Section */}
