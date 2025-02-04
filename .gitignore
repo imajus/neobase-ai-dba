@@ -3,7 +3,6 @@ dist/
 node_modules/
 
 # Database logos
-public/*.svg
-public/*.png
-!public/clickhouse-logo.svg
-!public/redis-logo.svg
+# Keep all logos in version control for Vercel
+!public/*.svg
+!public/*.png
