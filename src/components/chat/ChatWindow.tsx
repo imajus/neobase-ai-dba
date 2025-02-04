@@ -265,7 +265,7 @@ export default function ChatWindow({
           scroll-smooth 
           pb-24 
           md:pb-32 
-          mt-32 
+          mt-16
           md:mt-0
         "
       >
@@ -273,28 +273,40 @@ export default function ChatWindow({
           className={`
             max-w-5xl 
             mx-auto
-            px-2
-            md:pr-0
+            px-4
+            md:px-2
+            xl:px-0
             transition-all 
             duration-300
             ${isExpanded
-              ? 'md:ml-6' // Reduced from 8 to 6 to match input field
-              : 'md:ml-[16rem]' // Reduced from 18rem to match input field
+              ? 'md:ml-6 lg:ml-6 xl:mx-8 [@media(min-width:1920px)]:ml-[8rem]'
+              : 'md:ml-[19rem] xl:mx-auto'
             }
           `}
         >
           {messages.map((message) => (
-            <div key={message.id} className="py-6 first:pt-8">
+            <div key={message.id} className="py-4 md:py-6 first:pt-8">
               <div className={`
                 group flex items-center relative
+                ${message.type === 'user' ? 'justify-end' : 'justify-start'}
               `}>
                 {message.type === 'user' && (
-                  <div className="absolute right-0 -bottom-10 flex gap-1">
+                  <div className="
+                    absolute 
+                    right-0 
+                    -bottom-8
+                    md:-bottom-10 
+                    flex 
+                    gap-1
+                    z-10
+                  ">
                     <button
                       onClick={() => handleCopyToClipboard(message.content)}
                       className="
                         -translate-y-1/2
-                        p-2 
+                        p-1.5
+                        md:p-2 
+                        opacity-0
                         group-hover:opacity-100 
                         transition-opacity 
                         hover:bg-black/10 
@@ -304,7 +316,7 @@ export default function ChatWindow({
                       "
                       title="Copy message"
                     >
-                      <Copy className="w-4 h-4 text-gray-600" />
+                      <Copy className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-600" />
                     </button>
                     <button
                       onClick={() => {
@@ -313,17 +325,19 @@ export default function ChatWindow({
                       }}
                       className="
                         -translate-y-1/2
-                        p-2 
+                        p-1.5
+                        md:p-2 
+                        opacity-0
                         group-hover:opacity-100 
                         transition-opacity 
-                        hover:bg-black/10 
+                        hover:bg-black/10
                         rounded-lg
                         flex-shrink-0
                         border-0
                       "
                       title="Edit message"
                     >
-                      <Pencil className="w-4 h-4 text-gray-600" />
+                      <Pencil className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-600" />
                     </button>
                   </div>
                 )}
@@ -332,6 +346,7 @@ export default function ChatWindow({
                     message-bubble
                     inline-block
                     max-w-[85%]
+                    md:max-w-[75%]
                     ${message.type === 'user'
                       ? 'message-bubble-user'
                       : 'message-bubble-ai'
@@ -577,7 +592,10 @@ export default function ChatWindow({
           fixed bottom-0 left-0 right-0 p-4 
           bg-white border-t-4 border-black 
           transition-all duration-300
-          md:left-[${isExpanded ? '20rem' : '5rem'}]
+          ${isExpanded
+            ? ''
+            : 'md:left-[5rem]'
+          }
         `}
       >
         <div className="max-w-5xl mx-auto flex gap-4">
