@@ -294,11 +294,11 @@ export default function ChatWindow({
                   <div className="
                     absolute 
                     right-0 
-                    -bottom-8
+                    -bottom-9
                     md:-bottom-10 
                     flex 
                     gap-1
-                    z-10
+                    z-[5]
                   ">
                     <button
                       onClick={() => handleCopyToClipboard(message.content)}
@@ -306,17 +306,18 @@ export default function ChatWindow({
                         -translate-y-1/2
                         p-1.5
                         md:p-2 
-                        opacity-0
                         group-hover:opacity-100 
                         transition-opacity 
                         hover:bg-black/10 
                         rounded-lg
                         flex-shrink-0
                         border-0
+                        bg-white/80
+                        backdrop-blur-sm
                       "
                       title="Copy message"
                     >
-                      <Copy className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-600" />
+                      <Copy className="w-4 h-4 text-gray-800" />
                     </button>
                     <button
                       onClick={() => {
@@ -326,18 +327,19 @@ export default function ChatWindow({
                       className="
                         -translate-y-1/2
                         p-1.5
-                        md:p-2 
-                        opacity-0
+                        md:p-2
                         group-hover:opacity-100 
                         transition-opacity 
                         hover:bg-black/10
                         rounded-lg
                         flex-shrink-0
                         border-0
+                        bg-white/80
+                        backdrop-blur-sm
                       "
                       title="Edit message"
                     >
-                      <Pencil className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-600" />
+                      <Pencil className="w-4 h-4 text-gray-800" />
                     </button>
                   </div>
                 )}
@@ -345,7 +347,9 @@ export default function ChatWindow({
                   className={`
                     message-bubble
                     inline-block
-                    max-w-[85%]
+                    w-[95%]
+                    sm:w-[85%]
+                    ${message.type === 'user' && editingMessageId === message.id ? "md:w-[75%]" : "md:w-auto"}
                     md:max-w-[75%]
                     ${message.type === 'user'
                       ? 'message-bubble-user'
@@ -359,12 +363,28 @@ export default function ChatWindow({
                       <span className="text-gray-600">Thinking...</span>
                     </div>
                   ) : message.type === 'user' && editingMessageId === message.id ? (
-                    <div>
-                      <input
-                        type="text"
+                    <div className='w-full'>
+                      <textarea
                         value={editInput}
                         onChange={(e) => setEditInput(e.target.value)}
-                        className="neo-input w-full"
+                        className="
+                          neo-input 
+                          w-full
+                          text-lg
+                          min-h-[42px]
+                          resize-y
+                          py-2
+                          px-3
+                          leading-normal
+                          whitespace-pre-wrap
+                        "
+                        rows={Math.min(
+                          Math.max(
+                            editInput.split('\n').length,
+                            Math.ceil(editInput.length / 50)
+                          ),
+                          10
+                        )}
                         autoFocus
                       />
                       <div className="flex gap-2 mt-3">
@@ -592,22 +612,45 @@ export default function ChatWindow({
           fixed bottom-0 left-0 right-0 p-4 
           bg-white border-t-4 border-black 
           transition-all duration-300
-          ${isExpanded
-            ? ''
-            : 'md:left-[5rem]'
-          }
+          z-[10]
+          ${isExpanded ? '' : 'md:left-[5rem]'}
         `}
       >
         <div className="max-w-5xl mx-auto flex gap-4">
-          <input
-            type="text"
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
             placeholder="Talk to your database..."
-            className="neo-input flex-1"
+            className="
+              neo-input 
+              flex-1
+              min-h-[52px]
+              resize-y
+              py-3
+              px-4
+              leading-normal
+              whitespace-pre-wrap
+            "
+            rows={Math.min(
+              Math.max(
+                input.split('\n').length,
+                Math.ceil(input.length / 50)
+              ),
+              5
+            )}
             disabled={!isConnected}
           />
-          <button type="submit" className="neo-button px-8" disabled={!isConnected}>
+          <button
+            type="submit"
+            className="neo-button px-8 self-end"
+            disabled={!isConnected}
+          >
             <Send className="w-6 h-6" />
           </button>
         </div>
