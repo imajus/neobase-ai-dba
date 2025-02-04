@@ -1,4 +1,4 @@
-# NeoBase
+# NeoBase - AI Driven Database Admin
 <img width="1708" alt="Screenshot 2025-02-05 at 12 40 33 AM" src="https://github.com/user-attachments/assets/cf5f2061-1230-4dd6-b985-4edb21d76401" />
 
 **NeoBase** is an AI-powered database assistant that helps you manage, query, and optimize your databases effortlessly. With a sleek Neo Brutalism design and real-time chat functionality, NeoBase makes database administration intuitive and efficient.
