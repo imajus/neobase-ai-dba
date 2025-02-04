@@ -41,11 +41,10 @@
 
 ### Prerequisites
 
-- Go (v1.20+)
+- Go (v1.22+)
 - Node.js (v18+)
 - OpenAI API key
-- Docker (optional)
-
+- Docker
 
 ## Usage
 
