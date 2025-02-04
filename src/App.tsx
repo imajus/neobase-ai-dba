@@ -1,4 +1,4 @@
-import { Boxes } from 'lucide-react';
+import { Boxes, Database, LineChart, MessageSquare } from 'lucide-react';
 import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
@@ -268,20 +268,81 @@ function App() {
           onCloseConnection={handleCloseConnection}
         />
       ) : (
-        <div className={`flex-1 flex items-center justify-center p-4 mt-16 md:mt-0 min-h-[calc(100vh-4rem)] transition-all duration-300 ${isSidebarExpanded ? 'md:ml-80' : 'md:ml-20'
-          }`}>
-          <div className="text-center max-w-lg mx-auto">
-            <h2 className="text-2xl md:text-3xl font-bold mb-6">
-              Ready to explore your data?
-            </h2>
-            <p className="text-gray-600 text-base md:text-lg">
-              <button
-                onClick={handleAddConnection}
-                className="text-purple-600 hover:text-purple-800 font-medium"
-              >
-                Create a new connection
-              </button>
-              {' '}or select an existing one from the sidebar to begin.
+        <div className={`
+          flex-1 
+          flex 
+          flex-col 
+          items-center 
+          justify-center
+          p-8 
+          mt-16 
+          md:mt-0 
+          min-h-[calc(100vh-4rem)] 
+          transition-all 
+          duration-300 
+          ${isSidebarExpanded ? 'md:ml-80' : 'md:ml-20'}
+        `}>
+          {/* Welcome Section */}
+          <div className="w-full max-w-4xl mx-auto text-center mb-12">
+            <h1 className="text-5xl font-bold mb-4">
+              Welcome to NeoBase
+            </h1>
+            <p className="text-xl text-gray-600 mb-2 max-w-2xl mx-auto">
+              Transform how you interact with your databases using natural language.
+              <br />
+              No more complex queries - just ask questions and get instant insights.
+            </p>
+          </div>
+
+          {/* Features Cards */}
+          <div className="w-full max-w-4xl mx-auto grid md:grid-cols-3 gap-6 mb-12">
+            <div className="neo-border bg-white p-6 rounded-lg">
+              <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
+                <MessageSquare className="w-6 h-6 text-black" />
+              </div>
+              <h3 className="text-lg font-bold mb-2">
+                Natural Language Queries
+              </h3>
+              <p className="text-gray-600">
+                Talk to your database in plain English. NeoBase translates your questions into SQL queries automatically.
+              </p>
+            </div>
+
+            <div className="neo-border bg-white p-6 rounded-lg">
+              <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
+                <Database className="w-6 h-6 text-black" />
+              </div>
+              <h3 className="text-lg font-bold mb-2">
+                Multi-Database Support
+              </h3>
+              <p className="text-gray-600">
+                Connect to PostgreSQL, MySQL, MongoDB, Redis, and more. One interface for all your databases.
+              </p>
+            </div>
+
+            <div className="neo-border bg-white p-6 rounded-lg">
+              <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
+                <LineChart className="w-6 h-6 text-black" />
+              </div>
+              <h3 className="text-lg font-bold mb-2">
+                Visual Results
+              </h3>
+              <p className="text-gray-600">
+                View your data in tables or JSON format. Execute queries and see results in real-time.
+              </p>
+            </div>
+          </div>
+
+          {/* CTA Section */}
+          <div className="text-center">
+            <button
+              onClick={handleAddConnection}
+              className="neo-button text-lg px-8 py-4 mb-4"
+            >
+              Create New Connection
+            </button>
+            <p className="text-gray-600">
+              or select an existing one from the sidebar to begin
             </p>
           </div>
         </div>
@@ -295,6 +356,11 @@ function App() {
               id: Date.now().toString(),
               name: data.database,
               type: data.type,
+              host: data.host,
+              port: parseInt(data.port),
+              database: data.database,
+              username: data.username,
+              password: data.password,
             };
             setConnections(prev => [...prev, newConnection]);
             setShowConnectionModal(false);
