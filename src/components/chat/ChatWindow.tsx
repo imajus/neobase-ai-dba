@@ -243,6 +243,13 @@ export default function ChatWindow({
           >
             <Eraser className="w-5 h-5" />
           </button>
+          <button
+            onClick={() => setShowEditConnection(true)}
+            className="p-2 hover:bg-neo-gray rounded-lg transition-colors md:hidden"
+            title="Edit connection"
+          >
+            <Pencil className="w-5 h-5" />
+          </button>
           {isConnected ? (
             <button
               onClick={() => setShowCloseConfirm(true)}
@@ -315,8 +322,8 @@ export default function ChatWindow({
                         p-1.5
                         md:p-2 
                         group-hover:opacity-100 
-                        transition-opacity 
-                        hover:bg-black/10 
+                        transition-colors
+                        hover:bg-neo-gray
                         rounded-lg
                         flex-shrink-0
                         border-0
@@ -337,8 +344,8 @@ export default function ChatWindow({
                         p-1.5
                         md:p-2
                         group-hover:opacity-100 
-                        transition-opacity 
-                        hover:bg-black/10
+                        hover:bg-neo-gray
+                        transition-colors
                         rounded-lg
                         flex-shrink-0
                         border-0
@@ -668,7 +675,7 @@ export default function ChatWindow({
             className="neo-button px-8 self-end"
             disabled={!isConnected}
           >
-            <Send className="w-6 h-6" />
+            <Send className="w-6 h-8" />
           </button>
         </div>
       </form>
