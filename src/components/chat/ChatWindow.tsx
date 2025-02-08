@@ -613,7 +613,7 @@ export default function ChatWindow({
         {showScrollButton && (
           <button
             onClick={scrollToBottom}
-            className="fixed bottom-24 right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border"
+            className="fixed bottom-24 z-[10] right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border"
             title="Scroll to bottom"
           >
             <ArrowDown className="w-6 h-6" />

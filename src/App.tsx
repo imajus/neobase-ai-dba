@@ -1,4 +1,4 @@
-import { Boxes, Database, LineChart, MessageSquare } from 'lucide-react';
+import { Boxes, Database, Github, LineChart, MessageSquare } from 'lucide-react';
 import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
@@ -246,6 +246,43 @@ function App() {
 
   return (
     <div className="flex flex-col md:flex-row bg-[#FFDB58]/10 min-h-screen">
+      <a
+        href="https://github.com/bhaskarblur/neobase-ai-dba"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="
+          hidden
+          md:flex 
+          fixed 
+          bottom-4 
+          right-4 
+          z-[999] 
+          neo-button 
+          items-center 
+          gap-2 
+          px-4 
+          py-2 
+          text-sm 
+          font-bold
+          hover:translate-y-[-2px]
+          hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]
+          active:translate-y-[0px]
+          active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+          transition-all
+          duration-200
+        "
+      >
+        <Github className="w-4 h-4" />
+        <span>Star Us</span>
+        <span className="
+          bg-white/20 
+          px-2 
+          py-0.5 
+          rounded-full 
+          text-xs 
+          font-mono
+        ">5k</span>
+      </a>
       <div className="fixed top-0 left-0 right-0 h-16 bg-white border-b-4 border-black md:hidden z-50 flex items-center justify-center">
         <div className="flex items-center gap-2">
           <Boxes className="w-8 h-8" />

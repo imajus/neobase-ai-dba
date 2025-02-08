@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
 interface ConfirmationModalProps {
@@ -32,7 +31,7 @@ export default function ConfirmationModal({
 
         <div className="p-6">
           <p className="text-gray-600 mb-6">{message}</p>
-          
+
           <div className="flex gap-4">
             <button
               onClick={onConfirm}
