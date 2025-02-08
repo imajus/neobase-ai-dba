@@ -1,8 +1,1 @@
-.env
-dist/
-node_modules/
-
-# Database logos
-# Keep all logos in version control for Vercel
-!public/*.svg
-!public/*.png
+DS_Store
