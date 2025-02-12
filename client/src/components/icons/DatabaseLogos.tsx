@@ -1,5 +1,5 @@
 interface DatabaseLogoProps {
-  type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
+  type: 'postgresql' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j';
   size?: number;
   className?: string;
 }

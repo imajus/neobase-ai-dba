@@ -260,7 +260,7 @@ export default function ConnectionModal({
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.username && touched.username ? 'border-neo-error' : ''}`}
-              placeholder="e.g., db_user, admin"
+              placeholder="e.g., db_user, assistant"
               required
             />
             {errors.username && touched.username && (
