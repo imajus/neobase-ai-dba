@@ -3,7 +3,7 @@ package di
 import (
 	"log"
 	"neobase-ai/config"
-	"neobase-ai/internal/handlers"
+	"neobase-ai/internal/apis/handlers"
 	"neobase-ai/internal/repositories"
 	"neobase-ai/internal/services"
 	"neobase-ai/internal/utils"

@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"neobase-ai/internal/dtos"
+	"neobase-ai/internal/apis/dtos"
 
 	"github.com/gin-gonic/gin"
 )

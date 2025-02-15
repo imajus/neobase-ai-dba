@@ -1,8 +1,8 @@
 package middlewares
 
 import (
+	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/di"
-	"neobase-ai/internal/dtos"
 	"neobase-ai/internal/utils"
 	"net/http"
 	"strings"

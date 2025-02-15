@@ -4,6 +4,7 @@ import (
 	"context"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -12,21 +13,26 @@ import (
 type UserRepository interface {
 	FindByUsername(username string) (*models.User, error)
 	Create(user *models.User) error
+	CreateUserSignUpSecret(secret string) (*models.UserSignupSecret, error)
+	ValidateUserSignupSecret(secret string) bool
+	DeleteUserSignupSecret(secret string) error
 }
 
 type userRepository struct {
-	collection *mongo.Collection
+	userCollection             *mongo.Collection
+	userSignupSecretCollection *mongo.Collection
 }
 
 func NewUserRepository(mongoClient *mongodb.MongoDBClient) UserRepository {
 	return &userRepository{
-		collection: mongoClient.GetCollectionByName("users"),
+		userCollection:             mongoClient.GetCollectionByName("users"),
+		userSignupSecretCollection: mongoClient.GetCollectionByName("userSignupSecrets"),
 	}
 }
 
 func (r *userRepository) FindByUsername(username string) (*models.User, error) {
 	var user models.User
-	err := r.collection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
+	err := r.userCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
 	if err == mongo.ErrNoDocuments {
 		return nil, nil
 	}
@@ -37,6 +43,32 @@ func (r *userRepository) FindByUsername(username string) (*models.User, error) {
 }
 
 func (r *userRepository) Create(user *models.User) error {
-	_, err := r.collection.InsertOne(context.Background(), user)
+	_, err := r.userCollection.InsertOne(context.Background(), user)
+	return err
+}
+
+func (r *userRepository) CreateUserSignUpSecret(secret string) (*models.UserSignupSecret, error) {
+	createdSecret := models.UserSignupSecret{
+		Secret: secret,
+		Base: models.Base{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+	_, err := r.userSignupSecretCollection.InsertOne(context.Background(), createdSecret)
+	if err != nil {
+		return nil, err
+	}
+	return &createdSecret, err
+}
+
+func (r *userRepository) ValidateUserSignupSecret(secret string) bool {
+	var model *models.UserSignupSecret
+	err := r.userSignupSecretCollection.FindOne(context.Background(), bson.M{"secret": secret}).Decode(model)
+	return err == nil
+}
+
+func (r *userRepository) DeleteUserSignupSecret(secret string) error {
+	_, err := r.userSignupSecretCollection.DeleteOne(context.Background(), bson.M{"secret": secret})
 	return err
 }

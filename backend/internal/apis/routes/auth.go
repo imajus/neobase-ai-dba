@@ -1,8 +1,8 @@
 package routes
 
 import (
+	"neobase-ai/internal/apis/handlers"
 	"neobase-ai/internal/di"
-	"neobase-ai/internal/handlers"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,6 +18,7 @@ func SetupAuthRoutes(router *gin.Engine) {
 	{
 		auth.POST("/signup", authHandler.Signup)
 		auth.POST("/login", authHandler.Login)
+		auth.POST("/generate-signup-secret", authHandler.GenerateUserSignupSecret)
 	}
 
 }
