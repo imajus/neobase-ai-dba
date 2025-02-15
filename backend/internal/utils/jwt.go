@@ -7,43 +7,70 @@ import (
 )
 
 type JWTService interface {
-	GenerateToken(userID uint) (string, error)
-	ValidateToken(token string) (uint, error)
+	GenerateToken(userID string) (*string, error)
+	GenerateRefreshToken(userID string) (*string, error)
+	ValidateToken(token string) (*string, error)
 }
 
 type jwtService struct {
-	secretKey string
+	secretKey            string
+	accessTokenDuration  time.Duration
+	refreshTokenDuration time.Duration
 }
 
-func NewJWTService(secretKey string) JWTService {
+func NewJWTService(secretKey string, accessTokenDuration time.Duration, refreshTokenDuration time.Duration) JWTService {
 	return &jwtService{
-		secretKey: secretKey,
+		secretKey:            secretKey,
+		accessTokenDuration:  accessTokenDuration,
+		refreshTokenDuration: refreshTokenDuration,
 	}
 }
 
-func (s *jwtService) GenerateToken(userID uint) (string, error) {
+func (s *jwtService) GenerateToken(userID string) (*string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+		"iat":     time.Now().Unix(),
+		"iss":     "neobase-ai",
+		"exp":     time.Now().Add(s.accessTokenDuration).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(s.secretKey))
+	tokenString, err := token.SignedString([]byte(s.secretKey))
+	if err != nil {
+		return nil, err
+	}
+	return &tokenString, nil
 }
 
-func (s *jwtService) ValidateToken(tokenString string) (uint, error) {
+func (s *jwtService) GenerateRefreshToken(userID string) (*string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"iat":     time.Now().Unix(),
+		"iss":     "neobase-ai",
+		"exp":     time.Now().Add(s.refreshTokenDuration).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(s.secretKey))
+	if err != nil {
+		return nil, err
+	}
+	return &tokenString, nil
+}
+
+func (s *jwtService) ValidateToken(tokenString string) (*string, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.secretKey), nil
 	})
 
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		userID := uint(claims["user_id"].(float64))
-		return userID, nil
+		userID := claims["user_id"].(string)
+		return &userID, nil
 	}
 
-	return 0, err
+	return nil, err
 }

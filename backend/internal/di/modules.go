@@ -3,8 +3,13 @@ package di
 import (
 	"log"
 	"neobase-ai/config"
+	"neobase-ai/internal/handlers"
+	"neobase-ai/internal/repositories"
+	"neobase-ai/internal/services"
+	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/mongodb"
 	"neobase-ai/pkg/redis"
+	"time"
 
 	"go.uber.org/dig"
 )
@@ -25,7 +30,14 @@ func Initialize() {
 	}
 	redisRepo := redis.NewRedisRepositories(redisClient)
 
+	jwtService := utils.NewJWTService(config.Env.JWTSecret,
+		time.Millisecond*time.Duration(config.Env.JWTExpirationMilliseconds),
+		time.Millisecond*time.Duration(config.Env.JWTRefreshExpirationMilliseconds))
 	// Provide dependencies
 	DiContainer.Provide(redisRepo)
 	DiContainer.Provide(mongodbClient)
+	DiContainer.Provide(repositories.NewUserRepository)
+	DiContainer.Provide(jwtService)
+	DiContainer.Provide(services.NewAuthService)
+	DiContainer.Provide(handlers.NewAuthHandler)
 }

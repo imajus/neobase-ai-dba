@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -15,10 +14,11 @@ type Environment struct {
 	Port     string
 
 	// Auth configs
-	JWTSecret                 string
-	JWTExpirationMilliseconds int
-	DefaultUser               string
-	DefaultPassword           string
+	JWTSecret                        string
+	JWTExpirationMilliseconds        int
+	JWTRefreshExpirationMilliseconds int
+	DefaultUser                      string
+	DefaultPassword                  string
 
 	// Database configs
 	MongoURI          string
@@ -51,7 +51,8 @@ func LoadEnv() error {
 	Env.Port = getEnvWithDefault("PORT", "3000")
 	// Auth configs
 	Env.JWTSecret = getRequiredEnv("NEOBASE_JWT_SECRET", "neobase_jwt_secret")
-	Env.JWTExpirationMilliseconds = getIntEnvWithDefault("NEOBASE_JWT_EXPIRATION_MILLISECONDS", 1000*60*60*24*10) // 10 days default
+	Env.JWTExpirationMilliseconds = getIntEnvWithDefault("NEOBASE_JWT_EXPIRATION_MILLISECONDS", 1000*60*60*24*10)                // 10 days default
+	Env.JWTRefreshExpirationMilliseconds = getIntEnvWithDefault("NEOBASE_JWT_REFRESH_EXPIRATION_MILLISECONDS", 1000*60*60*24*30) // 30 days default
 	Env.DefaultUser = getEnvWithDefault("DEFAULT_USER", "bhaskar")
 	Env.DefaultPassword = getEnvWithDefault("DEFAULT_PASSWORD", "bhaskar")
 
@@ -90,20 +91,6 @@ func getIntEnvWithDefault(key string, defaultValue int) int {
 	value, err := strconv.Atoi(strValue)
 	if err != nil {
 		fmt.Printf("Warning: Invalid value for %s, using default: %d\n", key, defaultValue)
-		return defaultValue
-	}
-	return value
-}
-
-func getDurationEnvWithDefault(key string, defaultValue time.Duration) time.Duration {
-	strValue := os.Getenv(key)
-	if strValue == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(strValue)
-	if err != nil {
-		fmt.Printf("Warning: Invalid duration for %s, using default: %v\n", key, defaultValue)
 		return defaultValue
 	}
 	return value

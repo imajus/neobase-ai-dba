@@ -1,5 +1,7 @@
 package dtos
 
+import "neobase-ai/internal/models"
+
 type SignupRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required,min=6"`
@@ -11,11 +13,7 @@ type LoginRequest struct {
 }
 
 type AuthResponse struct {
-	Token string `json:"token"`
-	User  User   `json:"user"`
-}
-
-type User struct {
-	ID    uint   `json:"id"`
-	Email string `json:"email"`
+	AccessToken  string      `json:"access_token"`
+	RefreshToken string      `json:"refresh_token"`
+	User         models.User `json:"user"`
 }
