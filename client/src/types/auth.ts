@@ -15,4 +15,5 @@ export interface LoginFormData {
 
 export interface SignupFormData extends LoginFormData {
   confirmPassword: string;
+  userSignupSecret: string;
 }

@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  neobase-mongodb:
+    image: mongo:latest
+    container_name: neobase-mongodb
+    restart: always
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: neobase
+      MONGO_INITDB_ROOT_PASSWORD: neobase
+    volumes:
+      - neobase-mongodb-data:/data/db
+    networks:
+      - neobase-network
+
+  neobase-redis:
+    image: redis:latest
+    container_name: neobase-redis
+    restart: always
+    ports:
+      - 6379:6379
+    volumes:
+      - neobase-redis-data:/data
+    networks:
+      - neobase-network
+
+  neobase-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: neobase-backend
+    restart: always
+    ports:
+      - 3000:3000
+    environment:
+      NEOBASER_MONGODB_URI: mongodb://neobase-mongodb:27017/neobase
+      NEOBASER_REDIS_URI: redis://neobase-redis:6379
+    volumes:
+      - neobase-backend-data:/app/data
+    networks:
+      - neobase-network
+
+  neobase-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: neobase-client
+    restart: always
+    ports:
+      - 5173:5173
+    networks:
+      - neobase-network
+
+volumes:
+  neobase-mongodb-data:
+  neobase-redis-data:
+
+
+networks:
+  neobase-network:
+    external: true

@@ -1,4 +1,4 @@
-import { AlertCircle, Boxes, KeyRound, Mail } from 'lucide-react';
+import { AlertCircle, Boxes, KeyRound, Lock, UserRound } from 'lucide-react';
 import React, { useState } from 'react';
 import { LoginFormData, SignupFormData } from '../../types/auth';
 
@@ -11,6 +11,7 @@ interface FormErrors {
   userName?: string;
   password?: string;
   confirmPassword?: string;
+  userSignupSecret?: string;
 }
 
 export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
@@ -20,7 +21,8 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
   const [formData, setFormData] = useState<SignupFormData>({
     userName: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    userSignupSecret: ''
   });
 
   const validateUserName = (userName: string) => {
@@ -37,6 +39,10 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
     return '';
   };
 
+  const validateUserSignupSecret = (userSignupSecret: string) => {
+    if (!userSignupSecret) return 'User signup secret is required';
+    return '';
+  };
   const validateForm = () => {
     const newErrors: FormErrors = {};
 
@@ -45,6 +51,9 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
 
     const passwordError = validatePassword(formData.password);
     if (passwordError) newErrors.password = passwordError;
+
+    const userSignupSecretError = validateUserSignupSecret(formData.userSignupSecret);
+    if (!isLogin && userSignupSecretError) newErrors.userSignupSecret = userSignupSecretError;
 
     if (!isLogin && formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
@@ -123,7 +132,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
+              <UserRound className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
               <input
                 type="text"
                 name="userName"
@@ -143,6 +152,34 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
               </div>
             )}
           </div>
+
+          {!isLogin && (
+            <div>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  name="userSignupSecret"
+                  placeholder="User Signup Secret"
+                  value={formData.userSignupSecret}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  className={`neo-input pl-12 w-full ${errors.userSignupSecret && touched.userSignupSecret ? 'border-neo-error' : ''
+                    }`}
+                  required
+                />
+              </div>
+              <p className="text-gray-500 text-sm mt-2">
+                Required to signup new user, ask admin for the secret
+              </p>
+              {errors.userSignupSecret && touched.userSignupSecret && (
+                <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>{errors.userSignupSecret}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <div className="relative">
