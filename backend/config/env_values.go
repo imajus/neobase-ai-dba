@@ -23,7 +23,6 @@ type Environment struct {
 	// Database configs
 	MongoURI          string
 	MongoDatabaseName string
-	RedisURI          string
 
 	// Redis configs
 	RedisHost     string
@@ -53,12 +52,12 @@ func LoadEnv() error {
 	Env.JWTSecret = getRequiredEnv("JWT_SECRET", "neobase_jwt_secret")
 	Env.JWTExpirationMilliseconds = getIntEnvWithDefault("JWT_EXPIRATION_MILLISECONDS", 1000*60*60*24*10)                 // 10 days default
 	Env.JWTRefreshExpirationMilliseconds = getIntEnvWithDefault("_JWT_REFRESH_EXPIRATION_MILLISECONDS", 1000*60*60*24*30) // 30 days default
-	Env.AdminUser = getEnvWithDefault("ADMIN_USERNAME", "bhaskar")
-	Env.AdminPassword = getEnvWithDefault("ADMIN_PASSWORD", "bhaskar")
+	Env.AdminUser = getEnvWithDefault("NEOBASE_ADMIN_USERNAME", "bhaskar")
+	Env.AdminPassword = getEnvWithDefault("NEOBASE_ADMIN_PASSWORD", "bhaskar")
 
 	// Database configs
 	Env.MongoURI = getRequiredEnv("NEOBASE_MONGODB_URI", "mongodb://localhost:27017/neobase")
-	Env.MongoDatabaseName = getRequiredEnv("NEOBASE_MONGODB_DB_NAME", "neobase")
+	Env.MongoDatabaseName = getRequiredEnv("NEOBASE_MONGODB_NAME", "neobase")
 	Env.RedisHost = getRequiredEnv("NEOBASE_REDIS_HOST", "localhost")
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
 	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
@@ -102,18 +101,13 @@ func validateConfig() error {
 		return fmt.Errorf("invalid MONGODB_URI format: %s", Env.MongoURI)
 	}
 
-	// Validate Redis URI format
-	if !isValidURI(Env.RedisURI) {
-		return fmt.Errorf("invalid REDIS_URI format: %s", Env.RedisURI)
-	}
-
 	// Validate JWT expiration
 	if Env.JWTExpirationMilliseconds <= 0 {
 		return fmt.Errorf("JWT_EXPIRATION_MILLISECONDS must be positive, got: %d", Env.JWTExpirationMilliseconds)
 	}
 
-	if Env.AdminUser == "bhaskar" || Env.AdminPassword == "bhaskar" {
-		return fmt.Errorf("default credentials: bhaskar, should not be used")
+	if Env.AdminUser == "neobase-admin" || Env.AdminPassword == "neobase-password" {
+		return fmt.Errorf("default credentials: neobase-admin and neobase-password should not be used")
 	}
 
 	return nil

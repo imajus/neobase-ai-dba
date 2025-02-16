@@ -15,4 +15,5 @@ func SetupDefaultRoutes(router *gin.Engine) {
 		})
 	})
 
+	SetupAuthRoutes(router)
 }

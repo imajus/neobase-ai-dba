@@ -6,6 +6,7 @@ import (
 	"neobase-ai/config"
 	"neobase-ai/internal/apis/routes"
 	"neobase-ai/internal/di"
+	"neobase-ai/internal/middleware"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,7 +28,15 @@ func main() {
 	di.Initialize()
 
 	// Setup Gin
-	ginApp := gin.Default()
+	ginApp := gin.New() // Use gin.New() instead of gin.Default()
+
+	// Add custom recovery middleware
+	ginApp.Use(middleware.CustomRecoveryMiddleware())
+
+	// Add logging middleware
+	ginApp.Use(gin.Logger())
+
+	// Add CORS middleware
 	ginApp.Use(cors.Default())
 
 	// Setup routes

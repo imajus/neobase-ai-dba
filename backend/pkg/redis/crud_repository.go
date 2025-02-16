@@ -32,10 +32,13 @@ func NewRedisRepositories(client *redis.Client) *RedisRepositories {
 }
 
 func (r *RedisRepositories) Set(key string, data []byte, expiredTime time.Duration, ctx context.Context) error {
-	err := r.Client.Set(ctx, key, data, expiredTime).Err()
+	log.Printf("Setting Redis key: %s with expiration: %v", key, expiredTime)
+	err := r.Client.Set(ctx, key, string(data), expiredTime).Err()
 	if err != nil {
+		log.Printf("Error setting Redis key: %v", err)
 		return err
 	}
+	log.Printf("Successfully set Redis key: %s", key)
 	return nil
 }
 
@@ -48,20 +51,27 @@ func (r *RedisRepositories) Hset(key string, data string, expireAt time.Time, ct
 }
 
 func (r *RedisRepositories) Get(key string, ctx context.Context) (string, error) {
+	log.Printf("Getting Redis key: %s", key)
 	result, err := r.Client.Get(ctx, key).Result()
 	if err == redis.Nil {
+		log.Printf("Redis key not found: %s", key)
 		return "", errors.New("key does not exist")
 	} else if err != nil {
+		log.Printf("Error getting Redis key: %v", err)
 		return "", err
 	}
+	log.Printf("Successfully got Redis key: %s", key)
 	return result, nil
 }
 
 func (r *RedisRepositories) Del(key string, ctx context.Context) error {
+	log.Printf("Deleting Redis key: %s", key)
 	_, err := r.Client.Del(ctx, key).Result()
 	if err != nil {
+		log.Printf("Error deleting Redis key: %v", err)
 		return err
 	}
+	log.Printf("Successfully deleted Redis key: %s", key)
 	return nil
 }
 

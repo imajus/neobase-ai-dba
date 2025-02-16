@@ -1,7 +1,13 @@
 package models
 
 type UserSignupSecret struct {
-	ID     string `bson:"_id,omitempty"`
-	Secret string `bson:"secret"`
-	Base
+	Secret string `bson:"secret" json:"secret"`
+	Base   `bson:",inline"`
+}
+
+func NewUserSignupSecret(secret string) *UserSignupSecret {
+	return &UserSignupSecret{
+		Secret: secret,
+		Base:   NewBase(),
+	}
 }

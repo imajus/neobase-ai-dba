@@ -1,17 +1,18 @@
 package routes
 
 import (
-	"neobase-ai/internal/apis/handlers"
+	"log"
+	"neobase-ai/internal/apis/middlewares"
 	"neobase-ai/internal/di"
 
 	"github.com/gin-gonic/gin"
 )
 
 func SetupAuthRoutes(router *gin.Engine) {
-	var authHandler handlers.AuthHandler
-	di.DiContainer.Invoke(func(handler *handlers.AuthHandler) {
-		authHandler = *handler
-	})
+	authHandler, err := di.GetAuthHandler()
+	if err != nil {
+		log.Fatalf("Failed to get auth handler: %v", err)
+	}
 
 	// Auth routes
 	auth := router.Group("/api/auth")
@@ -21,4 +22,10 @@ func SetupAuthRoutes(router *gin.Engine) {
 		auth.POST("/generate-signup-secret", authHandler.GenerateUserSignupSecret)
 	}
 
+	protected := router.Group("/api/auth")
+	protected.Use(middlewares.AuthMiddleware())
+	{
+		protected.POST("/logout", authHandler.Logout)
+		protected.GET("/refresh-token", authHandler.RefreshToken)
+	}
 }

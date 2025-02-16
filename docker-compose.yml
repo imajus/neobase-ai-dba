@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   neobase-mongodb:
     image: mongo:latest
@@ -19,6 +17,7 @@ services:
     image: redis:latest
     container_name: neobase-redis
     restart: always
+    command: redis-server --requirepass default
     ports:
       - 6379:6379
     volumes:
@@ -35,10 +34,21 @@ services:
     ports:
       - 3000:3000
     environment:
-      NEOBASER_MONGODB_URI: mongodb://neobase-mongodb:27017/neobase
-      NEOBASER_REDIS_URI: redis://neobase-redis:6379
-    volumes:
-      - neobase-backend-data:/app/data
+      IS_DOCKER: "true"
+      NEOBASE_MONGODB_URI: mongodb://neobase:neobase@neobase-mongodb:27017/neobase-db?authSource=admin
+      NEOBASE_MONGODB_NAME: neobase-db
+      NEOBASE_REDIS_HOST: neobase-redis
+      NEOBASE_REDIS_PORT: 6379
+      NEOBASE_REDIS_USERNAME: default
+      NEOBASE_REDIS_PASSWORD: default
+      JWT_SECRET: ${JWT_SECRET}
+      USER_JWT_EXPIRATION_MILLISECONDS: 1000*60*60*24*10
+      USER_JWT_REFRESH_EXPIRATION_MILLISECONDS: 1000*60*60*24*30
+      NEOBASE_ADMIN_USERNAME: neobase-admin
+      NEOBASE_ADMIN_PASSWORD: neobase-password
+    depends_on:
+      - neobase-mongodb
+      - neobase-redis
     networks:
       - neobase-network
 
@@ -60,4 +70,4 @@ volumes:
 
 networks:
   neobase-network:
-    external: true
+    driver: bridge

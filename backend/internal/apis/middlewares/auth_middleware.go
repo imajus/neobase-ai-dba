@@ -1,8 +1,10 @@
 package middlewares
 
 import (
+	"log"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/di"
+	"neobase-ai/internal/repositories"
 	"neobase-ai/internal/utils"
 	"net/http"
 	"strings"
@@ -10,11 +12,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var jwtService *utils.JWTService
+var tokenRepo repositories.TokenRepository
+
 func AuthMiddleware() gin.HandlerFunc {
-	var jwtService utils.JWTService
-	di.DiContainer.Invoke(func(service utils.JWTService) {
-		jwtService = service
-	})
+	if jwtService == nil {
+		if err := di.DiContainer.Invoke(func(service utils.JWTService) {
+			jwtService = &service
+		}); err != nil {
+			log.Fatalf("Failed to provide JWT service: %v", err)
+		}
+	}
+	if tokenRepo == nil {
+		if err := di.DiContainer.Invoke(func(repo repositories.TokenRepository) {
+			tokenRepo = repo
+		}); err != nil {
+			log.Fatalf("Failed to provide Token repository: %v", err)
+		}
+	}
 
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -30,7 +45,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			errorMsg := "Invalid authorization format. Use: Bearer <token>"
+			errorMsg := "Invalid authorization header format"
 			c.JSON(http.StatusUnauthorized, dtos.Response{
 				Success: false,
 				Error:   &errorMsg,
@@ -39,7 +54,20 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		userID, err := jwtService.ValidateToken(parts[1])
+		token := parts[1]
+
+		// Check if token is blacklisted
+		if tokenRepo.IsTokenBlacklisted(token) {
+			errorMsg := "Token has been revoked"
+			c.JSON(http.StatusUnauthorized, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			c.Abort()
+			return
+		}
+
+		claims, err := (*jwtService).ValidateToken(token)
 		if err != nil {
 			errorMsg := "Invalid or expired token"
 			c.JSON(http.StatusUnauthorized, dtos.Response{
@@ -50,8 +78,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Set userID in context for later use
-		c.Set("userID", userID)
+		c.Set("userID", claims)
 		c.Next()
 	}
 }

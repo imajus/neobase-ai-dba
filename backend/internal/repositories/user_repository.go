@@ -4,7 +4,6 @@ import (
 	"context"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -43,28 +42,25 @@ func (r *userRepository) FindByUsername(username string) (*models.User, error) {
 }
 
 func (r *userRepository) Create(user *models.User) error {
+	if user.ID.IsZero() {
+		user.Base = models.NewBase()
+	}
 	_, err := r.userCollection.InsertOne(context.Background(), user)
 	return err
 }
 
 func (r *userRepository) CreateUserSignUpSecret(secret string) (*models.UserSignupSecret, error) {
-	createdSecret := models.UserSignupSecret{
-		Secret: secret,
-		Base: models.Base{
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		},
-	}
-	_, err := r.userSignupSecretCollection.InsertOne(context.Background(), createdSecret)
+	signupSecret := models.NewUserSignupSecret(secret)
+	_, err := r.userSignupSecretCollection.InsertOne(context.Background(), signupSecret)
 	if err != nil {
 		return nil, err
 	}
-	return &createdSecret, err
+	return signupSecret, nil
 }
 
 func (r *userRepository) ValidateUserSignupSecret(secret string) bool {
-	var model *models.UserSignupSecret
-	err := r.userSignupSecretCollection.FindOne(context.Background(), bson.M{"secret": secret}).Decode(model)
+	var signupSecret models.UserSignupSecret
+	err := r.userSignupSecretCollection.FindOne(context.Background(), bson.M{"secret": secret}).Decode(&signupSecret)
 	return err == nil
 }
 

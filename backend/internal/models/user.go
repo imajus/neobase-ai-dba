@@ -1,8 +1,15 @@
 package models
 
 type User struct {
-	ID       string `bson:"_id,omitempty"`
-	Username string `bson:"username"`
-	Password string `bson:"password"`
-	Base
+	Username string `bson:"username" json:"username"`
+	Password string `bson:"password" json:"-"`
+	Base     `bson:",inline"`
+}
+
+func NewUser(username, password string) *User {
+	return &User{
+		Username: username,
+		Password: password,
+		Base:     NewBase(),
+	}
 }

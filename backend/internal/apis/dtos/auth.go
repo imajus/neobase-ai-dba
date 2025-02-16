@@ -22,3 +22,11 @@ type AuthResponse struct {
 	RefreshToken string      `json:"refresh_token"`
 	User         models.User `json:"user"`
 }
+
+type RefreshTokenResponse struct {
+	AccessToken string `json:"access_token"`
+}
+
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
