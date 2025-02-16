@@ -43,6 +43,9 @@ func Initialize() {
 	// Initialize token repository
 	tokenRepo := repositories.NewTokenRepository(redisRepo)
 
+	chatRepo := repositories.NewChatRepository(mongodbClient)
+	llmRepo := repositories.NewLLMMessageRepository(mongodbClient)
+
 	// Provide all dependencies to the container
 	if err := DiContainer.Provide(func() *mongodb.MongoDBClient { return mongodbClient }); err != nil {
 		log.Fatalf("Failed to provide MongoDB client: %v", err)
@@ -54,6 +57,14 @@ func Initialize() {
 
 	if err := DiContainer.Provide(func() utils.JWTService { return jwtService }); err != nil {
 		log.Fatalf("Failed to provide JWT service: %v", err)
+	}
+
+	if err := DiContainer.Provide(func() repositories.ChatRepository { return chatRepo }); err != nil {
+		log.Fatalf("Failed to provide chat repository: %v", err)
+	}
+
+	if err := DiContainer.Provide(func() repositories.LLMMessageRepository { return llmRepo }); err != nil {
+		log.Fatalf("Failed to provide LLM message repository: %v", err)
 	}
 
 	// Provide repositories
@@ -80,12 +91,45 @@ func Initialize() {
 	}); err != nil {
 		log.Fatalf("Failed to provide auth handler: %v", err)
 	}
+
+	// Chat Repository
+	if err := DiContainer.Provide(func(mongoClient *mongodb.MongoDBClient) repositories.ChatRepository {
+		return repositories.NewChatRepository(mongoClient)
+	}); err != nil {
+		log.Fatalf("Failed to provide chat repository: %v", err)
+	}
+
+	// Chat Service
+	if err := DiContainer.Provide(func(chatRepo repositories.ChatRepository, llmRepo repositories.LLMMessageRepository) services.ChatService {
+		return services.NewChatService(chatRepo, llmRepo)
+	}); err != nil {
+		log.Fatalf("Failed to provide chat service: %v", err)
+	}
+
+	// Chat Handler
+	if err := DiContainer.Provide(func(chatService services.ChatService) *handlers.ChatHandler {
+		return handlers.NewChatHandler(chatService)
+	}); err != nil {
+		log.Fatalf("Failed to provide chat handler: %v", err)
+	}
 }
 
 // GetAuthHandler retrieves the AuthHandler from the DI container
 func GetAuthHandler() (*handlers.AuthHandler, error) {
 	var handler *handlers.AuthHandler
 	err := DiContainer.Invoke(func(h *handlers.AuthHandler) {
+		handler = h
+	})
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+// GetChatHandler retrieves the ChatHandler from the DI container
+func GetChatHandler() (*handlers.ChatHandler, error) {
+	var handler *handlers.ChatHandler
+	err := DiContainer.Invoke(func(h *handlers.ChatHandler) {
 		handler = h
 	})
 	if err != nil {
