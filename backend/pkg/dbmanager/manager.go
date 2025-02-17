@@ -30,6 +30,7 @@ type Manager struct {
 	mu          sync.RWMutex
 	redisRepo   redis.IRedisRepositories
 	stopCleanup chan struct{} // Channel to stop cleanup routine
+	eventChan   chan SSEEvent // Channel for SSE events
 }
 
 // NewManager creates a new connection manager
@@ -39,6 +40,7 @@ func NewManager(redisRepo redis.IRedisRepositories) *Manager {
 		drivers:     make(map[string]DatabaseDriver),
 		redisRepo:   redisRepo,
 		stopCleanup: make(chan struct{}),
+		eventChan:   make(chan SSEEvent, 100), // Buffered channel for events
 	}
 
 	// Start cleanup routine
@@ -52,7 +54,7 @@ func (m *Manager) RegisterDriver(dbType string, driver DatabaseDriver) {
 }
 
 // Connect creates a new database connection
-func (m *Manager) Connect(chatID string, config ConnectionConfig) error {
+func (m *Manager) Connect(chatID, userID string, config ConnectionConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -88,11 +90,14 @@ func (m *Manager) Connect(chatID string, config ConnectionConfig) error {
 		log.Printf("Failed to cache connection state: %v", err)
 	}
 
+	// Notify subscribers of successful connection
+	m.notifySubscribers(chatID, userID, StatusConnected, "")
+
 	return nil
 }
 
 // Disconnect closes a database connection
-func (m *Manager) Disconnect(chatID string) error {
+func (m *Manager) Disconnect(chatID, userID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -118,6 +123,9 @@ func (m *Manager) Disconnect(chatID string) error {
 	if err := m.redisRepo.Del(connKey, ctx); err != nil {
 		log.Printf("Failed to remove connection state from cache: %v", err)
 	}
+
+	// Notify subscribers of disconnection
+	m.notifySubscribers(chatID, userID, StatusDisconnected, "Connection closed by user")
 
 	delete(m.connections, chatID)
 	return nil
@@ -204,6 +212,9 @@ func (m *Manager) cleanup() {
 				log.Printf("Failed to remove connection state from cache: %v", err)
 			}
 
+			// Notify subscribers of disconnection
+			m.notifySubscribers(chatID, "", StatusDisconnected, "Connection closed due to inactivity")
+
 			delete(m.connections, chatID)
 			log.Printf("Successfully closed idle connection for chat %s", chatID)
 		}
@@ -263,4 +274,86 @@ func (m *Manager) UpdateLastUsed(chatID string) error {
 	}
 
 	return nil
+}
+
+// Add subscriber to connection
+func (m *Manager) Subscribe(chatID, userID, streamID string) error {
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("no connection found for chat ID: %s", chatID)
+	}
+
+	conn.SubLock.Lock()
+	if conn.Subscribers == nil {
+		conn.Subscribers = make(map[string]bool)
+	}
+	conn.Subscribers[streamID] = true
+	conn.SubLock.Unlock()
+
+	// Send current status to new subscriber
+	m.eventChan <- SSEEvent{
+		UserID:    userID,
+		ChatID:    chatID,
+		StreamID:  streamID,
+		Status:    conn.Status,
+		Timestamp: time.Now(),
+		Error:     conn.Error,
+	}
+
+	return nil
+}
+
+// Remove subscriber
+func (m *Manager) Unsubscribe(chatID, deviceID string) {
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	conn.SubLock.Lock()
+	delete(conn.Subscribers, deviceID)
+	conn.SubLock.Unlock()
+}
+
+// Get event channel for SSE
+func (m *Manager) GetEventChannel() <-chan SSEEvent {
+	return m.eventChan
+}
+
+// Notify subscribers of connection status change
+func (m *Manager) notifySubscribers(chatID, userID string, status ConnectionStatus, err string) {
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	conn.SubLock.RLock()
+	defer conn.SubLock.RUnlock()
+
+	// Send to all subscribers
+	for streamID := range conn.Subscribers {
+		event := SSEEvent{
+			UserID:    userID,
+			ChatID:    chatID,
+			StreamID:  streamID,
+			Status:    status,
+			Timestamp: time.Now(),
+			Error:     err,
+		}
+
+		select {
+		case m.eventChan <- event:
+		default:
+			log.Printf("Warning: Event channel full, dropped event for chat %s stream %s", chatID, streamID)
+		}
+	}
 }

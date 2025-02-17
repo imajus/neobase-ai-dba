@@ -13,18 +13,22 @@ import (
 	"sync"
 	"time"
 
+	"neobase-ai/pkg/dbmanager"
+
 	"github.com/gin-gonic/gin"
 )
 
 type ChatHandler struct {
 	chatService services.ChatService
+	dbManager   *dbmanager.Manager
 	streams     map[string]context.CancelFunc // Track active streams
 	streamsMux  sync.RWMutex                  // Mutex for thread-safe streams map access
 }
 
-func NewChatHandler(chatService services.ChatService) *ChatHandler {
+func NewChatHandler(chatService services.ChatService, dbManager *dbmanager.Manager) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
+		dbManager:   dbManager,
 		streams:     make(map[string]context.CancelFunc),
 	}
 }
@@ -346,5 +350,137 @@ func (h *ChatHandler) CancelStream(c *gin.Context) {
 	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
 		Data:    "Stream cancelled successfully",
+	})
+}
+
+// SSE handler for connection status
+func (h *ChatHandler) StreamConnectionStatus(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	streamID := c.Query("streamId")
+
+	// Set headers for SSE
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	// Create context with cancellation
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+
+	// Store cancel function for potential cancellation
+	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
+	h.streamsMux.Lock()
+	h.streams[streamKey] = cancel
+	h.streamsMux.Unlock()
+	defer func() {
+		h.streamsMux.Lock()
+		delete(h.streams, streamKey)
+		h.streamsMux.Unlock()
+	}()
+
+	// Subscribe to connection events
+	if err := h.dbManager.Subscribe(chatID, userID, streamID); err != nil {
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+		return
+	}
+	defer h.dbManager.Unsubscribe(chatID, streamID)
+
+	// Get event channel
+	eventChan := h.dbManager.GetEventChannel()
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case <-ctx.Done():
+			// Send completion event
+			data := dtos.StreamResponse{
+				Event: "complete",
+				Data:  nil,
+			}
+			json.NewEncoder(w).Encode(data)
+			return false
+
+		case event := <-eventChan:
+			// Only process events for this chat and stream
+			if event.ChatID == chatID && event.StreamID == streamID && event.UserID == userID {
+				data := dtos.StreamResponse{
+					Event: "connection",
+					Data:  event,
+				}
+				json.NewEncoder(w).Encode(data)
+				return true
+			}
+			return true
+
+		case <-time.After(30 * time.Second):
+			// Send keepalive event
+			data := dtos.StreamResponse{
+				Event: "keepalive",
+				Data:  nil,
+			}
+			json.NewEncoder(w).Encode(data)
+			return true
+		}
+	})
+}
+
+// ConnectDB establishes a database connection
+func (h *ChatHandler) ConnectDB(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	var config dbmanager.ConnectionConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(fmt.Sprintf("Invalid connection config: %v", err)),
+		})
+		return
+	}
+
+	// Validate connection type
+	if config.Type != "postgresql" { // Add more types as supported
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr("Unsupported database type"),
+		})
+		return
+	}
+
+	// Attempt to connect with userID
+	if err := h.dbManager.Connect(chatID, userID, config); err != nil {
+		c.JSON(http.StatusInternalServerError, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(fmt.Sprintf("Failed to connect: %v", err)),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    "Database connected successfully",
+	})
+}
+
+// DisconnectDB closes a database connection
+func (h *ChatHandler) DisconnectDB(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	if err := h.dbManager.Disconnect(chatID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(fmt.Sprintf("Failed to disconnect: %v", err)),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    "Database disconnected successfully",
 	})
 }

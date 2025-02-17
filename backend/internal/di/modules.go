@@ -7,6 +7,7 @@ import (
 	"neobase-ai/internal/repositories"
 	"neobase-ai/internal/services"
 	"neobase-ai/internal/utils"
+	"neobase-ai/pkg/dbmanager"
 	"neobase-ai/pkg/mongodb"
 	"neobase-ai/pkg/redis"
 	"time"
@@ -67,7 +68,13 @@ func Initialize() {
 		log.Fatalf("Failed to provide LLM message repository: %v", err)
 	}
 
-	// Provide repositories
+	// Provide DB Manager
+	if err := DiContainer.Provide(func(redisRepo redis.IRedisRepositories) *dbmanager.Manager {
+		return dbmanager.NewManager(redisRepo)
+	}); err != nil {
+		log.Fatalf("Failed to provide DB manager: %v", err)
+	}
+
 	if err := DiContainer.Provide(func(db *mongodb.MongoDBClient) repositories.UserRepository {
 		return repositories.NewUserRepository(db)
 	}); err != nil {
@@ -85,20 +92,6 @@ func Initialize() {
 		log.Fatalf("Failed to provide auth service: %v", err)
 	}
 
-	// Provide handlers
-	if err := DiContainer.Provide(func(authService services.AuthService) *handlers.AuthHandler {
-		return handlers.NewAuthHandler(authService)
-	}); err != nil {
-		log.Fatalf("Failed to provide auth handler: %v", err)
-	}
-
-	// Chat Repository
-	if err := DiContainer.Provide(func(mongoClient *mongodb.MongoDBClient) repositories.ChatRepository {
-		return repositories.NewChatRepository(mongoClient)
-	}); err != nil {
-		log.Fatalf("Failed to provide chat repository: %v", err)
-	}
-
 	// Chat Service
 	if err := DiContainer.Provide(func(chatRepo repositories.ChatRepository, llmRepo repositories.LLMMessageRepository) services.ChatService {
 		return services.NewChatService(chatRepo, llmRepo)
@@ -106,9 +99,19 @@ func Initialize() {
 		log.Fatalf("Failed to provide chat service: %v", err)
 	}
 
+	// Provide handlers
+	if err := DiContainer.Provide(func(authService services.AuthService) *handlers.AuthHandler {
+		return handlers.NewAuthHandler(authService)
+	}); err != nil {
+		log.Fatalf("Failed to provide auth handler: %v", err)
+	}
+
 	// Chat Handler
-	if err := DiContainer.Provide(func(chatService services.ChatService) *handlers.ChatHandler {
-		return handlers.NewChatHandler(chatService)
+	if err := DiContainer.Provide(func(
+		chatService services.ChatService,
+		dbManager *dbmanager.Manager,
+	) *handlers.ChatHandler {
+		return handlers.NewChatHandler(chatService, dbManager)
 	}); err != nil {
 		log.Fatalf("Failed to provide chat handler: %v", err)
 	}

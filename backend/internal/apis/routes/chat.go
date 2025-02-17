@@ -30,6 +30,11 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.PATCH("/:id/messages/:messageId", chatHandler.UpdateMessage)
 		protected.DELETE("/:id/messages", chatHandler.DeleteMessages)
 
+		// Database connection routes
+		protected.POST("/:id/connect", chatHandler.ConnectDB)
+		protected.POST("/:id/disconnect", chatHandler.DisconnectDB)
+		protected.GET("/:id/connection-status", chatHandler.StreamConnectionStatus)
+
 		// SSE endpoints for streaming
 		protected.GET("/:id/stream", chatHandler.StreamResponse)       // Listen to AI response stream
 		protected.POST("/:id/stream/cancel", chatHandler.CancelStream) // Cancel ongoing stream
