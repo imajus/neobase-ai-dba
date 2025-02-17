@@ -25,27 +25,34 @@ type DatabaseDriver interface {
 
 // Manager handles database connections
 type Manager struct {
-	connections map[string]*Connection    // chatID -> connection
-	drivers     map[string]DatabaseDriver // type -> driver
-	mu          sync.RWMutex
-	redisRepo   redis.IRedisRepositories
-	stopCleanup chan struct{} // Channel to stop cleanup routine
-	eventChan   chan SSEEvent // Channel for SSE events
+	connections   map[string]*Connection    // chatID -> connection
+	drivers       map[string]DatabaseDriver // type -> driver
+	mu            sync.RWMutex
+	redisRepo     redis.IRedisRepositories
+	stopCleanup   chan struct{} // Channel to stop cleanup routine
+	eventChan     chan SSEEvent // Channel for SSE events
+	schemaManager *SchemaManager
 }
 
 // NewManager creates a new connection manager
-func NewManager(redisRepo redis.IRedisRepositories) *Manager {
+func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Manager, error) {
+	schemaManager, err := NewSchemaManager(redisRepo, encryptionKey)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &Manager{
-		connections: make(map[string]*Connection),
-		drivers:     make(map[string]DatabaseDriver),
-		redisRepo:   redisRepo,
-		stopCleanup: make(chan struct{}),
-		eventChan:   make(chan SSEEvent, 100), // Buffered channel for events
+		connections:   make(map[string]*Connection),
+		drivers:       make(map[string]DatabaseDriver),
+		redisRepo:     redisRepo,
+		stopCleanup:   make(chan struct{}),
+		eventChan:     make(chan SSEEvent, 100),
+		schemaManager: schemaManager,
 	}
 
 	// Start cleanup routine
 	go m.startCleanupRoutine()
-	return m
+	return m, nil
 }
 
 // RegisterDriver registers a new database driver
@@ -356,4 +363,41 @@ func (m *Manager) notifySubscribers(chatID, userID string, status ConnectionStat
 			log.Printf("Warning: Event channel full, dropped event for chat %s stream %s", chatID, streamID)
 		}
 	}
+}
+
+func (m *Manager) StartSchemaTracking(chatID string) {
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				conn, err := m.GetConnection(chatID)
+				if err != nil {
+					continue
+				}
+
+				// Get connection type from the connections map
+				m.mu.RLock()
+				dbConn, exists := m.connections[chatID]
+				m.mu.RUnlock()
+				if !exists {
+					continue
+				}
+
+				diff, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
+				if err != nil {
+					log.Printf("Error checking schema changes: %v", err)
+					continue
+				}
+
+				if diff != nil {
+					log.Printf("Schema changes detected for chat %s: %v", chatID, diff)
+				}
+			case <-m.stopCleanup:
+				return
+			}
+		}
+	}()
 }

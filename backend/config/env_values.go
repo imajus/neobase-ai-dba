@@ -14,6 +14,7 @@ type Environment struct {
 	Port     string
 
 	// Auth configs
+	SchemaEncryptionKey              string
 	JWTSecret                        string
 	JWTExpirationMilliseconds        int
 	JWTRefreshExpirationMilliseconds int
@@ -48,7 +49,9 @@ func LoadEnv() error {
 
 	// Server configs
 	Env.Port = getEnvWithDefault("PORT", "3000")
+
 	// Auth configs
+	Env.SchemaEncryptionKey = getRequiredEnv("SCHEMA_ENCRYPTION_KEY", "neobase_schema_encryption_key")
 	Env.JWTSecret = getRequiredEnv("JWT_SECRET", "neobase_jwt_secret")
 	Env.JWTExpirationMilliseconds = getIntEnvWithDefault("JWT_EXPIRATION_MILLISECONDS", 1000*60*60*24*10)                 // 10 days default
 	Env.JWTRefreshExpirationMilliseconds = getIntEnvWithDefault("_JWT_REFRESH_EXPIRATION_MILLISECONDS", 1000*60*60*24*30) // 30 days default

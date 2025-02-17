@@ -69,8 +69,9 @@ func Initialize() {
 	}
 
 	// Provide DB Manager
-	if err := DiContainer.Provide(func(redisRepo redis.IRedisRepositories) *dbmanager.Manager {
-		return dbmanager.NewManager(redisRepo)
+	if err := DiContainer.Provide(func(redisRepo redis.IRedisRepositories) (*dbmanager.Manager, error) {
+		encryptionKey := config.Env.SchemaEncryptionKey
+		return dbmanager.NewManager(redisRepo, encryptionKey)
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)
 	}
