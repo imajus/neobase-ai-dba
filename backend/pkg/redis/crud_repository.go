@@ -22,6 +22,7 @@ type IRedisRepositories interface {
 	Del(key string, ctx context.Context) error
 	GetAllByField(ctx context.Context, modelType interface{}, filterFunc func(interface{}) bool) ([]interface{}, error)
 	TTL(key string, ctx context.Context) (time.Duration, error)
+	StartPipeline(ctx context.Context) *Pipeline
 }
 
 func NewRedisRepositories(client *redis.Client) *RedisRepositories {
@@ -127,4 +128,37 @@ func (r *RedisRepositories) TTL(key string, ctx context.Context) (time.Duration,
 		return 0, err
 	}
 	return duration, nil
+}
+
+// Pipeline represents a Redis pipeline
+type Pipeline struct {
+	pipe redis.Pipeliner
+}
+
+// StartPipeline starts a new Redis pipeline
+func (r *RedisRepositories) StartPipeline(ctx context.Context) *Pipeline {
+	return &Pipeline{
+		pipe: r.Client.Pipeline(),
+	}
+}
+
+// ExecutePipeline executes all commands in the pipeline
+func (p *Pipeline) Execute(ctx context.Context) error {
+	_, err := p.pipe.Exec(ctx)
+	return err
+}
+
+// PipelineSet adds a SET command to the pipeline
+func (p *Pipeline) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) {
+	p.pipe.Set(ctx, key, value, expiration)
+}
+
+// PipelineDel adds a DEL command to the pipeline
+func (p *Pipeline) Del(ctx context.Context, keys ...string) {
+	p.pipe.Del(ctx, keys...)
+}
+
+// PipelineExpire adds an EXPIRE command to the pipeline
+func (p *Pipeline) Expire(ctx context.Context, key string, expiration time.Duration) {
+	p.pipe.Expire(ctx, key, expiration)
 }
