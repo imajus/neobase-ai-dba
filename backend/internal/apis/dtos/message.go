@@ -6,9 +6,10 @@ import (
 )
 
 type CreateMessageRequest struct {
-	ChatID  string `json:"chat_id" binding:"required"`
-	Type    string `json:"type" binding:"required,oneof=user ai"`
-	Content string `json:"content" binding:"required"`
+	ChatID   string `json:"chat_id" binding:"required"`
+	StreamID string `json:"stream_id" binding:"required"`
+	Type     string `json:"type" binding:"required,oneof=user ai"`
+	Content  string `json:"content" binding:"required"`
 }
 
 type MessageResponse struct {
@@ -65,7 +66,7 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			executionResult = map[string]interface{}{}
 		}
 		queriesDto[i] = Query{
-			ID:              query.ID,
+			ID:              query.ID.Hex(),
 			Query:           query.Query,
 			Description:     query.Description,
 			ExecutionTime:   query.ExecutionTime,

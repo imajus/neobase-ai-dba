@@ -9,6 +9,7 @@ import (
 	"io"
 	"neobase-ai/pkg/redis"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -701,3 +702,120 @@ var (
 	_ SchemaSimplifier = (*PostgresSimplifier)(nil)
 	_ SchemaSimplifier = (*MySQLSimplifier)(nil)
 )
+
+// FormatSchemaForLLM formats the schema into a LLM-friendly string
+func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
+	var result strings.Builder
+	result.WriteString("Current Database Schema:\n\n")
+
+	// Sort tables for consistent output
+	tableNames := make([]string, 0, len(schema.Tables))
+	for tableName := range schema.Tables {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+
+	for _, tableName := range tableNames {
+		table := schema.Tables[tableName]
+		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
+		if table.Comment != "" {
+			result.WriteString(fmt.Sprintf("Description: %s\n", table.Comment))
+		}
+
+		// Sort columns for consistent output
+		columnNames := make([]string, 0, len(table.Columns))
+		for columnName := range table.Columns {
+			columnNames = append(columnNames, columnName)
+		}
+		sort.Strings(columnNames)
+
+		for _, columnName := range columnNames {
+			column := table.Columns[columnName]
+			nullable := "NOT NULL"
+			if column.IsNullable {
+				nullable = "NULL"
+			}
+			result.WriteString(fmt.Sprintf("  - %s (%s) %s",
+				columnName,
+				column.Type,
+				nullable,
+			))
+
+			// Check if column is primary key by looking at indexes
+			for _, idx := range table.Indexes {
+				if len(idx.Columns) == 1 && idx.Columns[0] == columnName {
+					result.WriteString(" PRIMARY KEY")
+					break
+				}
+			}
+
+			if column.DefaultValue != "" {
+				result.WriteString(fmt.Sprintf(" DEFAULT %s", column.DefaultValue))
+			}
+			if column.Comment != "" {
+				result.WriteString(fmt.Sprintf(" -- %s", column.Comment))
+			}
+			result.WriteString("\n")
+		}
+
+		// Add foreign key information
+		if len(table.ForeignKeys) > 0 {
+			result.WriteString("\n  Foreign Keys:\n")
+			for _, fk := range table.ForeignKeys {
+				result.WriteString(fmt.Sprintf("  - %s -> %s.%s",
+					fk.ColumnName,
+					fk.RefTable,
+					fk.RefColumn,
+				))
+				if fk.OnDelete != "" {
+					result.WriteString(fmt.Sprintf(" ON DELETE %s", fk.OnDelete))
+				}
+				if fk.OnUpdate != "" {
+					result.WriteString(fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate))
+				}
+				result.WriteString("\n")
+			}
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+// Add a quick check method
+func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db DBExecutor) (bool, error) {
+	// 1. Try cache first
+	sm.mu.RLock()
+	cachedSchema, exists := sm.schemaCache[chatID]
+	sm.mu.RUnlock()
+
+	if exists {
+		// Quick checksum comparison with database
+		currentChecksums, err := sm.getTableChecksums(ctx, db)
+		if err != nil {
+			return true, nil // Assume changed on error
+		}
+
+		// Compare only checksums
+		for tableName, checksum := range currentChecksums {
+			if cachedSchema.Tables[tableName].Checksum != checksum {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	// 2. If not in cache, check Redis
+	storage, err := sm.getStoredSchema(ctx, chatID)
+	if err != nil {
+		return true, nil // Assume changed if no stored schema
+	}
+
+	// 3. Quick checksum comparison
+	currentChecksums, err := sm.getTableChecksums(ctx, db)
+	if err != nil {
+		return true, nil
+	}
+
+	return !reflect.DeepEqual(storage.TableChecksums, currentChecksums), nil
+}

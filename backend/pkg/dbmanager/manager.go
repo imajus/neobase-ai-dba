@@ -2,6 +2,7 @@ package dbmanager
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"sync"
@@ -400,4 +401,72 @@ func (m *Manager) StartSchemaTracking(chatID string) {
 			}
 		}
 	}()
+}
+
+// Add exported methods to access internal fields
+func (m *Manager) GetConnections() map[string]*Connection {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.connections
+}
+
+func (m *Manager) GetSchemaManager() *SchemaManager {
+	return m.schemaManager
+}
+
+func (m *Manager) GetConnectionInfo(chatID string) (*ConnectionInfo, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conn, exists := m.connections[chatID]
+	if !exists {
+		return nil, false
+	}
+
+	// Convert Connection to ConnectionInfo
+	connInfo := &ConnectionInfo{
+		Config: conn.Config,
+	}
+
+	// Get the underlying *sql.DB from gorm.DB
+	if conn.DB != nil {
+		sqlDB, err := conn.DB.DB()
+		if err == nil {
+			connInfo.DB = sqlDB
+		}
+	}
+
+	return connInfo, true
+}
+
+// IsConnected checks if there is an active connection for the given chat
+func (m *Manager) IsConnected(chatID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conn, exists := m.connections[chatID]
+	if !exists {
+		return false
+	}
+
+	// Try a simple ping to check if connection is alive
+	if conn.DB != nil {
+		sqlDB, err := conn.DB.DB()
+		if err != nil {
+			return false
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		err = sqlDB.PingContext(ctx)
+		return err == nil
+	}
+
+	return false
+}
+
+type ConnectionInfo struct {
+	DB     *sql.DB
+	Config ConnectionConfig
 }

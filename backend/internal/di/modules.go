@@ -8,8 +8,10 @@ import (
 	"neobase-ai/internal/services"
 	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/dbmanager"
+	"neobase-ai/pkg/llm"
 	"neobase-ai/pkg/mongodb"
 	"neobase-ai/pkg/redis"
+	"os"
 	"time"
 
 	"go.uber.org/dig"
@@ -93,9 +95,41 @@ func Initialize() {
 		log.Fatalf("Failed to provide auth service: %v", err)
 	}
 
-	// Chat Service
-	if err := DiContainer.Provide(func(chatRepo repositories.ChatRepository, llmRepo repositories.LLMMessageRepository) services.ChatService {
-		return services.NewChatService(chatRepo, llmRepo)
+	// Add LLM Manager
+	if err := DiContainer.Provide(func() *llm.Manager {
+		manager := llm.NewManager()
+
+		// Register default OpenAI client
+		err := manager.RegisterClient("default", llm.Config{
+			Provider:    "openai",
+			Model:       "gpt-4",
+			APIKey:      os.Getenv("OPENAI_API_KEY"),
+			MaxTokens:   30000,
+			Temperature: 1,
+		})
+		if err != nil {
+			log.Printf("Warning: Failed to register OpenAI client: %v", err)
+		}
+
+		return manager
+	}); err != nil {
+		log.Fatalf("Failed to provide LLM manager: %v", err)
+	}
+
+	// Update Chat Service provider to include LLM manager
+	if err := DiContainer.Provide(func(
+		chatRepo repositories.ChatRepository,
+		llmRepo repositories.LLMMessageRepository,
+		dbManager *dbmanager.Manager,
+		llmManager *llm.Manager,
+	) services.ChatService {
+		// Get default LLM client
+		llmClient, err := llmManager.GetClient("default")
+		if err != nil {
+			log.Printf("Warning: Failed to get default LLM client: %v", err)
+		}
+
+		return services.NewChatService(chatRepo, llmRepo, dbManager, llmClient)
 	}); err != nil {
 		log.Fatalf("Failed to provide chat service: %v", err)
 	}

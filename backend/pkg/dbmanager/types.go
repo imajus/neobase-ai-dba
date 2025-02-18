@@ -29,12 +29,12 @@ type Connection struct {
 
 // ConnectionConfig holds the configuration for a database connection
 type ConnectionConfig struct {
-	Type     string `json:"type"`
-	Host     string `json:"host"`
-	Port     string `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Database string `json:"database"`
+	Type     string  `json:"type"`
+	Host     string  `json:"host"`
+	Port     string  `json:"port"`
+	Username *string `json:"username"`
+	Password *string `json:"password"`
+	Database string  `json:"database"`
 }
 
 // SSEEvent represents an event to be sent via SSE

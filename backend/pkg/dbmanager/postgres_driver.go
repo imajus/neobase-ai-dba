@@ -2,6 +2,7 @@ package dbmanager
 
 import (
 	"fmt"
+	"neobase-ai/internal/utils"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -15,8 +16,15 @@ func NewPostgresDriver() DatabaseDriver {
 }
 
 func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
+	// If username or password is nil, set it to empty string
+	if config.Username == nil {
+		config.Username = utils.ToStringPtr("")
+	}
+	if config.Password == nil {
+		config.Password = utils.ToStringPtr("")
+	}
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		config.Host, config.Port, config.Username, config.Password, config.Database)
+		config.Host, config.Port, *config.Username, *config.Password, config.Database)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {

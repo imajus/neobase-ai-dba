@@ -15,8 +15,8 @@ type ConnectionResponse struct {
 	Host     string `json:"host" binding:"required"`
 	Port     string `json:"port" binding:"required"`
 	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
 	Database string `json:"database" binding:"required"`
+	// Password not exposed in response
 }
 
 type CreateChatRequest struct {

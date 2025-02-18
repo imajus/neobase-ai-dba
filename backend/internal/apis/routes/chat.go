@@ -33,10 +33,10 @@ func SetupChatRoutes(router *gin.Engine) {
 		// Database connection routes
 		protected.POST("/:id/connect", chatHandler.ConnectDB)
 		protected.POST("/:id/disconnect", chatHandler.DisconnectDB)
-		protected.GET("/:id/connection-status", chatHandler.StreamConnectionStatus)
+		protected.GET("/:id/connection-status", chatHandler.GetDBConnectionStatus)
 
 		// SSE endpoints for streaming
-		protected.GET("/:id/stream", chatHandler.StreamResponse)       // Listen to AI response stream
+		protected.GET("/:id/stream", chatHandler.StreamChat)           // Listen to AI response stream
 		protected.POST("/:id/stream/cancel", chatHandler.CancelStream) // Cancel ongoing stream
 	}
 }

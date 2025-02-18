@@ -1,17 +1,15 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/services"
 	"neobase-ai/internal/utils"
 	"net/http"
 	"strconv"
 	"sync"
-	"time"
 
 	"neobase-ai/pkg/dbmanager"
 
@@ -21,15 +19,15 @@ import (
 type ChatHandler struct {
 	chatService services.ChatService
 	dbManager   *dbmanager.Manager
-	streams     map[string]context.CancelFunc // Track active streams
-	streamsMux  sync.RWMutex                  // Mutex for thread-safe streams map access
+	mu          sync.RWMutex
+	streams     map[string]chan dtos.StreamResponse // key: streamID
 }
 
 func NewChatHandler(chatService services.ChatService, dbManager *dbmanager.Manager) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
 		dbManager:   dbManager,
-		streams:     make(map[string]context.CancelFunc),
+		streams:     make(map[string]chan dtos.StreamResponse),
 	}
 }
 
@@ -188,7 +186,7 @@ func (h *ChatHandler) CreateMessage(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
-	response, statusCode, err := h.chatService.CreateMessage(userID, chatID, &req)
+	response, statusCode, err := h.chatService.CreateMessage(c.Request.Context(), userID, chatID, req.StreamID, req.Content)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{
@@ -255,11 +253,27 @@ func (h *ChatHandler) DeleteMessages(c *gin.Context) {
 	})
 }
 
-// StreamResponse handles SSE streaming of AI responses
-func (h *ChatHandler) StreamResponse(c *gin.Context) {
-	userID := c.GetString("userID")
-	chatID := c.Param("id")
-	streamID := c.Query("streamId")
+// HandleStreamEvent receives stream events from chat service and sends them to the client
+func (h *ChatHandler) HandleStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse) {
+	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
+	h.mu.RLock()
+	streamChan, exists := h.streams[streamKey]
+	h.mu.RUnlock()
+
+	if exists {
+		select {
+		case streamChan <- response:
+		default:
+			log.Printf("Warning: Stream channel %s is blocked", streamKey)
+		}
+	}
+}
+
+// StreamChat handles SSE endpoint
+func (h *ChatHandler) StreamChat(c *gin.Context) {
+	userID := c.GetString("user_id")
+	chatID := c.Param("chat_id")
+	streamID := c.Query("stream_id")
 
 	// Set headers for SSE
 	c.Header("Content-Type", "text/event-stream")
@@ -267,195 +281,90 @@ func (h *ChatHandler) StreamResponse(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 
-	// Create context with cancellation
-	ctx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-
-	// Store cancel function for potential cancellation
+	// Create new stream channel
 	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
-	h.streamsMux.Lock()
-	h.streams[streamKey] = cancel
-	h.streamsMux.Unlock()
+	h.mu.Lock()
+	streamChan := make(chan dtos.StreamResponse)
+	h.streams[streamKey] = streamChan
+	h.mu.Unlock()
+
+	// Send Connected successfully
+	c.SSEvent("message", dtos.StreamResponse{
+		Event: "sse-connected",
+		Data:  "SSE Connected successfully",
+	})
+
+	// Subscribe to chat service stream
+	h.chatService.SetStreamHandler(h)
+
+	// Cleanup when done
 	defer func() {
-		h.streamsMux.Lock()
+		h.mu.Lock()
 		delete(h.streams, streamKey)
-		h.streamsMux.Unlock()
+		close(streamChan)
+		h.mu.Unlock()
 	}()
 
-	// Get stream channel from service
-	streamChan, err := h.chatService.StreamResponse(userID, chatID, streamID)
-	if err != nil {
-		errorMsg := err.Error()
-		c.JSON(http.StatusInternalServerError, dtos.Response{
-			Success: false,
-			Error:   &errorMsg,
-		})
-		return
-	}
-
+	// Stream responses
 	c.Stream(func(w io.Writer) bool {
 		select {
-		case <-ctx.Done():
-			// Send completion event
-			data := dtos.StreamResponse{
-				Event: "complete",
-				Data:  nil,
-			}
-			json.NewEncoder(w).Encode(data)
-			return false
-
 		case response, ok := <-streamChan:
 			if !ok {
 				return false
 			}
-			// Send chunk event
-			json.NewEncoder(w).Encode(response)
+			// Send SSE format
+			c.SSEvent(response.Event, response.Data)
 			return true
-
-		case <-time.After(30 * time.Second):
-			// Send keepalive event
-			data := dtos.StreamResponse{
-				Event: "keepalive",
-				Data:  nil,
-			}
-			json.NewEncoder(w).Encode(data)
-			return true
+		case <-c.Request.Context().Done():
+			return false
 		}
 	})
 }
 
-// CancelStream cancels an ongoing stream
+// CancelStream cancels currently streaming response
 func (h *ChatHandler) CancelStream(c *gin.Context) {
-	userID := c.GetString("userID")
-	chatID := c.Param("id")
-	streamID := c.Query("streamId")
+	userID := c.GetString("user_id")
+	chatID := c.Param("chat_id")
+	streamID := c.Query("stream_id")
 
+	// Create stream key
 	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
 
-	h.streamsMux.RLock()
-	cancel, exists := h.streams[streamKey]
-	h.streamsMux.RUnlock()
+	// First cancel the processing
+	h.chatService.CancelProcessing(streamID)
 
-	if !exists {
-		c.JSON(http.StatusNotFound, dtos.Response{
-			Success: false,
-			Error:   utils.ToStringPtr("No active stream found"),
-		})
-		return
+	// Then cleanup the stream
+	h.mu.Lock()
+	if streamChan, ok := h.streams[streamKey]; ok {
+		close(streamChan)
+		delete(h.streams, streamKey)
 	}
-
-	// Cancel the stream
-	cancel()
+	h.mu.Unlock()
 
 	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
-		Data:    "Stream cancelled successfully",
-	})
-}
-
-// SSE handler for connection status
-func (h *ChatHandler) StreamConnectionStatus(c *gin.Context) {
-	userID := c.GetString("userID")
-	chatID := c.Param("id")
-	streamID := c.Query("streamId")
-
-	// Set headers for SSE
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
-
-	// Create context with cancellation
-	ctx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-
-	// Store cancel function for potential cancellation
-	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
-	h.streamsMux.Lock()
-	h.streams[streamKey] = cancel
-	h.streamsMux.Unlock()
-	defer func() {
-		h.streamsMux.Lock()
-		delete(h.streams, streamKey)
-		h.streamsMux.Unlock()
-	}()
-
-	// Subscribe to connection events
-	if err := h.dbManager.Subscribe(chatID, userID, streamID); err != nil {
-		c.JSON(http.StatusBadRequest, dtos.Response{
-			Success: false,
-			Error:   utils.ToStringPtr(err.Error()),
-		})
-		return
-	}
-	defer h.dbManager.Unsubscribe(chatID, streamID)
-
-	// Get event channel
-	eventChan := h.dbManager.GetEventChannel()
-
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case <-ctx.Done():
-			// Send completion event
-			data := dtos.StreamResponse{
-				Event: "complete",
-				Data:  nil,
-			}
-			json.NewEncoder(w).Encode(data)
-			return false
-
-		case event := <-eventChan:
-			// Only process events for this chat and stream
-			if event.ChatID == chatID && event.StreamID == streamID && event.UserID == userID {
-				data := dtos.StreamResponse{
-					Event: "connection",
-					Data:  event,
-				}
-				json.NewEncoder(w).Encode(data)
-				return true
-			}
-			return true
-
-		case <-time.After(30 * time.Second):
-			// Send keepalive event
-			data := dtos.StreamResponse{
-				Event: "keepalive",
-				Data:  nil,
-			}
-			json.NewEncoder(w).Encode(data)
-			return true
-		}
+		Data:    "Operation cancelled successfully",
 	})
 }
 
 // ConnectDB establishes a database connection
 func (h *ChatHandler) ConnectDB(c *gin.Context) {
+	var req dtos.ConnectDBRequest
 	userID := c.GetString("userID")
-	chatID := c.Param("id")
 
-	var config dbmanager.ConnectionConfig
-	if err := c.ShouldBindJSON(&config); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, dtos.Response{
 			Success: false,
-			Error:   utils.ToStringPtr(fmt.Sprintf("Invalid connection config: %v", err)),
+			Error:   utils.ToStringPtr(fmt.Sprintf("Invalid request: %v", err)),
 		})
 		return
 	}
 
-	// Validate connection type
-	if config.Type != "postgresql" { // Add more types as supported
-		c.JSON(http.StatusBadRequest, dtos.Response{
+	statusCode, err := h.chatService.ConnectDB(c.Request.Context(), userID, req.ChatID, req.StreamID)
+	if err != nil {
+		c.JSON(int(statusCode), dtos.Response{
 			Success: false,
-			Error:   utils.ToStringPtr("Unsupported database type"),
-		})
-		return
-	}
-
-	// Attempt to connect with userID
-	if err := h.dbManager.Connect(chatID, userID, config); err != nil {
-		c.JSON(http.StatusInternalServerError, dtos.Response{
-			Success: false,
-			Error:   utils.ToStringPtr(fmt.Sprintf("Failed to connect: %v", err)),
+			Error:   utils.ToStringPtr(err.Error()),
 		})
 		return
 	}
@@ -468,13 +377,22 @@ func (h *ChatHandler) ConnectDB(c *gin.Context) {
 
 // DisconnectDB closes a database connection
 func (h *ChatHandler) DisconnectDB(c *gin.Context) {
+	var req dtos.DisconnectDBRequest
 	userID := c.GetString("userID")
-	chatID := c.Param("id")
 
-	if err := h.dbManager.Disconnect(chatID, userID); err != nil {
-		c.JSON(http.StatusInternalServerError, dtos.Response{
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dtos.Response{
 			Success: false,
-			Error:   utils.ToStringPtr(fmt.Sprintf("Failed to disconnect: %v", err)),
+			Error:   utils.ToStringPtr(fmt.Sprintf("Invalid request: %v", err)),
+		})
+		return
+	}
+
+	statusCode, err := h.chatService.DisconnectDB(c.Request.Context(), userID, req.ChatID, req.StreamID)
+	if err != nil {
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
 		})
 		return
 	}
@@ -482,5 +400,25 @@ func (h *ChatHandler) DisconnectDB(c *gin.Context) {
 	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
 		Data:    "Database disconnected successfully",
+	})
+}
+
+// GetDBConnectionStatus checks the current connection status
+func (h *ChatHandler) GetDBConnectionStatus(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	status, statusCode, err := h.chatService.GetDBConnectionStatus(c.Request.Context(), userID, chatID)
+	if err != nil {
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    status,
 	})
 }

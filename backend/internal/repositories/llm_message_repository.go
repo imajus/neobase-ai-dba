@@ -13,11 +13,12 @@ import (
 
 type LLMMessageRepository interface {
 	// Message operations
-	CreateMessage(message *models.LLMMessage) error
+	CreateMessage(msg *models.LLMMessage) error
 	UpdateMessage(id primitive.ObjectID, message *models.LLMMessage) error
 	FindMessageByID(id primitive.ObjectID) (*models.LLMMessage, error)
 	FindMessagesByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, int64, error)
 	DeleteMessagesByChatID(chatID primitive.ObjectID) error
+	GetByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, error)
 }
 
 type llmMessageRepository struct {
@@ -33,8 +34,8 @@ func NewLLMMessageRepository(mongoClient *mongodb.MongoDBClient) LLMMessageRepos
 }
 
 // Message operations
-func (r *llmMessageRepository) CreateMessage(message *models.LLMMessage) error {
-	_, err := r.messageCollection.InsertOne(context.Background(), message)
+func (r *llmMessageRepository) CreateMessage(msg *models.LLMMessage) error {
+	_, err := r.messageCollection.InsertOne(context.Background(), msg)
 	return err
 }
 
@@ -81,5 +82,18 @@ func (r *llmMessageRepository) DeleteMessagesByChatID(chatID primitive.ObjectID)
 	filter := bson.M{"chat_id": chatID}
 	_, err := r.messageCollection.DeleteMany(context.Background(), filter)
 	return err
+}
 
+func (r *llmMessageRepository) GetByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, error) {
+	var messages []*models.LLMMessage
+	filter := bson.M{"chat_id": chatID}
+
+	cursor, err := r.messageCollection.Find(context.Background(), filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &messages)
+	return messages, err
 }
