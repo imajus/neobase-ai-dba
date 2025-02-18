@@ -710,7 +710,7 @@ func (m *Manager) CancelQueryExecution(streamID string) {
 	}
 }
 
-func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, isRollback bool) (*QueryExecutionResult, error) {
+func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, isRollback bool) (*QueryExecutionResult, *dtos.QueryError) {
 	m.executionMu.Lock()
 
 	// Create cancellable context with timeout
@@ -739,29 +739,41 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 	// Get connection and driver
 	conn, exists := m.connections[chatID]
 	if !exists {
-		return nil, fmt.Errorf("no connection found")
+		return nil, &dtos.QueryError{
+			Code:    "NO_CONNECTION_FOUND",
+			Message: "no connection found",
+			Details: "No connection found for chat ID: " + chatID,
+		}
 	}
 
 	driver, exists := m.drivers[conn.Config.Type]
 	if !exists {
-		return nil, fmt.Errorf("no driver found for type: %s", conn.Config.Type)
+		return nil, &dtos.QueryError{
+			Code:    "NO_DRIVER_FOUND",
+			Message: "no driver found",
+			Details: "No driver found for type: " + conn.Config.Type,
+		}
 	}
 
 	// Begin transaction
-	tx, err := driver.BeginTx(execCtx, conn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %v", err)
+	tx := driver.BeginTx(execCtx, conn)
+	if tx == nil {
+		return nil, &dtos.QueryError{
+			Code:    "FAILED_TO_START_TRANSACTION",
+			Message: "failed to start transaction",
+			Details: "Failed to start transaction",
+		}
 	}
 	execution.Tx = tx
 
 	// Execute query with proper cancellation handling
 	var result *QueryExecutionResult
 	done := make(chan struct{})
-	var queryErr error
+	var queryErr *dtos.QueryError
 
 	go func() {
 		defer close(done)
-		result, queryErr = tx.ExecuteQuery(execCtx, query)
+		result = tx.ExecuteQuery(execCtx, query)
 	}()
 
 	select {
@@ -770,9 +782,16 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			log.Printf("Error rolling back transaction: %v", err)
 		}
 		if execCtx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("query execution timed out")
+			return nil, &dtos.QueryError{
+				Code:    "QUERY_EXECUTION_TIMED_OUT",
+				Message: "query execution timed out",
+				Details: "Query execution timed out",
+			}
 		}
-		return nil, fmt.Errorf("query execution cancelled")
+		return nil, &dtos.QueryError{
+			Code:    "QUERY_EXECUTION_CANCELLED",
+			Message: "query execution cancelled",
+		}
 
 	case <-done:
 		if queryErr != nil {
@@ -782,7 +801,11 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			return result, queryErr
 		}
 		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("failed to commit transaction: %v", err)
+			return nil, &dtos.QueryError{
+				Code:    "QUERY_EXECUTION_FAILED",
+				Message: "query execution failed",
+				Details: err.Error(),
+			}
 		}
 		return result, nil
 	}

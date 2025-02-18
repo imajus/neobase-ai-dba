@@ -99,14 +99,20 @@ func (d *PostgresDriver) IsAlive(conn *Connection) bool {
 	return sqlDB.Ping() == nil
 }
 
-func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string) (*QueryExecutionResult, error) {
+func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string) *QueryExecutionResult {
 	startTime := time.Now()
 
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get SQL connection: %v", err)
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "QUERY_ERROR",
+				Message: "Query execution failed",
+				Details: err.Error(),
+			},
+		}
 	}
-
 	rows, err := sqlDB.QueryContext(ctx, query)
 	if err != nil {
 		return &QueryExecutionResult{
@@ -116,25 +122,25 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 				Message: "Query execution failed",
 				Details: err.Error(),
 			},
-		}, err
+		}
 	}
 	defer rows.Close()
 
 	return d.processRows(rows, startTime)
 }
 
-func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) (Transaction, error) {
+func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get SQL connection: %v", err)
+		return nil
 	}
 
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
-	return &PostgresTransaction{tx: tx}, nil
+	return &PostgresTransaction{tx: tx}
 }
 
 // Add PostgreSQL transaction implementation
@@ -142,7 +148,7 @@ type PostgresTransaction struct {
 	tx *sql.Tx
 }
 
-func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error) {
+func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, query string) *QueryExecutionResult {
 	startTime := time.Now()
 
 	rows, err := t.tx.QueryContext(ctx, query)
@@ -154,7 +160,7 @@ func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, query string) (*
 				Message: "Query execution failed",
 				Details: err.Error(),
 			},
-		}, err
+		}
 	}
 	defer rows.Close()
 
@@ -170,7 +176,7 @@ func (t *PostgresTransaction) Rollback() error {
 }
 
 // Helper method to process rows
-func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) (*QueryExecutionResult, error) {
+func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) *QueryExecutionResult {
 	columns, err := rows.Columns()
 	if err != nil {
 		return &QueryExecutionResult{
@@ -180,7 +186,7 @@ func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) (*Quer
 				Message: "Failed to get column metadata",
 				Details: err.Error(),
 			},
-		}, err
+		}
 	}
 
 	result := make([]map[string]interface{}, 0)
@@ -201,7 +207,7 @@ func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) (*Quer
 					Message: "Failed to scan row data",
 					Details: err.Error(),
 				},
-			}, err
+			}
 		}
 
 		entry := make(map[string]interface{})
@@ -228,7 +234,7 @@ func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) (*Quer
 				Message: "Failed to marshal result to JSON",
 				Details: err.Error(),
 			},
-		}, err
+		}
 	}
 
 	var resultMap map[string]interface{}
@@ -242,5 +248,5 @@ func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) (*Quer
 		Result:        resultMap,
 		ResultJSON:    string(resultJSON),
 		ExecutionTime: int(time.Since(startTime).Milliseconds()),
-	}, nil
+	}
 }

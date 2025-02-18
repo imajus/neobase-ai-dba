@@ -71,13 +71,13 @@ type DatabaseDriver interface {
 	Ping(conn *Connection) error
 	IsAlive(conn *Connection) bool
 	// Add new methods for query execution
-	ExecuteQuery(ctx context.Context, conn *Connection, query string) (*QueryExecutionResult, error)
-	BeginTx(ctx context.Context, conn *Connection) (Transaction, error)
+	ExecuteQuery(ctx context.Context, conn *Connection, query string) *QueryExecutionResult
+	BeginTx(ctx context.Context, conn *Connection) Transaction
 }
 
 // Add new Transaction interface
 type Transaction interface {
-	ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error)
+	ExecuteQuery(ctx context.Context, query string) *QueryExecutionResult
 	Commit() error
 	Rollback() error
 }

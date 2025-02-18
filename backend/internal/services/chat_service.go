@@ -833,8 +833,18 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	}
 
 	// Execute query
-	result, err := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, false)
-	if err != nil {
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, false)
+	if queryErr != nil {
+		// Send event about query execution failure
+		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+			Event: "query-execution-failed",
+			Data: map[string]interface{}{
+				"chat_id":    chatID,
+				"message_id": msg.ID.Hex(),
+				"query_id":   query.ID.Hex(),
+				"error":      queryErr,
+			},
+		})
 		return nil, http.StatusInternalServerError, err
 	}
 
@@ -968,8 +978,8 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		}
 
 		// Execute dependent query
-		dependentResult, err := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, false)
-		if err != nil {
+		dependentResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, false)
+		if queryErr != nil {
 			// Send event about dependent query failure
 			s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 				Event: "rollback-dependent-query-failed",
@@ -977,10 +987,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					"chat_id":    chatID,
 					"message_id": msg.ID.Hex(),
 					"query_id":   query.ID.Hex(),
-					"error":      err.Error(),
+					"error":      queryErr,
 				},
 			})
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute dependent query: %v", err)
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute dependent query: %v", queryErr)
 		}
 
 		// Get LLM context from previous messages
@@ -1121,8 +1131,8 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	}
 
 	// Execute rollback query
-	result, err := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, true)
-	if err != nil {
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, true)
+	if queryErr != nil {
 		// Send event about rollback query failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 			Event: "rollback-query-failed",
@@ -1130,10 +1140,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				"chat_id":    chatID,
 				"query_id":   query.ID.Hex(),
 				"message_id": msg.ID.Hex(),
-				"error":      err.Error(),
+				"error":      queryErr,
 			},
 		})
-		return nil, http.StatusInternalServerError, err
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute rollback query: %v", queryErr)
 	}
 
 	log.Printf("ChatService -> RollbackQuery -> result: %+v", result)
@@ -1155,7 +1165,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 
 	// Save updated message
 	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
-		return nil, http.StatusInternalServerError, err
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message with rollback results: %v", err)
 	}
 
 	// Update LLM message with rollback results

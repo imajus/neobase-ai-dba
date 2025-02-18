@@ -462,19 +462,25 @@ func (h *ChatHandler) GetDBConnectionStatus(c *gin.Context) {
 
 // Add query execution methods
 func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
-	userID := c.GetString("user_id")
+	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
 	var req dtos.ExecuteQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
 		return
 	}
 
 	// Execute query
 	response, status, err := h.chatService.ExecuteQuery(c.Request.Context(), userID, chatID, &req)
 	if err != nil {
-		c.JSON(int(status), gin.H{"error": err.Error()})
+		c.JSON(int(status), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
 		return
 	}
 
@@ -482,19 +488,25 @@ func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
 }
 
 func (h *ChatHandler) RollbackQuery(c *gin.Context) {
-	userID := c.GetString("user_id")
+	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
 	var req dtos.RollbackQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
 		return
 	}
 
 	// Execute rollback
 	response, status, err := h.chatService.RollbackQuery(c.Request.Context(), userID, chatID, &req)
 	if err != nil {
-		c.JSON(int(status), gin.H{"error": err.Error()})
+		c.JSON(int(status), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
 		return
 	}
 
