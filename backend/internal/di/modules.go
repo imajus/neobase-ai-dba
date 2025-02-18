@@ -108,11 +108,11 @@ func Initialize() {
 
 		// Register default OpenAI client
 		err := manager.RegisterClient("default", llm.Config{
-			Provider:    "openai",
-			Model:       "gpt-4",
-			APIKey:      os.Getenv("OPENAI_API_KEY"),
-			MaxTokens:   30000,
-			Temperature: 1,
+			Provider:            "openai",
+			Model:               "gpt-4o",
+			APIKey:              os.Getenv("OPENAI_API_KEY"),
+			MaxCompletionTokens: 3072,
+			Temperature:         1,
 		})
 		if err != nil {
 			log.Printf("Warning: Failed to register OpenAI client: %v", err)

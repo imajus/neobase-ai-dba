@@ -92,6 +92,12 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 
 	log.Printf("DBManager -> Connect -> Found driver for type: %s", config.Type)
 
+	// Check if connection already exists
+	if existingConn, exists := m.connections[chatID]; exists && existingConn.Status == StatusConnected {
+		log.Printf("DBManager -> Connect -> Connection already exists for chatID: %s", chatID)
+		return fmt.Errorf("connection already exists for chat ID: %s", chatID)
+	}
+
 	// Create connection
 	conn, err := driver.Connect(config)
 	if err != nil {

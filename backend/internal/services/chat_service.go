@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
@@ -230,14 +231,11 @@ const (
 	MessageTypeSystem    MessageType = "system"
 )
 
-// Update CreateMessage to handle the full message flow
+// Update CreateMessage to use a separate context for LLM processing
 func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error) {
-	// 1. Save user message
-	userObjID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
-	}
+	log.Printf("CreateMessage -> userID: %s, chatID: %s, streamID: %s, content: %s", userID, chatID, streamID, content)
 
+	// 1. Save user message
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
@@ -246,52 +244,60 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	msg := &models.Message{
 		Base:    models.NewBase(),
 		ChatID:  chatObjID,
-		UserID:  userObjID,
 		Content: content,
 		Type:    string(MessageTypeUser),
 	}
 
+	log.Printf("CreateMessage -> msg: %+v", msg)
+
 	if err := s.chatRepo.CreateMessage(msg); err != nil {
+		log.Printf("CreateMessage -> Error saving message: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to save message: %v", err)
 	}
+
+	log.Printf("CreateMessage -> msg saved")
 
 	// 2. Save to LLM messages for context
 	llmMsg := &models.LLMMessage{
 		Base:   models.NewBase(),
 		ChatID: chatObjID,
-		Role:   string(MessageTypeUser),
+		Role:   "user",
 		Content: map[string]interface{}{
 			"user_message": content,
 		},
 	}
+
 	if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-		log.Printf("Error saving LLM message: %v", err)
+		log.Printf("CreateMessage -> Error saving LLM message: %v", err)
 		// Continue even if LLM message save fails
 	}
 
-	// 3. Start async LLM processing
-	go s.processLLMResponse(ctx, userID, chatID, streamID)
+	log.Printf("CreateMessage -> llmMsg saved")
 
-	// 4. Return the saved message
-	return &dtos.MessageResponse{
-		ID:        msg.ID.Hex(),
-		ChatID:    msg.ChatID.Hex(),
-		Content:   msg.Content,
-		Type:      msg.Type,
-		CreatedAt: msg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}, http.StatusCreated, nil
+	// 3. Start async LLM processing with a background context
+	go func() {
+		// Create a new background context for LLM processing
+		bgCtx := context.Background()
+		s.processLLMResponse(bgCtx, userID, msg.ID.Hex(), chatID, streamID)
+	}()
+
+	return s.buildMessageResponse(msg), http.StatusOK, nil
 }
 
-// Add new method for LLM processing
-func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, streamID string) {
-	// Send initial processing message
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "ai-response-step",
-		Data:  "NeoBase is analyzing your request..",
-	})
-	// Create cancellable context
+// Update processLLMResponse to handle the new context
+func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID, chatID, streamID string) {
+	log.Printf("processLLMResponse -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
+
+	messageObjID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		s.handleError(ctx, chatID, err)
+		return
+	}
+
+	// Create cancellable context from the background context
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		s.handleError(ctx, chatID, err)
@@ -314,14 +320,14 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		s.processesMu.Lock()
 		delete(s.activeProcesses, streamID)
 		s.processesMu.Unlock()
-		cancel()
 	}()
 
 	// Send initial processing message
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "ai-response-step",
-		Data:  "Fetching request relevant entities(tables, columns, etc.) from the database..",
+		Data:  "NeoBase is analyzing your request..",
 	})
+
 	// Get DB connection from dbManager
 	dbConn, err := s.dbManager.GetConnection(chatID)
 	if err != nil {
@@ -390,17 +396,23 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 			if err != nil {
 				log.Printf("Error getting schema: %v", err)
 			} else {
-				messages = append(messages, &models.LLMMessage{
-					Base:   models.NewBase(),
-					ChatID: chatObjID,
-					Role:   string(MessageTypeSystem),
+				// Need to save this schema message to the LLM messages
+				llmMsg := &models.LLMMessage{
+					Base:      models.NewBase(),
+					ChatID:    chatObjID,
+					MessageID: messageObjID,
+					Role:      string(MessageTypeSystem),
 					Content: map[string]interface{}{
 						"schema_update": fmt.Sprintf("%s\n\nChanges:\n%s",
 							schemaManager.FormatSchemaForLLM(schema),
 							s.formatSchemaDiff(diff),
 						),
 					},
-				})
+				}
+				if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+					log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
+				}
+				messages = append(messages, llmMsg)
 			}
 		}
 	}
@@ -424,15 +436,25 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		return
 	}
 
+	log.Printf("processLLMResponse -> response: %s", response)
+
 	if checkCancellation() {
 		return
 	}
 
+	// Send initial processing message
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "ai-response-step",
 		Data:  "Analyzing the criticality of the query & if roll back is possible..",
 	})
 
+	var jsonResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response-error",
+			Data:  map[string]string{"error": err.Error()},
+		})
+	}
 	// Save response and send final message
 	respMsg := &models.Message{
 		Base:    models.NewBase(),
@@ -449,13 +471,27 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		return
 	}
 
+	formattedJsonResponse := map[string]interface{}{
+		"assistant_response": jsonResponse,
+	}
+	llmMsg := &models.LLMMessage{
+		Base:      models.NewBase(),
+		ChatID:    chatObjID,
+		MessageID: respMsg.ID,
+		Content:   formattedJsonResponse,
+		Role:      string(MessageTypeAssistant),
+	}
+	if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+		log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
+	}
+
 	// Send final response
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "ai-response",
 		Data: &dtos.MessageResponse{
 			ID:        respMsg.ID.Hex(),
 			ChatID:    respMsg.ChatID.Hex(),
-			Content:   respMsg.Content,
+			Content:   jsonResponse,
 			Type:      respMsg.Type,
 			CreatedAt: respMsg.CreatedAt.Format(time.RFC3339),
 		},
@@ -598,11 +634,18 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 }
 
 func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageResponse {
+	var content map[string]interface{}
+	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
+		log.Printf("Error unmarshalling message content: %v", err)
+		content = map[string]interface{}{
+			"user-message": msg.Content,
+		}
+	}
 	return &dtos.MessageResponse{
 		ID:        msg.ID.Hex(),
 		ChatID:    msg.ChatID.Hex(),
 		Type:      msg.Type,
-		Content:   msg.Content,
+		Content:   content,
 		Queries:   dtos.ToQueryDto(msg.Queries),
 		CreatedAt: msg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -614,6 +657,7 @@ func (s *chatService) SetStreamHandler(handler StreamHandler) {
 
 // Helper method to send stream events
 func (s *chatService) sendStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse) {
+	log.Printf("sendStreamEvent -> userID: %s, chatID: %s, streamID: %s, response: %+v", userID, chatID, streamID, response)
 	if s.streamHandler != nil {
 		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, response)
 	}
@@ -666,12 +710,10 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 	log.Printf("ChatService -> ConnectDB -> connected to chat: %s", chatID)
 
 	// Send to stream handler
-	if s.streamHandler != nil {
-		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "db-connected",
-			Data:  "Database connected successfully",
-		})
-	}
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "db-connected",
+		Data:  "Database connected successfully",
+	})
 
 	return http.StatusOK, nil
 }

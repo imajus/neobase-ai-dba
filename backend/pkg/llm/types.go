@@ -21,17 +21,17 @@ type Client interface {
 
 // ModelInfo contains information about the LLM model
 type ModelInfo struct {
-	Name         string
-	Provider     string
-	MaxTokens    int
-	ContextLimit int
+	Name                string
+	Provider            string
+	MaxCompletionTokens int
+	ContextLimit        int
 }
 
 // Config holds configuration for LLM clients
 type Config struct {
-	Provider    string
-	Model       string
-	APIKey      string
-	MaxTokens   int
-	Temperature float32
+	Provider            string
+	Model               string
+	APIKey              string
+	MaxCompletionTokens int
+	Temperature         float32
 }

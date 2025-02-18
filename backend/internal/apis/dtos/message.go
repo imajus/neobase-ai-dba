@@ -6,19 +6,17 @@ import (
 )
 
 type CreateMessageRequest struct {
-	ChatID   string `json:"chat_id" binding:"required"`
 	StreamID string `json:"stream_id" binding:"required"`
-	Type     string `json:"type" binding:"required,oneof=user ai"`
 	Content  string `json:"content" binding:"required"`
 }
 
 type MessageResponse struct {
-	ID        string   `json:"id"`
-	ChatID    string   `json:"chat_id"`
-	Type      string   `json:"type"`
-	Content   string   `json:"content"`
-	Queries   *[]Query `json:"queries,omitempty"`
-	CreatedAt string   `json:"created_at"`
+	ID        string                 `json:"id"`
+	ChatID    string                 `json:"chat_id"`
+	Type      string                 `json:"type"`
+	Content   map[string]interface{} `json:"content"` // Should be a map[string]interface{}
+	Queries   *[]Query               `json:"queries,omitempty"`
+	CreatedAt string                 `json:"created_at"`
 }
 
 type Query struct {
@@ -53,6 +51,9 @@ type MessageListRequest struct {
 }
 
 func ToQueryDto(queries *[]models.Query) *[]Query {
+	if queries == nil {
+		return nil
+	}
 	queriesDto := make([]Query, len(*queries))
 	for i, query := range *queries {
 		var exampleResult map[string]interface{}

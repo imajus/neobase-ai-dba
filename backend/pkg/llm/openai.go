@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
 	"strings"
@@ -12,10 +13,10 @@ import (
 )
 
 type OpenAIClient struct {
-	client      *openai.Client
-	model       string
-	maxTokens   int
-	temperature float32
+	client              *openai.Client
+	model               string
+	maxCompletionTokens int
+	temperature         float32
 }
 
 func NewOpenAIClient(config Config) (*OpenAIClient, error) {
@@ -30,10 +31,10 @@ func NewOpenAIClient(config Config) (*OpenAIClient, error) {
 	}
 
 	return &OpenAIClient{
-		client:      client,
-		model:       model,
-		maxTokens:   config.MaxTokens,
-		temperature: config.Temperature,
+		client:              client,
+		model:               model,
+		maxCompletionTokens: config.MaxCompletionTokens,
+		temperature:         config.Temperature,
 	}, nil
 }
 
@@ -47,9 +48,12 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		Content: constants.GetSystemPrompt(dbType),
 	})
 
+	log.Printf("GenerateResponse -> messages: %v", messages)
+
 	for _, msg := range messages {
 		content := ""
 
+		log.Printf("GenerateResponse -> msg: %v", msg)
 		// Handle different message types
 		switch msg.Role {
 		case "user":
@@ -76,14 +80,14 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 
 	// Create completion request with JSON schema
 	req := openai.ChatCompletionRequest{
-		Model:       c.model,
-		Messages:    openAIMessages,
-		MaxTokens:   c.maxTokens,
-		Temperature: c.temperature,
+		Model:               c.model,
+		Messages:            openAIMessages,
+		MaxCompletionTokens: c.maxCompletionTokens,
+		Temperature:         c.temperature,
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
 			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
-				Name:        "NeoBase AI Response",
+				Name:        "neobase-response",
 				Description: "A friendly AI Response/Explanation or clarification question (Must Send this)",
 				Schema:      json.RawMessage(constants.LLMResponseSchema),
 				Strict:      false,
@@ -101,6 +105,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		return "", fmt.Errorf("no response from OpenAI")
 	}
 
+	log.Printf("GenerateResponse -> resp: %v", resp)
 	// Validate response against schema
 	var llmResponse constants.LLMResponse
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &llmResponse); err != nil {
@@ -112,10 +117,10 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 
 func (c *OpenAIClient) GetModelInfo() ModelInfo {
 	return ModelInfo{
-		Name:         c.model,
-		Provider:     "openai",
-		MaxTokens:    c.maxTokens,
-		ContextLimit: getModelContextLimit(c.model),
+		Name:                c.model,
+		Provider:            "openai",
+		MaxCompletionTokens: c.maxCompletionTokens,
+		ContextLimit:        getModelContextLimit(c.model),
 	}
 }
 

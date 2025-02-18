@@ -3,82 +3,80 @@ package constants
 // LLM response schema for structured query generation
 const LLMResponseSchema = `{
     "type": "object",
-    "required": [
-      "assistantMessage"
-    ],
+    "required": ["assistantMessage"],
     "properties": {
-      "queries": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "required": [
-            "query",
-            "queryType",
-            "explanation",
-            "isCritical",
-            "canRollback",
-            "estimateResponseTime"
-          ],
-          "properties": {
-            "query": {
-              "type": "string",
-              "description": "SQL query to fetch order details."
-            },
-            "tables": {
-              "type": "string",
-              "description": "Tables being used in the query(comma separated)"
-            },
-            "queryType": {
-              "type": "string",
-              "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
-            },
-            "isCritical": {
-              "type": "boolean",
-              "description": "Indicates if the query is critical."
-            },
-            "canRollback": {
-              "type": "boolean",
-              "description": "Indicates if the operation can be rolled back."
-            },
-            "explanation": {
-              "type": "string",
-              "description": "Description of what the query does."
-            },
-            "exampleResult": {
-              "type": "array",
-              "items": {
+        "queries": {
+            "type": "array",
+            "items": {
                 "type": "object",
-                "description": "Key-value pairs representing column names and example values.",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "description": "An example array of results that the query might return."
+                "required": [
+                    "query",
+                    "queryType",
+                    "explanation",
+                    "isCritical",
+                    "canRollback",
+                    "estimateResponseTime"
+                ],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query to fetch order details."
+                    },
+                    "tables": {
+                        "type": "string",
+                        "description": "Tables being used in the query(comma separated)"
+                    },
+                    "queryType": {
+                        "type": "string",
+                        "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
+                    },
+                    "isCritical": {
+                        "type": "boolean",
+                        "description": "Indicates if the query is critical."
+                    },
+                    "canRollback": {
+                        "type": "boolean",
+                        "description": "Indicates if the operation can be rolled back."
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "Description of what the query does."
+                    },
+                    "exampleResult": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "description": "Key-value pairs representing column names and example values.",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "description": "An example array of results that the query might return."
+                    },
+                    "rollbackQuery": {
+                        "type": "string",
+                        "description": "Query to undo this operation (if canRollback=true), default empty"
+                    },
+                    "estimateResponseTime": {
+                        "type": "number",
+                        "description": "Estimated time (in milliseconds) to fetch the response."
+                    },
+                    "rollbackDependentQuery": {
+                        "type": "string",
+                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                    }
+                },
+                "additionalProperties": false
             },
-            "rollbackQuery": {
-              "type": "string",
-              "description": "Query to undo this operation (if canRollback=true), default empty"
-            },
-            "estimateResponseTime": {
-              "type": "number",
-              "description": "Estimated time (in milliseconds) to fetch the response."
-            },
-            "rollbackDependentQuery": {
-              "type": "string",
-              "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
-            }
-          },
-          "additionalProperties": false
+            "description": "List of queries related to orders."
         },
-        "description": "List of queries related to orders."
-      },
-      "assistantMessage": {
-        "type": "string",
-        "description": "Message from the assistant providing context about the orders."
-      }
+        "assistantMessage": {
+            "type": "string",
+            "description": "Message from the assistant providing context about the orders."
+        }
     },
     "additionalProperties": false
-  }`
+}`
 
 // LLMResponse represents the structured response from LLM
 type LLMResponse struct {
