@@ -86,14 +86,14 @@ type LLMResponse struct {
 
 // QueryInfo represents a single query in the LLM response
 type QueryInfo struct {
-	Query                  string              `json:"query"`
-	Tables                 string              `json:"tables,omitempty"`
-	QueryType              string              `json:"queryType"`
-	IsCritical             bool                `json:"isCritical"`
-	CanRollback            bool                `json:"canRollback"`
-	Explanation            string              `json:"explanation"`
-	ExampleResult          []map[string]string `json:"exampleResult,omitempty"`
-	RollbackQuery          string              `json:"rollbackQuery,omitempty"`
-	EstimateResponseTime   float64             `json:"estimateResponseTime"`
-	RollbackDependentQuery string              `json:"rollbackDependentQuery,omitempty"`
+	Query                  string                   `json:"query"`
+	Tables                 string                   `json:"tables,omitempty"`
+	QueryType              string                   `json:"queryType"`
+	IsCritical             bool                     `json:"isCritical"`
+	CanRollback            bool                     `json:"canRollback"`
+	Explanation            string                   `json:"explanation"`
+	ExampleResult          []map[string]interface{} `json:"exampleResult,omitempty"`
+	RollbackQuery          string                   `json:"rollbackQuery,omitempty"`
+	EstimateResponseTime   float64                  `json:"estimateResponseTime"`
+	RollbackDependentQuery string                   `json:"rollbackDependentQuery,omitempty"`
 }

@@ -14,17 +14,22 @@ type Message struct {
 }
 
 type Query struct {
-	ID              primitive.ObjectID `bson:"id" json:"id"`
-	Query           string             `bson:"query" json:"query"`
-	Description     string             `bson:"description" json:"description"`
-	ExecutionTime   int                `bson:"execution_time" json:"execution_time"` // in milliseconds
-	CanRollback     bool               `bson:"can_rollback" json:"can_rollback"`
-	IsCritical      bool               `bson:"is_critical" json:"is_critical"`
-	IsExecuted      bool               `bson:"is_executed" json:"is_executed"`       // if the query has been executed
-	IsRolledBack    bool               `bson:"is_rolled_back" json:"is_rolled_back"` // if the query has been rolled back
-	Error           *QueryError        `bson:"error,omitempty" json:"error,omitempty"`
-	ExampleResult   *string            `bson:"example_result,omitempty" json:"example_result,omitempty"`     // JSON string
-	ExecutionResult *string            `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
+	ID                     primitive.ObjectID `bson:"id" json:"id"`
+	Query                  string             `bson:"query" json:"query"`
+	QueryType              *string            `bson:"query_type" json:"query_type"` // SELECT, INSERT, UPDATE, DELETE...
+	Tables                 *string            `bson:"tables" json:"tables"`         // comma separated table names involved in the query
+	Description            string             `bson:"description" json:"description"`
+	RollbackDependentQuery *string            `bson:"rollback_dependent_query,omitempty" json:"rollback_dependent_query,omitempty"` // ID of the query that this query depends on
+	RollbackQuery          *string            `bson:"rollback_query,omitempty" json:"rollback_query,omitempty"`                     // the query to rollback the query
+	ExecutionTime          *int               `bson:"execution_time" json:"execution_time"`                                         // in milliseconds
+	ExampleExecutionTime   int                `bson:"example_execution_time" json:"example_execution_time"`                         // in milliseconds
+	CanRollback            bool               `bson:"can_rollback" json:"can_rollback"`
+	IsCritical             bool               `bson:"is_critical" json:"is_critical"`
+	IsExecuted             bool               `bson:"is_executed" json:"is_executed"`       // if the query has been executed
+	IsRolledBack           bool               `bson:"is_rolled_back" json:"is_rolled_back"` // if the query has been rolled back
+	Error                  *QueryError        `bson:"error,omitempty" json:"error,omitempty"`
+	ExampleResult          *string            `bson:"example_result,omitempty" json:"example_result,omitempty"`     // JSON string
+	ExecutionResult        *string            `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
 }
 
 type QueryError struct {

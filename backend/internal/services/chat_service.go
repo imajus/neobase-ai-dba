@@ -9,6 +9,7 @@ import (
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
 	"neobase-ai/internal/repositories"
+	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/dbmanager"
 	"neobase-ai/pkg/llm"
 	"net/http"
@@ -455,15 +456,50 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 			Data:  map[string]string{"error": err.Error()},
 		})
 	}
-	// Save response and send final message
-	respMsg := &models.Message{
-		Base:    models.NewBase(),
-		ChatID:  chatObjID,
-		UserID:  userObjID,
-		Content: response,
-		Type:    string(MessageTypeAssistant),
+
+	queries := []models.Query{}
+	for _, query := range jsonResponse["queries"].([]interface{}) {
+		queryMap := query.(map[string]interface{})
+		var exampleResult *string
+		log.Printf("processLLMResponse -> queryMap: %v", queryMap)
+		if queryMap["exampleResult"] != nil {
+			log.Printf("processLLMResponse -> queryMap[\"exampleResult\"]: %v", queryMap["exampleResult"])
+			result, _ := json.Marshal(queryMap["exampleResult"].([]interface{}))
+			exampleResult = utils.ToStringPtr(string(result))
+			log.Printf("processLLMResponse -> saving exampleResult: %v", *exampleResult)
+		} else {
+			exampleResult = nil
+			log.Println("processLLMResponse -> saving exampleResult: nil")
+		}
+
+		var rollbackDependentQuery *string
+		if queryMap["rollbackDependentQuery"] != nil {
+			rollbackDependentQuery = utils.ToStringPtr(queryMap["rollbackDependentQuery"].(string))
+		} else {
+			rollbackDependentQuery = nil
+		}
+		queries = append(queries, models.Query{
+			ID:                     primitive.NewObjectID(),
+			Query:                  queryMap["query"].(string),
+			Description:            queryMap["explanation"].(string),
+			ExecutionTime:          nil,
+			ExampleExecutionTime:   int(queryMap["estimateResponseTime"].(float64)),
+			CanRollback:            queryMap["canRollback"].(bool),
+			IsCritical:             queryMap["isCritical"].(bool),
+			IsExecuted:             false,
+			IsRolledBack:           false,
+			ExampleResult:          exampleResult,
+			ExecutionResult:        nil,
+			Error:                  nil,
+			QueryType:              utils.ToStringPtr(queryMap["queryType"].(string)),
+			Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
+			RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
+			RollbackDependentQuery: rollbackDependentQuery,
+		})
 	}
-	if err := s.chatRepo.CreateMessage(respMsg); err != nil {
+	// Save response and send final message
+	chatResponseMsg := models.NewMessage(userObjID, chatObjID, string(MessageTypeAssistant), jsonResponse["assistantMessage"].(string), &queries)
+	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "error",
 			Data:  map[string]string{"error": err.Error()},
@@ -477,7 +513,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 	llmMsg := &models.LLMMessage{
 		Base:      models.NewBase(),
 		ChatID:    chatObjID,
-		MessageID: respMsg.ID,
+		MessageID: chatResponseMsg.ID,
 		Content:   formattedJsonResponse,
 		Role:      string(MessageTypeAssistant),
 	}
@@ -489,11 +525,12 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "ai-response",
 		Data: &dtos.MessageResponse{
-			ID:        respMsg.ID.Hex(),
-			ChatID:    respMsg.ChatID.Hex(),
-			Content:   jsonResponse,
-			Type:      respMsg.Type,
-			CreatedAt: respMsg.CreatedAt.Format(time.RFC3339),
+			ID:        chatResponseMsg.ID.Hex(),
+			ChatID:    chatResponseMsg.ChatID.Hex(),
+			Content:   chatResponseMsg.Content,
+			Queries:   dtos.ToQueryDto(chatResponseMsg.Queries),
+			Type:      chatResponseMsg.Type,
+			CreatedAt: chatResponseMsg.CreatedAt.Format(time.RFC3339),
 		},
 	})
 }
@@ -634,18 +671,11 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 }
 
 func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageResponse {
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		log.Printf("Error unmarshalling message content: %v", err)
-		content = map[string]interface{}{
-			"user-message": msg.Content,
-		}
-	}
 	return &dtos.MessageResponse{
 		ID:        msg.ID.Hex(),
 		ChatID:    msg.ChatID.Hex(),
 		Type:      msg.Type,
-		Content:   content,
+		Content:   msg.Content,
 		Queries:   dtos.ToQueryDto(msg.Queries),
 		CreatedAt: msg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
