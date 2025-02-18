@@ -16,6 +16,7 @@ type LLMMessageRepository interface {
 	CreateMessage(msg *models.LLMMessage) error
 	UpdateMessage(id primitive.ObjectID, message *models.LLMMessage) error
 	FindMessageByID(id primitive.ObjectID) (*models.LLMMessage, error)
+	FindMessageByChatMessageID(messageID primitive.ObjectID) (*models.LLMMessage, error)
 	FindMessagesByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, int64, error)
 	DeleteMessagesByChatID(chatID primitive.ObjectID) error
 	GetByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, error)
@@ -96,4 +97,14 @@ func (r *llmMessageRepository) GetByChatID(chatID primitive.ObjectID) ([]*models
 
 	err = cursor.All(context.Background(), &messages)
 	return messages, err
+}
+
+// FindMessageByChatMessageID finds a message by the chat message ID(original message id)
+func (r *llmMessageRepository) FindMessageByChatMessageID(messageID primitive.ObjectID) (*models.LLMMessage, error) {
+	var message models.LLMMessage
+	err := r.messageCollection.FindOne(context.Background(), bson.M{"message_id": messageID}).Decode(&message)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	return &message, err
 }

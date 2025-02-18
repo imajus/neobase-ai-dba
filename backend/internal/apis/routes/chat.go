@@ -38,5 +38,10 @@ func SetupChatRoutes(router *gin.Engine) {
 		// SSE endpoints for streaming
 		protected.GET("/:id/stream", chatHandler.StreamChat)
 		protected.POST("/:id/stream/cancel", chatHandler.CancelStream)
+
+		// Query execution routes
+		protected.POST("/:id/queries/execute", chatHandler.ExecuteQuery)
+		protected.POST("/:id/queries/rollback", chatHandler.RollbackQuery)
+		protected.POST("/:id/queries/cancel", chatHandler.CancelQueryExecution)
 	}
 }

@@ -42,6 +42,9 @@ type ChatService interface {
 	DisconnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error)
 	GetDBConnectionStatus(ctx context.Context, userID, chatID string) (*dtos.ConnectionStatusResponse, uint32, error)
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
+	ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
+	RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
+	CancelQueryExecution(streamID string)
 }
 
 type chatService struct {
@@ -806,4 +809,475 @@ func isValidDBType(dbType string) bool {
 		}
 	}
 	return false
+}
+
+func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error) {
+	// Verify message and query ownership
+	msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
+	if err != nil {
+		return nil, http.StatusForbidden, err
+	}
+
+	log.Printf("ChatService -> ExecuteQuery -> msg: %+v", msg)
+	log.Printf("ChatService -> ExecuteQuery -> query: %+v", query)
+
+	// Check connection status and connect if needed
+	if !s.dbManager.IsConnected(chatID) {
+		log.Printf("ChatService -> ExecuteQuery -> Database not connected, initiating connection")
+		status, err := s.ConnectDB(ctx, userID, chatID, req.StreamID)
+		if err != nil {
+			return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+		}
+		// Give a small delay for connection to stabilize
+		time.Sleep(1 * time.Second)
+	}
+
+	// Execute query
+	result, err := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, false)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
+
+	// Update query status in message
+	query.IsRolledBack = false
+	query.IsExecuted = true
+	query.ExecutionTime = &result.ExecutionTime
+	if result.Error != nil {
+		query.Error = &models.QueryError{
+			Code:    result.Error.Code,
+			Message: result.Error.Message,
+			Details: result.Error.Details,
+		}
+	} else {
+		query.Error = nil
+	}
+	query.ExecutionResult = &result.ResultJSON
+
+	// Save updated message
+	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	// Update LLM message with query execution results
+	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
+	if err != nil {
+		log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
+	} else if llmMsg != nil {
+		// Get the existing content
+		content := llmMsg.Content
+		if content == nil {
+			content = make(map[string]interface{})
+		}
+
+		// Update the queries in the assistant response
+		if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
+			if queries, ok := assistantResponse["queries"].([]interface{}); ok {
+				for i, q := range queries {
+					if queryMap, ok := q.(map[string]interface{}); ok {
+						// Match the query by ID
+						if queryMap["id"] == query.ID.Hex() {
+							// Update execution results
+							queryMap["isExecuted"] = query.IsExecuted
+							queryMap["isRolledBack"] = query.IsRolledBack
+							queryMap["executionTime"] = query.ExecutionTime
+							queryMap["executionResult"] = result.Result
+							if query.Error != nil {
+								queryMap["error"] = query.Error
+							} else {
+								queryMap["error"] = nil
+							}
+							queries[i] = queryMap
+						}
+					}
+				}
+				assistantResponse["queries"] = queries
+				content["assistant_response"] = assistantResponse
+			}
+		}
+
+		// Save updated LLM message
+		llmMsg.Content = content
+		if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+			log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
+		}
+	}
+
+	// Send stream event
+	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+		Event: "query-executed",
+		Data: map[string]interface{}{
+			"message_id":       msg.ID.Hex(),
+			"query_id":         query.ID.Hex(),
+			"is_executed":      query.IsExecuted,
+			"is_rolled_back":   query.IsRolledBack,
+			"execution_time":   *query.ExecutionTime,
+			"execution_result": result.Result,
+			"error":            query.Error,
+		},
+	})
+
+	return &dtos.QueryExecutionResponse{
+		ChatID:          chatID,
+		MessageID:       msg.ID.Hex(),
+		QueryID:         query.ID.Hex(),
+		IsExecuted:      query.IsExecuted,
+		IsRolledBack:    query.IsRolledBack,
+		ExecutionTime:   *query.ExecutionTime,
+		ExecutionResult: result.Result,
+		Error:           result.Error,
+	}, http.StatusOK, nil
+}
+
+func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error) {
+	// Verify message and query ownership
+	msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
+	if err != nil {
+		return nil, http.StatusForbidden, err
+	}
+
+	log.Printf("ChatService -> RollbackQuery -> msg: %+v", msg)
+	log.Printf("ChatService -> RollbackQuery -> query: %+v", query)
+
+	// Validate query state
+	if !query.IsExecuted {
+		return nil, http.StatusBadRequest, fmt.Errorf("cannot rollback a query that hasn't been executed")
+	}
+	if query.IsRolledBack {
+		return nil, http.StatusBadRequest, fmt.Errorf("query already rolled back")
+	}
+
+	// Check if we need to generate rollback query
+	if query.RollbackQuery == nil && query.CanRollback {
+		// First execute the dependent query to get context
+		if query.RollbackDependentQuery == nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("rollback dependent query is required but not provided")
+		}
+
+		log.Printf("ChatService -> RollbackQuery -> Executing dependent query: %s", *query.RollbackDependentQuery)
+
+		// Check connection status and connect if needed
+		if !s.dbManager.IsConnected(chatID) {
+			log.Printf("ChatService -> RollbackQuery -> Database not connected, initiating connection")
+			status, err := s.ConnectDB(ctx, userID, chatID, req.StreamID)
+			if err != nil {
+				return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		// Execute dependent query
+		dependentResult, err := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, false)
+		if err != nil {
+			// Send event about dependent query failure
+			s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+				Event: "rollback-dependent-query-failed",
+				Data: map[string]interface{}{
+					"chat_id":    chatID,
+					"message_id": msg.ID.Hex(),
+					"query_id":   query.ID.Hex(),
+					"error":      err.Error(),
+				},
+			})
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute dependent query: %v", err)
+		}
+
+		// Get LLM context from previous messages
+		llmMsgs, err := s.llmRepo.GetByChatID(msg.ChatID)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to get LLM context: %v", err)
+		}
+
+		// Build context for LLM
+		var contextBuilder strings.Builder
+		contextBuilder.WriteString("Previous messages:\n")
+		for _, llmMsg := range llmMsgs {
+			if content, ok := llmMsg.Content["assistant_response"].(map[string]interface{}); ok {
+				contextBuilder.WriteString(fmt.Sprintf("Assistant: %v\n", content["content"]))
+			}
+			if content, ok := llmMsg.Content["user_message"].(string); ok {
+				contextBuilder.WriteString(fmt.Sprintf("User: %s\n", content))
+			}
+		}
+		contextBuilder.WriteString(fmt.Sprintf("\nQuery id: %s\n", query.ID.Hex())) // This will help LLM to understand the context of the query to be rolled back
+		contextBuilder.WriteString(fmt.Sprintf("\nOriginal query: %s\n", query.Query))
+		contextBuilder.WriteString(fmt.Sprintf("Dependent query result: %s\n", dependentResult.ResultJSON))
+		contextBuilder.WriteString("\nPlease generate a rollback query that will undo the effects of the original query.")
+
+		// Get connection info for db type
+		conn, exists := s.dbManager.GetConnectionInfo(chatID)
+		if !exists {
+			return nil, http.StatusBadRequest, fmt.Errorf("no database connection found")
+		}
+
+		// Convert LLM messages to expected format
+		llmMessages := make([]*models.LLMMessage, len(llmMsgs))
+		// Use copy to avoid modifying original messages
+		copy(llmMessages, llmMsgs)
+
+		// Get rollback query from LLM
+		llmResponse, err := s.llmClient.GenerateResponse(
+			ctx,
+			llmMessages,      // Pass the LLM messages array
+			conn.Config.Type, // Pass the database type
+		)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate rollback query: %v", err)
+		}
+
+		// Parse LLM response to get rollback query
+		var rollbackQuery string
+		var jsonResponse map[string]interface{}
+		if err := json.Unmarshal([]byte(llmResponse), &jsonResponse); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to parse LLM response: %v", err)
+		}
+
+		if assistantResponse, ok := jsonResponse["assistant_response"].(map[string]interface{}); ok {
+			if queries, ok := assistantResponse["queries"].([]interface{}); ok {
+				for i, q := range queries {
+					if qMap, ok := q.(map[string]interface{}); ok {
+						if qMap["id"] == query.ID.Hex() {
+							rollbackQuery = qMap["rollback_query"].(string)
+							// Update the query map with rollback info
+							qMap["rollback_query"] = rollbackQuery
+							queries[i] = qMap
+						}
+					}
+				}
+				// Update the queries in assistant response
+				assistantResponse["queries"] = queries
+			}
+		}
+
+		if rollbackQuery == "" {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate valid rollback query")
+		}
+
+		// Update query with rollback query
+		query.RollbackQuery = &rollbackQuery
+
+		// Update message in DB
+		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message with rollback query: %v", err)
+		}
+
+		// Update existing LLM message
+		llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
+		if err != nil {
+			log.Printf("ChatService -> RollbackQuery -> Error finding LLM message: %v", err)
+		} else if llmMsg != nil {
+			content := llmMsg.Content
+			if content == nil {
+				content = make(map[string]interface{})
+			}
+
+			if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
+				// Update the assistant response with new queries
+				if queries, ok := assistantResponse["queries"].([]interface{}); ok {
+					for i, q := range queries {
+						if qMap, ok := q.(map[string]interface{}); ok {
+							if qMap["id"] == query.ID.Hex() {
+								qMap["rollback_query"] = rollbackQuery
+								queries[i] = qMap
+							}
+						}
+					}
+					assistantResponse["queries"] = queries
+				}
+				content["assistant_response"] = assistantResponse
+			}
+
+			llmMsg.Content = content
+			if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+				log.Printf("ChatService -> RollbackQuery -> Error updating LLM message: %v", err)
+			}
+		}
+	}
+
+	// Now execute the rollback query
+	if query.RollbackQuery == nil {
+		// Send event about rollback query failure
+		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+			Event: "rollback-query-failed",
+			Data: map[string]interface{}{
+				"chat_id":    chatID,
+				"query_id":   query.ID.Hex(),
+				"message_id": msg.ID.Hex(),
+				"error":      "No rollback query available",
+			},
+		})
+		return nil, http.StatusBadRequest, fmt.Errorf("no rollback query available")
+	}
+
+	// Check connection status and connect if needed
+	if !s.dbManager.IsConnected(chatID) {
+		log.Printf("ChatService -> RollbackQuery -> Database not connected, initiating connection")
+		status, err := s.ConnectDB(ctx, userID, chatID, req.StreamID)
+		if err != nil {
+			return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	// Execute rollback query
+	result, err := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, true)
+	if err != nil {
+		// Send event about rollback query failure
+		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+			Event: "rollback-query-failed",
+			Data: map[string]interface{}{
+				"chat_id":    chatID,
+				"query_id":   query.ID.Hex(),
+				"message_id": msg.ID.Hex(),
+				"error":      err.Error(),
+			},
+		})
+		return nil, http.StatusInternalServerError, err
+	}
+
+	log.Printf("ChatService -> RollbackQuery -> result: %+v", result)
+
+	// Update query status
+	// We're using same execution time & result for rollback as the original query
+	query.IsRolledBack = true
+	query.ExecutionTime = &result.ExecutionTime
+	if result.Error != nil {
+		query.Error = &models.QueryError{
+			Code:    result.Error.Code,
+			Message: result.Error.Message,
+			Details: result.Error.Details,
+		}
+	} else {
+		query.Error = nil
+	}
+	query.ExecutionResult = &result.ResultJSON
+
+	// Save updated message
+	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	// Update LLM message with rollback results
+	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
+	if err != nil {
+		log.Printf("ChatService -> RollbackQuery -> Error finding LLM message: %v", err)
+	} else if llmMsg != nil {
+		content := llmMsg.Content
+		if content == nil {
+			content = make(map[string]interface{})
+		}
+
+		if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
+			if queries, ok := assistantResponse["queries"].([]interface{}); ok {
+				for i, q := range queries {
+					if queryMap, ok := q.(map[string]interface{}); ok {
+						if queryMap["id"] == query.ID.Hex() {
+							queryMap["isRolledBack"] = query.IsRolledBack
+							queryMap["executionTime"] = query.ExecutionTime
+							queryMap["executionResult"] = result.Result
+							if query.Error != nil {
+								queryMap["error"] = query.Error
+							} else {
+								queryMap["error"] = nil
+							}
+							queries[i] = queryMap
+						}
+					}
+				}
+				assistantResponse["queries"] = queries
+				content["assistant_response"] = assistantResponse
+			}
+		}
+
+		llmMsg.Content = content
+		if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+			log.Printf("ChatService -> RollbackQuery -> Error updating LLM message: %v", err)
+		}
+	}
+
+	// Send stream event
+	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+		Event: "rollback-executed",
+		Data: map[string]interface{}{
+			"message_id":       msg.ID.Hex(),
+			"query_id":         query.ID.Hex(),
+			"is_executed":      query.IsExecuted,
+			"is_rolled_back":   query.IsRolledBack,
+			"execution_time":   query.ExecutionTime,
+			"execution_result": result.Result,
+			"error":            query.Error,
+		},
+	})
+
+	return &dtos.QueryExecutionResponse{
+		ChatID:          chatID,
+		MessageID:       msg.ID.Hex(),
+		QueryID:         query.ID.Hex(),
+		IsExecuted:      query.IsExecuted,
+		IsRolledBack:    query.IsRolledBack,
+		ExecutionTime:   *query.ExecutionTime,
+		ExecutionResult: result.Result,
+		Error:           result.Error,
+	}, http.StatusOK, nil
+}
+
+func (s *chatService) CancelQueryExecution(streamID string) {
+	log.Printf("ChatService -> CancelQueryExecution -> Cancelling query for streamID: %s", streamID)
+
+	// Cancel the query execution in dbManager
+	s.dbManager.CancelQueryExecution(streamID)
+
+	// Send stream event for cancellation
+	s.sendStreamEvent("", "", streamID, dtos.StreamResponse{
+		Event: "query-cancelled",
+		Data: map[string]interface{}{
+			"stream_id": streamID,
+			"message":   "Query execution cancelled",
+		},
+	})
+}
+
+// Add helper method to verify query ownership
+func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string) (*models.Message, *models.Query, error) {
+	// Convert IDs to ObjectIDs
+	msgObjID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid message ID format")
+	}
+
+	queryObjID, err := primitive.ObjectIDFromHex(queryID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid query ID format")
+	}
+
+	// Get message
+	msg, err := s.chatRepo.FindMessageByID(msgObjID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch message: %v", err)
+	}
+	if msg == nil {
+		return nil, nil, fmt.Errorf("message not found")
+	}
+
+	// Verify chat ownership
+	if msg.ChatID.Hex() != chatID {
+		return nil, nil, fmt.Errorf("message does not belong to this chat")
+	}
+
+	// Find query in message
+	var targetQuery *models.Query
+	if msg.Queries != nil {
+		for _, q := range *msg.Queries {
+			if q.ID == queryObjID {
+				targetQuery = &q
+				break
+			}
+		}
+	}
+	if targetQuery == nil {
+		return nil, nil, fmt.Errorf("query not found in message")
+	}
+
+	return msg, targetQuery, nil
 }

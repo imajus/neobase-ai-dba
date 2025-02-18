@@ -21,7 +21,7 @@ type Query struct {
 	Description            string             `bson:"description" json:"description"`
 	RollbackDependentQuery *string            `bson:"rollback_dependent_query,omitempty" json:"rollback_dependent_query,omitempty"` // ID of the query that this query depends on
 	RollbackQuery          *string            `bson:"rollback_query,omitempty" json:"rollback_query,omitempty"`                     // the query to rollback the query
-	ExecutionTime          *int               `bson:"execution_time" json:"execution_time"`                                         // in milliseconds
+	ExecutionTime          *int               `bson:"execution_time" json:"execution_time"`                                         // in milliseconds, same for execution & rollback query
 	ExampleExecutionTime   int                `bson:"example_execution_time" json:"example_execution_time"`                         // in milliseconds
 	CanRollback            bool               `bson:"can_rollback" json:"can_rollback"`
 	IsCritical             bool               `bson:"is_critical" json:"is_critical"`

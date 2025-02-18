@@ -459,3 +459,61 @@ func (h *ChatHandler) GetDBConnectionStatus(c *gin.Context) {
 		Data:    status,
 	})
 }
+
+// Add query execution methods
+func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
+	userID := c.GetString("user_id")
+	chatID := c.Param("id")
+
+	var req dtos.ExecuteQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Execute query
+	response, status, err := h.chatService.ExecuteQuery(c.Request.Context(), userID, chatID, &req)
+	if err != nil {
+		c.JSON(int(status), gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(int(status), response)
+}
+
+func (h *ChatHandler) RollbackQuery(c *gin.Context) {
+	userID := c.GetString("user_id")
+	chatID := c.Param("id")
+
+	var req dtos.RollbackQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Execute rollback
+	response, status, err := h.chatService.RollbackQuery(c.Request.Context(), userID, chatID, &req)
+	if err != nil {
+		c.JSON(int(status), gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(int(status), response)
+}
+
+func (h *ChatHandler) CancelQueryExecution(c *gin.Context) {
+	var req dtos.CancelQueryExecutionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Cancel execution
+	h.chatService.CancelQueryExecution(req.StreamID)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Query execution cancelled",
+		"data": map[string]interface{}{
+			"stream_id": req.StreamID,
+		},
+	})
+}

@@ -13,28 +13,29 @@ import (
 )
 
 const (
-	cleanupInterval = 2 * time.Minute  // Check every 30 seconds
-	idleTimeout     = 10 * time.Minute // Close after 10 seconds of inactivity
+	cleanupInterval = 5 * time.Minute  // Check every 5 minutes
+	idleTimeout     = 10 * time.Minute // Close after 10 minutes of inactivity
 )
 
-// DatabaseDriver interface that all database drivers must implement
-type DatabaseDriver interface {
-	Connect(config ConnectionConfig) (*Connection, error)
-	Disconnect(conn *Connection) error
-	Ping(conn *Connection) error
-	IsAlive(conn *Connection) bool
+type cleanupMetrics struct {
+	lastRun            time.Time
+	connectionsRemoved int
+	executionsRemoved  int
 }
 
 // Manager handles database connections
 type Manager struct {
-	connections   map[string]*Connection    // chatID -> connection
-	drivers       map[string]DatabaseDriver // type -> driver
-	mu            sync.RWMutex
-	redisRepo     redis.IRedisRepositories
-	stopCleanup   chan struct{} // Channel to stop cleanup routine
-	eventChan     chan SSEEvent // Channel for SSE events
-	schemaManager *SchemaManager
-	streamHandler StreamHandler // Changed from *StreamHandler to StreamHandler
+	connections      map[string]*Connection    // chatID -> connection
+	drivers          map[string]DatabaseDriver // type -> driver
+	mu               sync.RWMutex
+	redisRepo        redis.IRedisRepositories
+	stopCleanup      chan struct{} // Channel to stop cleanup routine
+	eventChan        chan SSEEvent // Channel for SSE events
+	schemaManager    *SchemaManager
+	streamHandler    StreamHandler              // Changed from *StreamHandler to StreamHandler
+	activeExecutions map[string]*QueryExecution // key: streamID
+	executionMu      sync.RWMutex
+	cleanupMetrics   cleanupMetrics
 }
 
 // NewManager creates a new connection manager
@@ -45,16 +46,28 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 	}
 
 	m := &Manager{
-		connections:   make(map[string]*Connection),
-		drivers:       make(map[string]DatabaseDriver),
-		redisRepo:     redisRepo,
-		stopCleanup:   make(chan struct{}),
-		eventChan:     make(chan SSEEvent, 100),
-		schemaManager: schemaManager,
+		connections:      make(map[string]*Connection),
+		drivers:          make(map[string]DatabaseDriver),
+		redisRepo:        redisRepo,
+		stopCleanup:      make(chan struct{}),
+		eventChan:        make(chan SSEEvent, 100),
+		schemaManager:    schemaManager,
+		activeExecutions: make(map[string]*QueryExecution),
+		executionMu:      sync.RWMutex{},
 	}
 
-	// Start cleanup routine
-	go m.startCleanupRoutine()
+	// Start cleanup routine in a separate goroutine with error handling
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("DBManager -> Cleanup routine panic recovered: %v", r)
+				// Restart the cleanup routine
+				go m.startCleanupRoutine()
+			}
+		}()
+		m.startCleanupRoutine()
+	}()
+
 	return m, nil
 }
 
@@ -117,10 +130,9 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 
 	// Initialize subscribers map with existing subscribers
 	conn.Subscribers = make(map[string]bool)
-	if existingSubscribers != nil {
-		for id := range existingSubscribers {
-			conn.Subscribers[id] = true
-		}
+
+	for id := range existingSubscribers {
+		conn.Subscribers[id] = true
 	}
 	// Add current streamID if not already present
 	conn.Subscribers[streamID] = true
@@ -279,111 +291,145 @@ func (m *Manager) startCleanupRoutine() {
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
 
+	log.Printf("DBManager -> startCleanupRoutine -> Starting cleanup routine with interval: %v", cleanupInterval)
+
 	for {
 		select {
+		case <-m.stopCleanup:
+			log.Printf("DBManager -> startCleanupRoutine -> Cleanup routine stopped")
+			return
 		case <-ticker.C:
 			m.cleanup()
-		case <-m.stopCleanup:
-			return
 		}
 	}
 }
 
-// cleanup closes inactive connections
+// cleanup closes inactive connections and cleans up stale executions
 func (m *Manager) cleanup() {
+	start := time.Now()
+	connectionsRemoved := 0
+	executionsRemoved := 0
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now()
 	for chatID, conn := range m.connections {
-		if now.Sub(conn.LastUsed) < idleTimeout {
-			continue
-		}
-
-		log.Printf("DBManager -> cleanup -> Found idle connection for chatID: %s", chatID)
-
-		// Store subscribers before cleanup
-		subscribers := make(map[string]bool)
-		conn.SubLock.RLock()
-		for id := range conn.Subscribers {
-			subscribers[id] = true
-		}
-		// Use stored fields
-		userID := conn.UserID
-		streamID := conn.StreamID
-		conn.SubLock.RUnlock()
-
-		// Get driver and disconnect
+		// First check if connection is still active
 		if conn.DB != nil {
-			if driver, exists := m.drivers[conn.Config.Type]; exists {
-				if err := driver.Disconnect(conn); err != nil {
-					log.Printf("DBManager -> cleanup -> Failed to disconnect: %v", err)
-					continue
+			sqlDB, err := conn.DB.DB()
+			if err != nil || sqlDB.Ping() != nil {
+				log.Printf("DBManager -> cleanup -> Connection for chatID %s is no longer active", chatID)
+				// Force cleanup of dead connection
+				if driver, exists := m.drivers[conn.Config.Type]; exists {
+					driver.Disconnect(conn)
 				}
+				delete(m.connections, chatID)
+				connectionsRemoved++
+				continue
+			}
+		}
+
+		if time.Since(conn.LastUsed) > idleTimeout {
+			log.Printf("DBManager -> cleanup -> Found idle connection for chatID: %s, last used: %v",
+				chatID, conn.LastUsed)
+
+			// Get driver for this connection
+			driver, exists := m.drivers[conn.Config.Type]
+			if !exists {
+				log.Printf("DBManager -> cleanup -> No driver found for type: %s", conn.Config.Type)
+				continue
 			}
 
-			// Remove from cache
+			// Disconnect
+			if err := driver.Disconnect(conn); err != nil {
+				log.Printf("DBManager -> cleanup -> Error disconnecting: %v", err)
+				continue
+			}
+
+			// Remove from connections map
+			delete(m.connections, chatID)
+			log.Printf("DBManager -> cleanup -> Removed inactive connection for chatID: %s", chatID)
+
+			// Remove from Redis
 			ctx := context.Background()
 			connKey := fmt.Sprintf("conn:%s", chatID)
 			if err := m.redisRepo.Del(connKey, ctx); err != nil {
 				log.Printf("DBManager -> cleanup -> Failed to remove connection state from cache: %v", err)
 			}
-		}
 
-		// Delete the connection
-		delete(m.connections, chatID)
-		log.Printf("DBManager -> cleanup -> Removed idle connection for chatID: %s", chatID)
-
-		log.Printf("DBManager -> cleanup -> Subscribers: %+v", subscribers)
-		// Notify subscribers in a separate goroutine
-		if len(subscribers) > 0 {
-			go func(chatID, userID, streamID string, subs map[string]bool) {
-				log.Printf("DBManager -> cleanup -> Notifying %d subscribers for chatID: %s", len(subs), chatID)
-				for subStreamID := range subs {
-					response := dtos.StreamResponse{
-						Event: string(StatusDisconnected),
-						Data:  "Connection closed due to inactivity",
-					}
-
-					if m.streamHandler != nil {
-						log.Printf("DBManager -> cleanup -> Going to notify subscriber %s of cleanup disconnection", subStreamID)
-						m.streamHandler.HandleDBEvent(userID, chatID, subStreamID, response)
-						log.Printf("DBManager -> cleanup -> Notified subscriber %s of cleanup disconnection", subStreamID)
-					}
-				}
-			}(chatID, userID, streamID, subscribers)
+			connectionsRemoved++
 		}
 	}
+	m.mu.Unlock()
+
+	// Cleanup stale executions
+	m.executionMu.Lock()
+	for streamID, execution := range m.activeExecutions {
+		// Check if execution has been running for too long (e.g., > 10 minutes)
+		if time.Since(execution.StartTime) > 10*time.Minute {
+			log.Printf("DBManager -> cleanup -> Found stale execution for streamID: %s, started: %v",
+				streamID, execution.StartTime)
+
+			// Cancel the execution
+			execution.CancelFunc()
+
+			// Rollback transaction if it exists
+			if execution.Tx != nil {
+				if err := execution.Tx.Rollback(); err != nil {
+					log.Printf("DBManager -> cleanup -> Error rolling back transaction: %v", err)
+				}
+			}
+
+			delete(m.activeExecutions, streamID)
+			log.Printf("DBManager -> cleanup -> Cleaned up stale execution for streamID: %s", streamID)
+
+			executionsRemoved++
+		}
+	}
+	m.executionMu.Unlock()
+
+	// Update metrics
+	m.cleanupMetrics = cleanupMetrics{
+		lastRun:            start,
+		connectionsRemoved: connectionsRemoved,
+		executionsRemoved:  executionsRemoved,
+	}
+
+	log.Printf("DBManager -> cleanup -> Completed in %v. Removed %d connections and %d executions",
+		time.Since(start), connectionsRemoved, executionsRemoved)
 }
 
 // Stop gracefully stops the manager and cleans up resources
 func (m *Manager) Stop() error {
-	// Signal cleanup routine to stop
+	log.Printf("DBManager -> Stop -> Stopping manager")
+
+	// Stop cleanup routine
 	close(m.stopCleanup)
 
-	// Close all active connections
+	// Clean up all active connections
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	for chatID, conn := range m.connections {
-		driver, exists := m.drivers[conn.Config.Type]
-		if !exists {
-			continue
-		}
-
-		if err := driver.Disconnect(conn); err != nil {
-			log.Printf("Failed to disconnect chat %s: %v", chatID, err)
-		}
-
-		ctx := context.Background()
-		connKey := fmt.Sprintf("conn:%s", chatID)
-		if err := m.redisRepo.Del(connKey, ctx); err != nil {
-			log.Printf("Failed to remove connection state from cache for chat %s: %v", chatID, err)
+		if driver, exists := m.drivers[conn.Config.Type]; exists {
+			if err := driver.Disconnect(conn); err != nil {
+				log.Printf("DBManager -> Stop -> Error disconnecting %s: %v", chatID, err)
+			}
 		}
 	}
-
-	// Clear connections map
 	m.connections = make(map[string]*Connection)
+	m.mu.Unlock()
+
+	// Cancel all active executions
+	m.executionMu.Lock()
+	for streamID, execution := range m.activeExecutions {
+		execution.CancelFunc()
+		if execution.Tx != nil {
+			if err := execution.Tx.Rollback(); err != nil {
+				log.Printf("DBManager -> Stop -> Error rolling back transaction for %s: %v", streamID, err)
+			}
+		}
+	}
+	m.activeExecutions = make(map[string]*QueryExecution)
+	m.executionMu.Unlock()
+
+	log.Printf("DBManager -> Stop -> Manager stopped successfully")
 	return nil
 }
 
@@ -630,4 +676,114 @@ type ConnectionInfo struct {
 // SetStreamHandler sets the stream handler for database events
 func (m *Manager) SetStreamHandler(handler StreamHandler) {
 	m.streamHandler = handler
+}
+
+type QueryExecution struct {
+	QueryID     string
+	MessageID   string
+	StartTime   time.Time
+	IsExecuting bool
+	IsRollback  bool
+	Tx          Transaction // Changed from *sql.Tx to Transaction
+	CancelFunc  context.CancelFunc
+}
+
+func (m *Manager) CancelQueryExecution(streamID string) {
+	m.executionMu.Lock()
+	defer m.executionMu.Unlock()
+
+	if execution, exists := m.activeExecutions[streamID]; exists {
+		log.Printf("Cancelling query execution for streamID: %s", streamID)
+
+		// Cancel the context first
+		execution.CancelFunc()
+
+		// Rollback transaction if it exists
+		if execution.Tx != nil {
+			if err := execution.Tx.Rollback(); err != nil {
+				log.Printf("Error rolling back transaction: %v", err)
+			}
+		}
+
+		delete(m.activeExecutions, streamID)
+		log.Printf("Query execution cancelled for streamID: %s", streamID)
+	}
+}
+
+func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, isRollback bool) (*QueryExecutionResult, error) {
+	m.executionMu.Lock()
+
+	// Create cancellable context with timeout
+	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute timeout
+
+	// Track execution
+	execution := &QueryExecution{
+		QueryID:     queryID,
+		MessageID:   messageID,
+		StartTime:   time.Now(),
+		IsExecuting: true,
+		IsRollback:  isRollback,
+		CancelFunc:  cancel,
+	}
+	m.activeExecutions[streamID] = execution
+	m.executionMu.Unlock()
+
+	// Ensure cleanup
+	defer func() {
+		m.executionMu.Lock()
+		delete(m.activeExecutions, streamID)
+		m.executionMu.Unlock()
+		cancel()
+	}()
+
+	// Get connection and driver
+	conn, exists := m.connections[chatID]
+	if !exists {
+		return nil, fmt.Errorf("no connection found")
+	}
+
+	driver, exists := m.drivers[conn.Config.Type]
+	if !exists {
+		return nil, fmt.Errorf("no driver found for type: %s", conn.Config.Type)
+	}
+
+	// Begin transaction
+	tx, err := driver.BeginTx(execCtx, conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %v", err)
+	}
+	execution.Tx = tx
+
+	// Execute query with proper cancellation handling
+	var result *QueryExecutionResult
+	done := make(chan struct{})
+	var queryErr error
+
+	go func() {
+		defer close(done)
+		result, queryErr = tx.ExecuteQuery(execCtx, query)
+	}()
+
+	select {
+	case <-execCtx.Done():
+		if err := tx.Rollback(); err != nil {
+			log.Printf("Error rolling back transaction: %v", err)
+		}
+		if execCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("query execution timed out")
+		}
+		return nil, fmt.Errorf("query execution cancelled")
+
+	case <-done:
+		if queryErr != nil {
+			if err := tx.Rollback(); err != nil {
+				log.Printf("Error rolling back transaction: %v", err)
+			}
+			return result, queryErr
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("failed to commit transaction: %v", err)
+		}
+		return result, nil
+	}
 }

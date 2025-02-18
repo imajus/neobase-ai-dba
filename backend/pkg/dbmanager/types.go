@@ -1,6 +1,7 @@
 package dbmanager
 
 import (
+	"context"
 	"neobase-ai/internal/apis/dtos"
 	"sync"
 	"time"
@@ -54,4 +55,29 @@ type SSEEvent struct {
 // StreamHandler interface for handling database events
 type StreamHandler interface {
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
+}
+
+// QueryExecutionResult represents the result of a query execution
+type QueryExecutionResult struct {
+	Result        map[string]interface{} `json:"result"`
+	ResultJSON    string                 `json:"result_json"`
+	ExecutionTime int                    `json:"execution_time"`
+	Error         *dtos.QueryError       `json:"error,omitempty"`
+}
+
+type DatabaseDriver interface {
+	Connect(config ConnectionConfig) (*Connection, error)
+	Disconnect(conn *Connection) error
+	Ping(conn *Connection) error
+	IsAlive(conn *Connection) bool
+	// Add new methods for query execution
+	ExecuteQuery(ctx context.Context, conn *Connection, query string) (*QueryExecutionResult, error)
+	BeginTx(ctx context.Context, conn *Connection) (Transaction, error)
+}
+
+// Add new Transaction interface
+type Transaction interface {
+	ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error)
+	Commit() error
+	Rollback() error
 }

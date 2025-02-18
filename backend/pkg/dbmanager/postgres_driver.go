@@ -1,11 +1,14 @@
 package dbmanager
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log"
+	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/utils"
 	"time"
-
-	"log"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -94,4 +97,150 @@ func (d *PostgresDriver) IsAlive(conn *Connection) bool {
 		return false
 	}
 	return sqlDB.Ping() == nil
+}
+
+func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string) (*QueryExecutionResult, error) {
+	startTime := time.Now()
+
+	sqlDB, err := conn.DB.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SQL connection: %v", err)
+	}
+
+	rows, err := sqlDB.QueryContext(ctx, query)
+	if err != nil {
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "QUERY_ERROR",
+				Message: "Query execution failed",
+				Details: err.Error(),
+			},
+		}, err
+	}
+	defer rows.Close()
+
+	return d.processRows(rows, startTime)
+}
+
+func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) (Transaction, error) {
+	sqlDB, err := conn.DB.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SQL connection: %v", err)
+	}
+
+	tx, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PostgresTransaction{tx: tx}, nil
+}
+
+// Add PostgreSQL transaction implementation
+type PostgresTransaction struct {
+	tx *sql.Tx
+}
+
+func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error) {
+	startTime := time.Now()
+
+	rows, err := t.tx.QueryContext(ctx, query)
+	if err != nil {
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "QUERY_ERROR",
+				Message: "Query execution failed",
+				Details: err.Error(),
+			},
+		}, err
+	}
+	defer rows.Close()
+
+	return (&PostgresDriver{}).processRows(rows, startTime)
+}
+
+func (t *PostgresTransaction) Commit() error {
+	return t.tx.Commit()
+}
+
+func (t *PostgresTransaction) Rollback() error {
+	return t.tx.Rollback()
+}
+
+// Helper method to process rows
+func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) (*QueryExecutionResult, error) {
+	columns, err := rows.Columns()
+	if err != nil {
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "METADATA_ERROR",
+				Message: "Failed to get column metadata",
+				Details: err.Error(),
+			},
+		}, err
+	}
+
+	result := make([]map[string]interface{}, 0)
+
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+
+		for i := range columns {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return &QueryExecutionResult{
+				ExecutionTime: int(time.Since(startTime).Milliseconds()),
+				Error: &dtos.QueryError{
+					Code:    "SCAN_ERROR",
+					Message: "Failed to scan row data",
+					Details: err.Error(),
+				},
+			}, err
+		}
+
+		entry := make(map[string]interface{})
+		for i, col := range columns {
+			var v interface{}
+			val := values[i]
+			b, ok := val.([]byte)
+			if ok {
+				v = string(b)
+			} else {
+				v = val
+			}
+			entry[col] = v
+		}
+		result = append(result, entry)
+	}
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "JSON_ERROR",
+				Message: "Failed to marshal result to JSON",
+				Details: err.Error(),
+			},
+		}, err
+	}
+
+	var resultMap map[string]interface{}
+	if len(result) > 0 {
+		resultMap = result[0]
+	} else {
+		resultMap = make(map[string]interface{})
+	}
+
+	return &QueryExecutionResult{
+		Result:        resultMap,
+		ResultJSON:    string(resultJSON),
+		ExecutionTime: int(time.Since(startTime).Milliseconds()),
+	}, nil
 }
