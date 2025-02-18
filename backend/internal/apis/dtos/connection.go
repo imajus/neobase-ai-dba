@@ -10,11 +10,9 @@ type ConnectionStatusResponse struct {
 }
 
 type ConnectDBRequest struct {
-	ChatID   string `json:"chat_id" binding:"required"`
 	StreamID string `json:"stream_id" binding:"required"`
 }
 
 type DisconnectDBRequest struct {
-	ChatID   string `json:"chat_id" binding:"required"`
 	StreamID string `json:"stream_id" binding:"required"`
 }

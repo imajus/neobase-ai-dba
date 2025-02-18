@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
 	"neobase-ai/internal/repositories"
 	"neobase-ai/pkg/dbmanager"
@@ -18,6 +19,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// Used by Handler
 type StreamHandler interface {
 	HandleStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 }
@@ -37,6 +39,7 @@ type ChatService interface {
 	ConnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error)
 	DisconnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error)
 	GetDBConnectionStatus(ctx context.Context, userID, chatID string) (*dtos.ConnectionStatusResponse, uint32, error)
+	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 }
 
 type chatService struct {
@@ -67,6 +70,7 @@ func NewChatService(
 }
 
 func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error) {
+	log.Printf("Creating chat for user %s", userID)
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
@@ -80,7 +84,6 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Username: &req.Connection.Username,
 		Password: &req.Connection.Password,
 		Database: req.Connection.Database,
-		IsActive: true,
 		Base:     models.NewBase(),
 	}
 
@@ -117,7 +120,6 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	}
 
 	// Update chat fields
-	chat.IsActive = req.IsActive
 	if req.Connection != (dtos.CreateConnectionRequest{}) {
 		chat.Connection = models.Connection{
 			Type:     req.Connection.Type,
@@ -126,7 +128,6 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			Username: &req.Connection.Username,
 			Password: &req.Connection.Password,
 			Database: req.Connection.Database,
-			IsActive: true,
 			Base:     models.NewBase(),
 		}
 	}
@@ -591,7 +592,6 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			Username: *chat.Connection.Username,
 			Database: chat.Connection.Database,
 		},
-		IsActive:  chat.IsActive,
 		CreatedAt: chat.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: chat.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -641,13 +641,18 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		return http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 	}
 
+	log.Printf("ChatService -> ConnectDB -> chatDetails: %+v", chatDetails)
+
 	// Validate connection type
 	if !isValidDBType(chatDetails.Connection.Type) {
 		return http.StatusBadRequest, fmt.Errorf("unsupported database type")
 	}
 
+	// Subscribe to connection status updates before connecting
+	s.dbManager.Subscribe(chatID, streamID)
+
 	// Attempt to connect
-	if err := s.dbManager.Connect(chatID, userID, dbmanager.ConnectionConfig{
+	if err := s.dbManager.Connect(chatID, userID, streamID, dbmanager.ConnectionConfig{
 		Type:     chatDetails.Connection.Type,
 		Host:     chatDetails.Connection.Host,
 		Port:     chatDetails.Connection.Port,
@@ -655,10 +660,12 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		Password: chatDetails.Connection.Password,
 		Database: chatDetails.Connection.Database,
 	}); err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("failed to connect: %v", err)
+		return http.StatusBadRequest, fmt.Errorf("failed to connect: %v", err)
 	}
 
-	// Send stream event if handler exists
+	log.Printf("ChatService -> ConnectDB -> connected to chat: %s", chatID)
+
+	// Send to stream handler
 	if s.streamHandler != nil {
 		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "db-connected",
@@ -669,19 +676,27 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 	return http.StatusOK, nil
 }
 
-func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID, streamID string) (uint32, error) {
-	if err := s.dbManager.Disconnect(chatID, userID); err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("failed to disconnect: %v", err)
-	}
-
-	// Send stream event if handler exists
+// Add method to handle DB status events
+func (s *chatService) HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse) {
+	// Send to stream handler
 	if s.streamHandler != nil {
-		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "db-disconnected",
-			Data:  "Database disconnected successfully",
-		})
+		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, response)
+	}
+}
+
+func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error) {
+	log.Printf("ChatService -> DisconnectDB -> Starting for chatID: %s", chatID)
+
+	// Subscribe to connection status updates before disconnecting
+	s.dbManager.Subscribe(chatID, streamID)
+	log.Printf("ChatService -> DisconnectDB -> Subscribed to updates with streamID: %s", streamID)
+
+	if err := s.dbManager.Disconnect(chatID, userID); err != nil {
+		log.Printf("ChatService -> DisconnectDB -> failed to disconnect: %v", err)
+		return http.StatusBadRequest, fmt.Errorf("failed to disconnect: %v", err)
 	}
 
+	log.Printf("ChatService -> DisconnectDB -> disconnected from chat: %s", chatID)
 	return http.StatusOK, nil
 }
 
@@ -712,7 +727,7 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 }
 
 func isValidDBType(dbType string) bool {
-	validTypes := []string{"postgresql", "mysql"} // Add more as supported
+	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB} // Add more as supported
 	for _, t := range validTypes {
 		if t == dbType {
 			return true

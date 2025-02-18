@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"neobase-ai/pkg/redis"
 	"reflect"
 	"sort"
@@ -209,13 +210,18 @@ func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExec
 
 // Update CheckSchemaChanges to include dbType
 func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaDiff, error) {
+	log.Printf("SchemaManager -> CheckSchemaChanges -> chatID: %s", chatID)
 	currentSchema, err := sm.fetchSchema(ctx, db, dbType)
 	if err != nil {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> error fetching schema: %v", err)
 		return nil, err
 	}
 
+	log.Printf("SchemaManager -> CheckSchemaChanges -> currentSchema: %+v", currentSchema)
+
 	storage, err := sm.getStoredSchema(ctx, chatID)
 	if err != nil {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> error getting stored schema: %v", err)
 		// If no previous schema, treat current as initial
 		if err := sm.storeSchema(ctx, chatID, currentSchema); err != nil {
 			return nil, err
@@ -223,14 +229,18 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 		return nil, nil
 	}
 
+	log.Printf("SchemaManager -> CheckSchemaChanges -> storage: %+v", storage)
+
 	// Compare schemas
 	if currentSchema.Checksum == storage.FullSchema.Checksum {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> no changes")
 		return nil, nil
 	}
 
 	// Generate diff
 	diff := sm.generateDiff(storage.FullSchema, currentSchema)
 	if diff == nil {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> no changes")
 		return nil, nil
 	}
 
@@ -239,7 +249,9 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 	sm.schemaCache[chatID] = currentSchema
 	sm.mu.Unlock()
 
+	log.Printf("SchemaManager -> CheckSchemaChanges -> storing schema")
 	if err := sm.storeSchema(ctx, chatID, currentSchema); err != nil {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> error storing schema: %v", err)
 		return nil, err
 	}
 

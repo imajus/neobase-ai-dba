@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/pkg/redis"
 )
 
 const (
-	cleanupInterval = 2 * time.Minute  // Check every 2 minutes
-	idleTimeout     = 10 * time.Minute // Close after 10 minutes of inactivity
+	cleanupInterval = 2 * time.Minute  // Check every 30 seconds
+	idleTimeout     = 10 * time.Minute // Close after 10 seconds of inactivity
 )
 
 // DatabaseDriver interface that all database drivers must implement
@@ -33,6 +34,7 @@ type Manager struct {
 	stopCleanup   chan struct{} // Channel to stop cleanup routine
 	eventChan     chan SSEEvent // Channel for SSE events
 	schemaManager *SchemaManager
+	streamHandler StreamHandler // Changed from *StreamHandler to StreamHandler
 }
 
 // NewManager creates a new connection manager
@@ -59,53 +61,106 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 // RegisterDriver registers a new database driver
 func (m *Manager) RegisterDriver(dbType string, driver DatabaseDriver) {
 	m.drivers[dbType] = driver
+	log.Printf("DBManager -> Registered driver for type: %s", dbType)
 }
 
 // Connect creates a new database connection
-func (m *Manager) Connect(chatID, userID string, config ConnectionConfig) error {
+func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if connection already exists
-	if conn, exists := m.connections[chatID]; exists && conn.Status == StatusConnected {
-		return fmt.Errorf("connection already exists for chat ID: %s", chatID)
+	log.Printf("DBManager -> Connect -> Starting connection for chatID: %s", chatID)
+
+	// Get existing subscribers if connection exists
+	var existingSubscribers map[string]bool
+	if existingConn, exists := m.connections[chatID]; exists {
+		existingConn.SubLock.RLock()
+		existingSubscribers = make(map[string]bool)
+		for id := range existingConn.Subscribers {
+			existingSubscribers[id] = true
+		}
+		existingConn.SubLock.RUnlock()
+		log.Printf("DBManager -> Connect -> Preserving existing subscribers: %+v", existingSubscribers)
 	}
 
 	// Get appropriate driver
 	driver, exists := m.drivers[config.Type]
 	if !exists {
+		log.Printf("DBManager -> Connect -> No driver found for type: %s", config.Type)
 		return fmt.Errorf("unsupported database type: %s", config.Type)
 	}
+
+	log.Printf("DBManager -> Connect -> Found driver for type: %s", config.Type)
 
 	// Create connection
 	conn, err := driver.Connect(config)
 	if err != nil {
+		log.Printf("DBManager -> Connect -> Driver connection failed: %v", err)
 		return fmt.Errorf("failed to connect: %v", err)
 	}
 
-	// Set initial last used time
+	log.Printf("DBManager -> Connect -> Driver connection successful")
+
+	// Initialize connection fields
 	conn.LastUsed = time.Now()
+	conn.Status = StatusConnected
+	conn.Config = config
+	conn.UserID = userID
+	conn.ChatID = chatID
+	conn.StreamID = streamID
+
+	// Initialize subscribers map with existing subscribers
+	conn.Subscribers = make(map[string]bool)
+	if existingSubscribers != nil {
+		for id := range existingSubscribers {
+			conn.Subscribers[id] = true
+		}
+	}
+	// Add current streamID if not already present
+	conn.Subscribers[streamID] = true
+
+	log.Printf("DBManager -> Connect -> Initialized subscribers: %+v", conn.Subscribers)
 
 	// Store connection
 	m.connections[chatID] = conn
+	log.Printf("DBManager -> Connect -> Stored connection in manager")
 
-	// Cache connection state in Redis
-	ctx := context.Background()
-	connKey := fmt.Sprintf("conn:%s", chatID)
-	pipe := m.redisRepo.StartPipeline(ctx)
-	pipe.Set(ctx, connKey, "connected", idleTimeout)
-	if err := pipe.Execute(ctx); err != nil {
-		log.Printf("Failed to cache connection state: %v", err)
-	}
+	// Notify subscribers in a separate goroutine
+	go func() {
+		m.notifySubscribers(chatID, userID, StatusConnected, "")
+		log.Printf("DBManager -> Connect -> Notified subscribers")
+	}()
 
-	// Notify subscribers of successful connection
-	m.notifySubscribers(chatID, userID, StatusConnected, "")
+	// Start background tasks in a separate goroutine
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("DBManager -> Connect -> Background task panic recovered: %v", r)
+			}
+		}()
 
+		// Cache connection state in Redis
+		ctx := context.Background()
+		connKey := fmt.Sprintf("conn:%s", chatID)
+		pipe := m.redisRepo.StartPipeline(ctx)
+		pipe.Set(ctx, connKey, "connected", idleTimeout)
+		if err := pipe.Execute(ctx); err != nil {
+			log.Printf("DBManager -> Connect -> Failed to cache connection state: %v", err)
+		} else {
+			log.Printf("DBManager -> Connect -> Connection state cached in Redis")
+		}
+
+		// Start schema tracking
+		m.StartSchemaTracking(chatID)
+	}()
+
+	log.Printf("DBManager -> Connect -> Connection completed successfully for chatID: %s", chatID)
 	return nil
 }
 
 // Disconnect closes a database connection
 func (m *Manager) Disconnect(chatID, userID string) error {
+	log.Printf("DBManager -> Disconnect -> Starting disconnection for chatID: %s", chatID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -114,28 +169,66 @@ func (m *Manager) Disconnect(chatID, userID string) error {
 		return fmt.Errorf("no connection found for chat ID: %s", chatID)
 	}
 
-	// Get driver
-	driver, exists := m.drivers[conn.Config.Type]
-	if !exists {
-		return fmt.Errorf("driver not found for type: %s", conn.Config.Type)
+	log.Printf("DBManager -> Disconnect -> Connection found for chatID: %s", chatID)
+
+	// Only attempt to disconnect if there's an active connection
+	if conn.DB != nil {
+		// Get driver
+		driver, exists := m.drivers[conn.Config.Type]
+		if !exists {
+			return fmt.Errorf("driver not found for type: %s", conn.Config.Type)
+		}
+
+		// Disconnect
+		if err := driver.Disconnect(conn); err != nil {
+			return fmt.Errorf("failed to disconnect: %v", err)
+		}
+
+		log.Printf("DBManager -> Disconnect -> Disconnected from chatID: %s", chatID)
+
+		// Remove from cache
+		ctx := context.Background()
+		connKey := fmt.Sprintf("conn:%s", chatID)
+		if err := m.redisRepo.Del(connKey, ctx); err != nil {
+			log.Printf("DBManager -> Disconnect -> Failed to remove connection state from cache: %v", err)
+		}
 	}
 
-	// Disconnect
-	if err := driver.Disconnect(conn); err != nil {
-		return fmt.Errorf("failed to disconnect: %v", err)
+	// Store subscribers before deleting connection
+	subscribers := make(map[string]bool)
+	conn.SubLock.RLock()
+	log.Printf("DBManager -> Disconnect -> Current subscribers: %+v", conn.Subscribers)
+	for id := range conn.Subscribers {
+		subscribers[id] = true
 	}
+	conn.SubLock.RUnlock()
 
-	// Remove from cache
-	ctx := context.Background()
-	connKey := fmt.Sprintf("conn:%s", chatID)
-	if err := m.redisRepo.Del(connKey, ctx); err != nil {
-		log.Printf("Failed to remove connection state from cache: %v", err)
-	}
-
-	// Notify subscribers of disconnection
-	m.notifySubscribers(chatID, userID, StatusDisconnected, "Connection closed by user")
-
+	// Delete the connection
 	delete(m.connections, chatID)
+	log.Printf("DBManager -> Disconnect -> Deleted connection from manager")
+
+	// Notify subscribers after releasing the lock
+	if len(subscribers) > 0 {
+		go func(subs map[string]bool) {
+			log.Printf("DBManager -> Disconnect -> Notifying subscribers: %+v", subs)
+			for streamID := range subs {
+				response := dtos.StreamResponse{
+					Event: string(StatusDisconnected),
+					Data:  "Connection closed by user",
+				}
+
+				if m.streamHandler != nil {
+					log.Printf("DBManager -> Disconnect -> Going to notify subscriber %s of disconnection", streamID)
+					m.streamHandler.HandleDBEvent(userID, chatID, streamID, response)
+					log.Printf("DBManager -> Disconnect -> Notified subscriber %s of disconnection", streamID)
+				}
+			}
+		}(subscribers)
+	} else {
+		log.Printf("DBManager -> Disconnect -> No subscribers to notify")
+	}
+
+	log.Printf("DBManager -> Disconnect -> Successfully disconnected chat %s", chatID)
 	return nil
 }
 
@@ -197,34 +290,62 @@ func (m *Manager) cleanup() {
 
 	now := time.Now()
 	for chatID, conn := range m.connections {
-		if now.Sub(conn.LastUsed) > idleTimeout {
-			log.Printf("Closing idle connection for chat %s (last used: %v)",
-				chatID, conn.LastUsed.Format(time.RFC3339))
+		if now.Sub(conn.LastUsed) < idleTimeout {
+			continue
+		}
 
-			// Get driver
-			driver, exists := m.drivers[conn.Config.Type]
-			if !exists {
-				log.Printf("Driver not found for type: %s", conn.Config.Type)
-				continue
-			}
+		log.Printf("DBManager -> cleanup -> Found idle connection for chatID: %s", chatID)
 
-			// Disconnect
-			if err := driver.Disconnect(conn); err != nil {
-				log.Printf("Failed to disconnect: %v", err)
+		// Store subscribers before cleanup
+		subscribers := make(map[string]bool)
+		conn.SubLock.RLock()
+		for id := range conn.Subscribers {
+			subscribers[id] = true
+		}
+		// Use stored fields
+		userID := conn.UserID
+		streamID := conn.StreamID
+		conn.SubLock.RUnlock()
+
+		// Get driver and disconnect
+		if conn.DB != nil {
+			if driver, exists := m.drivers[conn.Config.Type]; exists {
+				if err := driver.Disconnect(conn); err != nil {
+					log.Printf("DBManager -> cleanup -> Failed to disconnect: %v", err)
+					continue
+				}
 			}
 
 			// Remove from cache
 			ctx := context.Background()
 			connKey := fmt.Sprintf("conn:%s", chatID)
 			if err := m.redisRepo.Del(connKey, ctx); err != nil {
-				log.Printf("Failed to remove connection state from cache: %v", err)
+				log.Printf("DBManager -> cleanup -> Failed to remove connection state from cache: %v", err)
 			}
+		}
 
-			// Notify subscribers of disconnection
-			m.notifySubscribers(chatID, "", StatusDisconnected, "Connection closed due to inactivity")
+		// Delete the connection
+		delete(m.connections, chatID)
+		log.Printf("DBManager -> cleanup -> Removed idle connection for chatID: %s", chatID)
 
-			delete(m.connections, chatID)
-			log.Printf("Successfully closed idle connection for chat %s", chatID)
+		log.Printf("DBManager -> cleanup -> Subscribers: %+v", subscribers)
+		// Notify subscribers in a separate goroutine
+		if len(subscribers) > 0 {
+			go func(chatID, userID, streamID string, subs map[string]bool) {
+				log.Printf("DBManager -> cleanup -> Notifying %d subscribers for chatID: %s", len(subs), chatID)
+				for subStreamID := range subs {
+					response := dtos.StreamResponse{
+						Event: string(StatusDisconnected),
+						Data:  "Connection closed due to inactivity",
+					}
+
+					if m.streamHandler != nil {
+						log.Printf("DBManager -> cleanup -> Going to notify subscriber %s of cleanup disconnection", subStreamID)
+						m.streamHandler.HandleDBEvent(userID, chatID, subStreamID, response)
+						log.Printf("DBManager -> cleanup -> Notified subscriber %s of cleanup disconnection", subStreamID)
+					}
+				}
+			}(chatID, userID, streamID, subscribers)
 		}
 	}
 }
@@ -284,14 +405,28 @@ func (m *Manager) UpdateLastUsed(chatID string) error {
 	return nil
 }
 
-// Add subscriber to connection
-func (m *Manager) Subscribe(chatID, userID, streamID string) error {
-	m.mu.RLock()
-	conn, exists := m.connections[chatID]
-	m.mu.RUnlock()
+// Subscribe adds a subscriber for connection status updates
+func (m *Manager) Subscribe(chatID, streamID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
+	log.Printf("DBManager -> Subscribe -> Adding subscriber %s for chatID: %s", streamID, chatID)
+
+	conn, exists := m.connections[chatID]
 	if !exists {
-		return fmt.Errorf("no connection found for chat ID: %s", chatID)
+		// Create a placeholder connection for subscribers
+		conn = &Connection{
+			Subscribers: make(map[string]bool),
+			Status:      StatusDisconnected,
+			ChatID:      chatID,
+			StreamID:    streamID,
+			// UserID will be set when actual connection is established
+		}
+		m.connections[chatID] = conn
+		log.Printf("DBManager -> Subscribe -> Created new connection entry for chatID: %s", chatID)
+	} else {
+		// Update StreamID if connection exists
+		conn.StreamID = streamID
 	}
 
 	conn.SubLock.Lock()
@@ -301,17 +436,8 @@ func (m *Manager) Subscribe(chatID, userID, streamID string) error {
 	conn.Subscribers[streamID] = true
 	conn.SubLock.Unlock()
 
-	// Send current status to new subscriber
-	m.eventChan <- SSEEvent{
-		UserID:    userID,
-		ChatID:    chatID,
-		StreamID:  streamID,
-		Status:    conn.Status,
-		Timestamp: time.Now(),
-		Error:     conn.Error,
-	}
-
-	return nil
+	log.Printf("DBManager -> Subscribe -> Added subscriber %s for chatID: %s, total subscribers: %d",
+		streamID, chatID, len(conn.Subscribers))
 }
 
 // Remove subscriber
@@ -336,71 +462,95 @@ func (m *Manager) GetEventChannel() <-chan SSEEvent {
 
 // Notify subscribers of connection status change
 func (m *Manager) notifySubscribers(chatID, userID string, status ConnectionStatus, err string) {
+	log.Printf("DBManager -> notifySubscribers -> Notifying subscribers for chatID: %s", chatID)
+
+	// Get connection and subscribers under read lock
 	m.mu.RLock()
 	conn, exists := m.connections[chatID]
 	m.mu.RUnlock()
 
 	if !exists {
+		log.Printf("DBManager -> notifySubscribers -> No connection found for chatID: %s", chatID)
 		return
 	}
 
+	// Get a snapshot of subscribers under read lock
 	conn.SubLock.RLock()
-	defer conn.SubLock.RUnlock()
+	subscribers := make(map[string]bool, len(conn.Subscribers))
+	for id := range conn.Subscribers {
+		subscribers[id] = true
+	}
+	conn.SubLock.RUnlock()
 
-	// Send to all subscribers
-	for streamID := range conn.Subscribers {
-		event := SSEEvent{
-			UserID:    userID,
-			ChatID:    chatID,
-			StreamID:  streamID,
-			Status:    status,
-			Timestamp: time.Now(),
-			Error:     err,
+	log.Printf("DBManager -> notifySubscribers -> Notifying %d subscribers for chatID: %s", len(subscribers), chatID)
+
+	// Notify subscribers without holding any locks
+	for streamID := range subscribers {
+		response := dtos.StreamResponse{
+			Event: string(status),
+			Data:  err,
 		}
 
-		select {
-		case m.eventChan <- event:
-		default:
-			log.Printf("Warning: Event channel full, dropped event for chat %s stream %s", chatID, streamID)
+		if m.streamHandler != nil {
+			m.streamHandler.HandleDBEvent(userID, chatID, streamID, response)
+			log.Printf("DBManager -> notifySubscribers -> Sent event to stream handler: %+v", response)
 		}
 	}
 }
 
 func (m *Manager) StartSchemaTracking(chatID string) {
+	log.Printf("DBManager -> StartSchemaTracking -> Starting for chatID: %s", chatID)
+
 	go func() {
+		// Initial delay to let connection stabilize
+		time.Sleep(2 * time.Second)
+
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
+
+		// Do initial schema check
+		if err := m.doSchemaCheck(chatID); err != nil {
+			log.Printf("DBManager -> StartSchemaTracking -> Initial schema check failed: %v", err)
+		}
 
 		for {
 			select {
 			case <-ticker.C:
-				conn, err := m.GetConnection(chatID)
-				if err != nil {
-					continue
-				}
-
-				// Get connection type from the connections map
-				m.mu.RLock()
-				dbConn, exists := m.connections[chatID]
-				m.mu.RUnlock()
-				if !exists {
-					continue
-				}
-
-				diff, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
-				if err != nil {
-					log.Printf("Error checking schema changes: %v", err)
-					continue
-				}
-
-				if diff != nil {
-					log.Printf("Schema changes detected for chat %s: %v", chatID, diff)
+				if err := m.doSchemaCheck(chatID); err != nil {
+					log.Printf("DBManager -> StartSchemaTracking -> Schema check failed: %v", err)
 				}
 			case <-m.stopCleanup:
+				log.Printf("DBManager -> StartSchemaTracking -> Stopping for chatID: %s", chatID)
 				return
 			}
 		}
 	}()
+}
+
+func (m *Manager) doSchemaCheck(chatID string) error {
+	conn, err := m.GetConnection(chatID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection: %v", err)
+	}
+
+	m.mu.RLock()
+	dbConn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("connection not found")
+	}
+
+	diff, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
+	if err != nil {
+		return fmt.Errorf("schema check failed: %v", err)
+	}
+
+	if diff != nil {
+		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %+v", chatID, diff)
+	}
+
+	return nil
 }
 
 // Add exported methods to access internal fields
@@ -469,4 +619,9 @@ func (m *Manager) IsConnected(chatID string) bool {
 type ConnectionInfo struct {
 	DB     *sql.DB
 	Config ConnectionConfig
+}
+
+// SetStreamHandler sets the stream handler for database events
+func (m *Manager) SetStreamHandler(handler StreamHandler) {
+	m.streamHandler = handler
 }

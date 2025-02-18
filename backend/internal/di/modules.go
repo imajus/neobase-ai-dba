@@ -4,6 +4,7 @@ import (
 	"log"
 	"neobase-ai/config"
 	"neobase-ai/internal/apis/handlers"
+	"neobase-ai/internal/constants"
 	"neobase-ai/internal/repositories"
 	"neobase-ai/internal/services"
 	"neobase-ai/internal/utils"
@@ -73,7 +74,13 @@ func Initialize() {
 	// Provide DB Manager
 	if err := DiContainer.Provide(func(redisRepo redis.IRedisRepositories) (*dbmanager.Manager, error) {
 		encryptionKey := config.Env.SchemaEncryptionKey
-		return dbmanager.NewManager(redisRepo, encryptionKey)
+		manager, err := dbmanager.NewManager(redisRepo, encryptionKey)
+		if err != nil {
+			log.Fatalf("Failed to provide DB manager: %v", err)
+		}
+		// Register database drivers
+		manager.RegisterDriver(constants.DatabaseTypePostgreSQL, dbmanager.NewPostgresDriver())
+		return manager, nil
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)
 	}
@@ -116,7 +123,7 @@ func Initialize() {
 		log.Fatalf("Failed to provide LLM manager: %v", err)
 	}
 
-	// Update Chat Service provider to include LLM manager
+	// Update Chat Service provider to include DB manager setup
 	if err := DiContainer.Provide(func(
 		chatRepo repositories.ChatRepository,
 		llmRepo repositories.LLMMessageRepository,
@@ -129,7 +136,12 @@ func Initialize() {
 			log.Printf("Warning: Failed to get default LLM client: %v", err)
 		}
 
-		return services.NewChatService(chatRepo, llmRepo, dbManager, llmClient)
+		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient)
+
+		// Set chat service as stream handler for DB manager
+		dbManager.SetStreamHandler(chatService)
+
+		return chatService
 	}); err != nil {
 		log.Fatalf("Failed to provide chat service: %v", err)
 	}

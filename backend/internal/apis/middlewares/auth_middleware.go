@@ -77,8 +77,9 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		log.Printf("User ID from Auth Middleware: %s", *claims)
 
-		c.Set("userID", claims)
+		c.Set("userID", *claims)
 		c.Next()
 	}
 }

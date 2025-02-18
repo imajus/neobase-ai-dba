@@ -63,9 +63,23 @@ services:
     networks:
       - neobase-network
 
+  example-postgres:
+    image: postgres:latest
+    container_name: example-postgres
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
 volumes:
   neobase-mongodb-data:
   neobase-redis-data:
+  postgres-data:
 
 
 networks:

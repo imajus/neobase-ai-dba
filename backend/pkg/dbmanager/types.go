@@ -1,6 +1,7 @@
 package dbmanager
 
 import (
+	"neobase-ai/internal/apis/dtos"
 	"sync"
 	"time"
 
@@ -11,9 +12,9 @@ import (
 type ConnectionStatus string
 
 const (
-	StatusConnected    ConnectionStatus = "connected"
-	StatusDisconnected ConnectionStatus = "disconnected"
-	StatusError        ConnectionStatus = "error"
+	StatusConnected    ConnectionStatus = "db-connected"
+	StatusDisconnected ConnectionStatus = "db-disconnected"
+	StatusError        ConnectionStatus = "db-error"
 )
 
 // Connection represents an active database connection
@@ -23,7 +24,10 @@ type Connection struct {
 	Status      ConnectionStatus
 	Error       string
 	Config      ConnectionConfig
-	Subscribers map[string]bool // Map of subscriber IDs (e.g., deviceIDs) that need notifications
+	UserID      string
+	ChatID      string
+	StreamID    string
+	Subscribers map[string]bool // Map of subscriber IDs (e.g., streamIDs) that need notifications
 	SubLock     sync.RWMutex    // Lock for thread-safe subscriber operations
 }
 
@@ -45,4 +49,9 @@ type SSEEvent struct {
 	Status    ConnectionStatus `json:"status"`
 	Timestamp time.Time        `json:"timestamp"`
 	Error     string           `json:"error,omitempty"`
+}
+
+// StreamHandler interface for handling database events
+type StreamHandler interface {
+	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 }

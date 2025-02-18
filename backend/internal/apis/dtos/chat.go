@@ -24,7 +24,6 @@ type CreateChatRequest struct {
 }
 
 type UpdateChatRequest struct {
-	IsActive   bool                    `json:"is_active"`
 	Connection CreateConnectionRequest `json:"connection"`
 }
 
@@ -32,7 +31,6 @@ type ChatResponse struct {
 	ID         string             `json:"id"`
 	UserID     string             `json:"user_id"`
 	Connection ConnectionResponse `json:"connection"`
-	IsActive   bool               `json:"is_active"`
 	CreatedAt  string             `json:"created_at"`
 	UpdatedAt  string             `json:"updated_at"`
 }
