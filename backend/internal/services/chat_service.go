@@ -46,7 +46,6 @@ type chatService struct {
 	dbManager       *dbmanager.Manager
 	llmClient       llm.Client
 	streamChans     map[string]chan dtos.StreamResponse
-	mu              sync.RWMutex
 	streamHandler   StreamHandler
 	activeProcesses map[string]context.CancelFunc // key: streamID
 	processesMu     sync.RWMutex
@@ -287,7 +286,7 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, streamID string) {
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(ctx)
-
+	defer cancel()
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		s.handleError(ctx, chatID, err)
@@ -502,7 +501,7 @@ func (s *chatService) formatSchemaDiff(diff *dbmanager.SchemaDiff) string {
 	return msg.String()
 }
 
-func (s *chatService) handleError(ctx context.Context, chatID string, err error) {
+func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
 }
 
