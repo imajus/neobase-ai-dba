@@ -1,6 +1,6 @@
 package dtos
 
 type StreamResponse struct {
-	Event string      `json:"event"` // message, error, db-connected, db-disconnected, sse-connected, response-cancelled
+	Event string      `json:"event"` // ai-response, ai-response-step, ai-response-error, db-connected, db-disconnected, sse-connected, response-cancelled
 	Data  interface{} `json:"data,omitempty"`
 }

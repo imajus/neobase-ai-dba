@@ -32,7 +32,6 @@ type ChatService interface {
 	UpdateMessage(userID, chatID, messageID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
-	StreamResponse(userID, chatID primitive.ObjectID, streamID string, response dtos.StreamResponse) (chan dtos.StreamResponse, error)
 	SetStreamHandler(handler StreamHandler)
 	CancelProcessing(streamID string)
 	ConnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error)
@@ -284,6 +283,11 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 
 // Add new method for LLM processing
 func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, streamID string) {
+	// Send initial processing message
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "ai-response-step",
+		Data:  "NeoBase is analyzing your request..",
+	})
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -312,6 +316,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		cancel()
 	}()
 
+	// Send initial processing message
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "ai-response-step",
+		Data:  "Fetching request relevant entities(tables, columns, etc.) from the database..",
+	})
 	// Get DB connection from dbManager
 	dbConn, err := s.dbManager.GetConnection(chatID)
 	if err != nil {
@@ -332,12 +341,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		s.handleError(ctx, chatID, err)
 		return
 	}
-
-	// Send initial processing message
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "processing",
-		Data:  "Analyzing your request...",
-	})
 
 	// Helper function to check cancellation
 	checkCancellation := func() bool {
@@ -374,10 +377,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 	}
 
 	if changed {
-		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "processing",
-			Data:  "Updating database schema information...",
-		})
 		// Only do full schema comparison if changes detected
 		diff, err := schemaManager.CheckSchemaChanges(ctx, chatID, dbConn, connInfo.Config.Type)
 		if err != nil {
@@ -405,20 +404,20 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		}
 	}
 
+	// Send initial processing message
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "ai-response-step",
+		Data:  "Generating an optimized query & example results for the request..",
+	})
 	if checkCancellation() {
 		return
 	}
 
 	// Generate LLM response
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "processing",
-		Data:  "Generating response...",
-	})
-
 	response, err := s.llmClient.GenerateResponse(ctx, messages, connInfo.Config.Type)
 	if err != nil {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "error",
+			Event: "ai-response-error",
 			Data:  map[string]string{"error": err.Error()},
 		})
 		return
@@ -427,6 +426,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 	if checkCancellation() {
 		return
 	}
+
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "ai-response-step",
+		Data:  "Analyzing the criticality of the query & if roll back is possible..",
+	})
 
 	// Save response and send final message
 	respMsg := &models.Message{
@@ -446,7 +450,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 
 	// Send final response
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "message",
+		Event: "ai-response",
 		Data: &dtos.MessageResponse{
 			ID:        respMsg.ID.Hex(),
 			ChatID:    respMsg.ChatID.Hex(),
@@ -454,12 +458,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 			Type:      respMsg.Type,
 			CreatedAt: respMsg.CreatedAt.Format(time.RFC3339),
 		},
-	})
-
-	// Send completion event
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "complete",
-		Data:  map[string]string{},
 	})
 }
 
@@ -578,49 +576,6 @@ func (s *chatService) ListMessages(userID, chatID string, page, pageSize int) (*
 	}
 
 	return response, http.StatusOK, nil
-}
-
-func (s *chatService) StreamResponse(userID, chatID primitive.ObjectID, streamID string, response dtos.StreamResponse) (chan dtos.StreamResponse, error) {
-	// Create channel for streaming responses
-	streamChan := make(chan dtos.StreamResponse)
-
-	// Start streaming in a goroutine
-	go func() {
-		defer close(streamChan)
-
-		// TODO: Prepare the LLM Messages to send to the LLM
-
-		// TODO: Here you would integrate with your LLM service
-		// For now, we'll simulate some streaming responses
-		responses := []string{
-			"Analyzing your query...",
-			"Generating SQL statements...",
-			"Validating database schema...",
-			"Preparing response...",
-			"Here's what I found...",
-		}
-
-		for _, resp := range responses {
-			select {
-			case streamChan <- dtos.StreamResponse{
-				Event: "message",
-				Data:  resp,
-			}:
-				time.Sleep(1 * time.Second) // Simulate processing time
-			case <-time.After(5 * time.Second):
-				// Timeout if channel is blocked
-				return
-			}
-		}
-
-		// Send completion event
-		streamChan <- dtos.StreamResponse{
-			Event: "complete",
-			Data:  map[string]interface{}{},
-		}
-	}()
-
-	return streamChan, nil
 }
 
 // Helper methods for building responses
