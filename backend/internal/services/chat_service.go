@@ -245,8 +245,14 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
 	}
 
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
 	msg := &models.Message{
 		Base:    models.NewBase(),
+		UserID:  userObjID,
 		ChatID:  chatObjID,
 		Content: content,
 		Type:    string(MessageTypeUser),
@@ -264,6 +270,7 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	// 2. Save to LLM messages for context
 	llmMsg := &models.LLMMessage{
 		Base:   models.NewBase(),
+		UserID: userObjID,
 		ChatID: chatObjID,
 		Role:   "user",
 		Content: map[string]interface{}{
@@ -353,7 +360,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 		return
 	}
 
-	log.Printf("processLLMResponse -> messages: %v", messages)
 	// Helper function to check cancellation
 	checkCancellation := func() bool {
 		select {
@@ -418,6 +424,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 			// Create and save LLM message
 			llmMsg := &models.LLMMessage{
 				Base:      models.NewBase(),
+				UserID:    userObjID,
 				ChatID:    chatObjID,
 				MessageID: messageObjID,
 				Role:      string(MessageTypeSystem),
@@ -443,6 +450,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 		return
 	}
 
+	for _, msg := range messages {
+		log.Printf("processLLMResponse -> messagesToLLM -> msg: %v", msg)
+	}
 	// Generate LLM response
 	response, err := s.llmClient.GenerateResponse(ctx, messages, connInfo.Config.Type)
 	if err != nil {
@@ -528,6 +538,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 	}
 	llmMsg := &models.LLMMessage{
 		Base:      models.NewBase(),
+		UserID:    userObjID,
 		ChatID:    chatObjID,
 		MessageID: chatResponseMsg.ID,
 		Content:   formattedJsonResponse,

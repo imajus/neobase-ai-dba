@@ -524,10 +524,8 @@ func (h *ChatHandler) CancelQueryExecution(c *gin.Context) {
 
 	// Cancel execution
 	h.chatService.CancelQueryExecution(userID, chatID, req.MessageID, req.QueryID, req.StreamID)
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Query execution cancelled",
-		"data": map[string]interface{}{
-			"stream_id": req.StreamID,
-		},
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    "Query execution cancelled successfully",
 	})
 }
