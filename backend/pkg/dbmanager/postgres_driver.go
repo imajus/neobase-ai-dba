@@ -8,6 +8,7 @@ import (
 	"log"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/utils"
+	"strings"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -368,6 +369,71 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 		return nil, fmt.Errorf("failed to get SQL DB connection")
 	}
 
+	// Get columns
+	columnsQuery := `
+		SELECT 
+			c.table_name,
+			c.column_name,
+			c.data_type,
+			c.is_nullable,
+			c.column_default,
+			pd.description
+		FROM information_schema.columns c
+		LEFT JOIN pg_description pd ON 
+			pd.objoid = (quote_ident(c.table_name)::regclass)::oid AND 
+			pd.objsubid = c.ordinal_position
+		WHERE c.table_schema = 'public'
+		ORDER BY c.table_name, c.ordinal_position;
+	`
+
+	rows, err := sqlDB.QueryContext(ctx, columnsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch columns: %v", err)
+	}
+	defer rows.Close()
+
+	// Build schema
+	schema := &SchemaInfo{
+		Tables: make(map[string]TableSchema),
+	}
+
+	// Process columns
+	for rows.Next() {
+		var col columnInfo
+		if err := rows.Scan(
+			&col.TableName,
+			&col.ColumnName,
+			&col.DataType,
+			&col.IsNullable,
+			&col.ColumnDefault,
+			&col.Description,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan column: %v", err)
+		}
+
+		table, exists := schema.Tables[col.TableName]
+		if !exists {
+			table = TableSchema{
+				Name:        col.TableName,
+				Columns:     make(map[string]ColumnInfo),
+				Indexes:     make(map[string]IndexInfo),
+				ForeignKeys: make(map[string]ForeignKey),
+				Constraints: make(map[string]ConstraintInfo),
+			}
+		}
+
+		// Add column
+		table.Columns[col.ColumnName] = ColumnInfo{
+			Name:         col.ColumnName,
+			Type:         col.DataType,
+			IsNullable:   col.IsNullable == "YES",
+			DefaultValue: col.ColumnDefault.String,
+			Comment:      col.Description.String,
+		}
+
+		schema.Tables[col.TableName] = table
+	}
+
 	// Get essential schema elements
 	tables, err := d.getTables(ctx, sqlDB)
 	if err != nil {
@@ -400,6 +466,16 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 
 	// Convert to generic SchemaInfo
 	return d.convertToSchemaInfo(tables, indexes, views), nil
+}
+
+// Update the column fetching query and struct
+type columnInfo struct {
+	TableName     string         `db:"table_name"`
+	ColumnName    string         `db:"column_name"`
+	DataType      string         `db:"data_type"`
+	IsNullable    string         `db:"is_nullable"`
+	ColumnDefault sql.NullString `db:"column_default"`
+	Description   sql.NullString `db:"description"`
 }
 
 func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]PostgresTable, error) {
@@ -456,7 +532,7 @@ func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string
 		SELECT 
 			t.relname AS table_name,
 			i.relname AS index_name,
-			array_agg(a.attname) AS column_names,
+			string_agg(a.attname, ',') AS column_names,
 			ix.indisunique AS is_unique
 		FROM pg_class t
 		JOIN pg_index ix ON t.oid = ix.indrelid
@@ -469,20 +545,35 @@ func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string
 
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query indexes: %v", err)
 	}
 	defer rows.Close()
 
 	indexes := make(map[string][]PostgresIndex)
 	for rows.Next() {
-		var index PostgresIndex
-		var columnNames []string
-		if err := rows.Scan(&index.TableName, &index.Name, &columnNames, &index.IsUnique); err != nil {
-			return nil, err
+		var (
+			index          PostgresIndex
+			columnNamesStr string
+		)
+
+		if err := rows.Scan(
+			&index.TableName,
+			&index.Name,
+			&columnNamesStr,
+			&index.IsUnique,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan index row: %v", err)
 		}
-		index.Columns = columnNames
+
+		index.Columns = strings.Split(columnNamesStr, ",")
+
 		indexes[index.TableName] = append(indexes[index.TableName], index)
 	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating index rows: %v", err)
+	}
+
 	return indexes, nil
 }
 
