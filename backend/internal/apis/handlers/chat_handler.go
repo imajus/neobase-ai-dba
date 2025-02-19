@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/services"
@@ -21,14 +20,15 @@ import (
 type ChatHandler struct {
 	chatService services.ChatService
 	dbManager   *dbmanager.Manager
-	mu          sync.RWMutex
-	streams     map[string]chan dtos.StreamResponse // key: streamID
+	streamMutex sync.RWMutex
+	streams     map[string]chan dtos.StreamResponse // key: userID:chatID:streamID
 }
 
 func NewChatHandler(chatService services.ChatService, dbManager *dbmanager.Manager) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
 		dbManager:   dbManager,
+		streamMutex: sync.RWMutex{},
 		streams:     make(map[string]chan dtos.StreamResponse),
 	}
 }
@@ -219,7 +219,7 @@ func (h *ChatHandler) UpdateMessage(c *gin.Context) {
 	chatID := c.Param("id")
 	messageID := c.Param("messageId")
 
-	response, statusCode, err := h.chatService.UpdateMessage(userID, chatID, messageID, &req)
+	response, statusCode, err := h.chatService.UpdateMessage(userID, chatID, messageID, req.StreamID, &req)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{
@@ -259,19 +259,21 @@ func (h *ChatHandler) DeleteMessages(c *gin.Context) {
 func (h *ChatHandler) HandleStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse) {
 	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
 
-	h.mu.RLock()
+	h.streamMutex.RLock()
 	streamChan, exists := h.streams[streamKey]
-	h.mu.RUnlock()
+	h.streamMutex.RUnlock()
 
-	if exists {
-		select {
-		case streamChan <- response:
-			log.Printf("Sent stream event: %s for stream %s", response.Event, streamID)
-		default:
-			log.Printf("Failed to send stream event: channel full or closed for stream %s", streamID)
-		}
-	} else {
-		log.Printf("No stream channel found for key: %s", streamKey)
+	if !exists {
+		log.Printf("No stream found for key: %s", streamKey)
+		return
+	}
+
+	// Try to send with timeout
+	select {
+	case streamChan <- response:
+		log.Printf("Successfully sent event to stream: %s, event: %s", streamKey, response.Event)
+	case <-time.After(100 * time.Millisecond):
+		log.Printf("Timeout sending event to stream: %s", streamKey)
 	}
 }
 
@@ -289,88 +291,75 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 
-	// Create new stream channel
 	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
-	h.mu.Lock()
-	streamChan := make(chan dtos.StreamResponse)
+	log.Printf("Starting stream for key: %s", streamKey)
+
+	// Create buffered channel
+	h.streamMutex.Lock()
+	streamChan := make(chan dtos.StreamResponse, 100)
 	h.streams[streamKey] = streamChan
-	h.mu.Unlock()
+	h.streamMutex.Unlock()
 
-	log.Printf("Chat SSE Connected: userID=%s, chatID=%s, streamID=%s", userID, chatID, streamID)
-
-	// Set headers for SSE
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no") // Disable buffering in Nginx
+	c.Header("Transfer-Encoding", "chunked")
 
-	// Send initial connection message
-	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n",
-		`{"event":"sse-connected","data":"SSE Connected successfully"}`)))
-	c.Writer.Flush()
+	ctx := c.Request.Context()
+	heartbeatTicker := time.NewTicker(30 * time.Second)
+	defer heartbeatTicker.Stop()
 
-	// Create a done channel to signal goroutine termination
-	done := make(chan struct{})
-
-	// Send heartbeat i.e SSE is alive
-	go func() {
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n",
-					`{"event":"heartbeat","data":"SSE is alive"}`)))
-				c.Writer.Flush()
-			}
-		}
-	}()
-
-	// Subscribe to chat service stream
+	// Set the stream handler
 	h.chatService.SetStreamHandler(h)
 
-	// Cleanup when done
+	// Cleanup on exit
 	defer func() {
-		h.mu.Lock()
+		h.streamMutex.Lock()
 		if ch, exists := h.streams[streamKey]; exists {
 			close(ch)
 			delete(h.streams, streamKey)
+			log.Printf("Cleaned up stream for key: %s", streamKey)
 		}
-		h.mu.Unlock()
-		log.Printf("Chat SSE Disconnected: userID=%s, chatID=%s, streamID=%s", userID, chatID, streamID)
+		h.streamMutex.Unlock()
 	}()
 
-	// Wait for client disconnect
-	<-c.Request.Context().Done()
-	close(done) // Signal heartbeat goroutine to stop
-
-	// Stream responses
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case response, ok := <-streamChan:
-			if !ok {
-				return false
-			}
-			// Format SSE message manually
-			jsonData, err := json.Marshal(response)
-			if err != nil {
-				log.Printf("Error marshaling SSE response: %v", err)
-				return false
-			}
-			// Write SSE message format
-			_, err = w.Write([]byte(fmt.Sprintf("data: %s\n\n", jsonData)))
-			if err != nil {
-				log.Printf("Error writing SSE message: %v", err)
-				return false
-			}
-			return true
-		case <-c.Request.Context().Done():
-			return false
-		}
+	// Send initial connection event
+	data, _ := json.Marshal(dtos.StreamResponse{
+		Event: "connected",
+		Data:  "Stream established",
 	})
+	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
+	c.Writer.Flush()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Client disconnected for stream key: %s", streamKey)
+			return
+
+		case <-heartbeatTicker.C:
+			data, _ := json.Marshal(dtos.StreamResponse{
+				Event: "heartbeat",
+				Data:  "ping",
+			})
+			c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
+			c.Writer.Flush()
+
+		case msg, ok := <-streamChan:
+			if !ok {
+				log.Printf("Stream channel closed for key: %s", streamKey)
+				return
+			}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				log.Printf("Error marshaling message: %v", err)
+				continue
+			}
+			log.Printf("Sending stream event -> key: %s, event: %s", streamKey, msg.Event)
+			c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
+			c.Writer.Flush()
+		}
+	}
 }
 
 // CancelStream cancels currently streaming response
@@ -394,12 +383,12 @@ func (h *ChatHandler) CancelStream(c *gin.Context) {
 	h.chatService.CancelProcessing(streamID)
 
 	// Then cleanup the stream
-	h.mu.Lock()
+	h.streamMutex.Lock()
 	if streamChan, ok := h.streams[streamKey]; ok {
 		close(streamChan)
 		delete(h.streams, streamKey)
 	}
-	h.mu.Unlock()
+	h.streamMutex.Unlock()
 
 	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
@@ -553,4 +542,73 @@ func (h *ChatHandler) CancelQueryExecution(c *gin.Context) {
 		Success: true,
 		Data:    "Query execution cancelled successfully",
 	})
+}
+
+// Update the stream handling
+func (h *ChatHandler) HandleStream(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	streamID := c.Query("stream_id")
+
+	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
+	log.Printf("Starting stream for key: %s", streamKey)
+
+	// Create buffered channel
+	h.streamMutex.Lock()
+	streamChan := make(chan dtos.StreamResponse, 100)
+	h.streams[streamKey] = streamChan
+	h.streamMutex.Unlock()
+
+	log.Printf("Created new stream channel for key: %s", streamKey)
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	ctx := c.Request.Context()
+	heartbeatTicker := time.NewTicker(30 * time.Second)
+	defer heartbeatTicker.Stop()
+
+	// Cleanup on exit
+	defer func() {
+		h.streamMutex.Lock()
+		if ch, exists := h.streams[streamKey]; exists {
+			close(ch)
+			delete(h.streams, streamKey)
+			log.Printf("Cleaned up stream for key: %s", streamKey)
+		}
+		h.streamMutex.Unlock()
+	}()
+
+	// Send initial connection event
+	c.SSEvent("message", dtos.StreamResponse{
+		Event: "connected",
+		Data:  "Stream established",
+	})
+	c.Writer.Flush()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Client disconnected for stream key: %s", streamKey)
+			return
+
+		case <-heartbeatTicker.C:
+			c.SSEvent("message", dtos.StreamResponse{
+				Event: "heartbeat",
+				Data:  "ping",
+			})
+			c.Writer.Flush()
+
+		case msg, ok := <-streamChan:
+			if !ok {
+				log.Printf("Stream channel closed for key: %s", streamKey)
+				return
+			}
+			log.Printf("Sending stream event -> key: %s, event: %s", streamKey, msg.Event)
+			c.SSEvent("message", msg)
+			c.Writer.Flush()
+		}
+	}
 }

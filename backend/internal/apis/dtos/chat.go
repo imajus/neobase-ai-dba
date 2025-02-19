@@ -24,7 +24,7 @@ type CreateChatRequest struct {
 }
 
 type UpdateChatRequest struct {
-	Connection CreateConnectionRequest `json:"connection"`
+	Connection CreateConnectionRequest `json:"connection" binding:"required"`
 }
 
 type ChatResponse struct {

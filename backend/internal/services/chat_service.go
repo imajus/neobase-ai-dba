@@ -33,7 +33,7 @@ type ChatService interface {
 	GetByID(userID, chatID string) (*dtos.ChatResponse, uint32, error)
 	List(userID string, page, pageSize int) (*dtos.ChatListResponse, uint32, error)
 	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error)
-	UpdateMessage(userID, chatID, messageID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
+	UpdateMessage(userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
 	SetStreamHandler(handler StreamHandler)
@@ -640,9 +640,59 @@ func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
 }
 
-func (s *chatService) UpdateMessage(userID, chatID, messageID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error) {
-	// Implementation similar to CreateMessage but with update logic
-	return nil, http.StatusNotImplemented, fmt.Errorf("not implemented")
+func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error) {
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	messageObjID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid message ID format")
+	}
+
+	message, err := s.chatRepo.FindMessageByID(messageObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch message: %v", err)
+	}
+
+	if message.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to message")
+	}
+
+	if message.ChatID != chatObjID {
+		return nil, http.StatusBadRequest, fmt.Errorf("message does not belong to chat")
+	}
+
+	// Update message content, This is a user message
+	message.Content = req.Content
+
+	err = s.chatRepo.UpdateMessage(message.ID, message)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message: %v", err)
+	}
+
+	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(message.ID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch LLM message: %v", err)
+	}
+
+	llmMsg.Content = map[string]interface{}{
+		"user_message": message.Content,
+	}
+
+	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update LLM message: %v", err)
+	}
+
+	// This will create a new assistant message, but we can update the existing assisant message where user_message_id is message.ID
+	go s.processLLMResponse(context.Background(), userID, chatID, streamID, message.Content)
+	return s.buildMessageResponse(message), http.StatusOK, nil
 }
 
 func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
@@ -703,7 +753,7 @@ func (s *chatService) ListMessages(userID, chatID string, page, pageSize int) (*
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
 	}
 
-	messages, total, err := s.chatRepo.FindMessagesByChat(chatObjID, page, pageSize)
+	messages, total, err := s.chatRepo.FindLatestMessageByChat(chatObjID, page, pageSize)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch messages: %v", err)
 	}
@@ -758,6 +808,8 @@ func (s *chatService) sendStreamEvent(userID, chatID, streamID string, response 
 	log.Printf("sendStreamEvent -> userID: %s, chatID: %s, streamID: %s, response: %+v", userID, chatID, streamID, response)
 	if s.streamHandler != nil {
 		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, response)
+	} else {
+		log.Printf("sendStreamEvent -> no stream handler set")
 	}
 }
 

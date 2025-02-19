@@ -22,6 +22,7 @@ type ChatRepository interface {
 	UpdateMessage(id primitive.ObjectID, message *models.Message) error
 	DeleteMessages(chatID primitive.ObjectID) error
 	FindMessagesByChat(chatID primitive.ObjectID, page, pageSize int) ([]*models.Message, int64, error)
+	FindLatestMessageByChat(chatID primitive.ObjectID, page, pageSize int) ([]*models.Message, int64, error)
 	FindMessageByID(id primitive.ObjectID) (*models.Message, error)
 }
 
@@ -126,6 +127,33 @@ func (r *chatRepository) FindMessagesByChat(chatID primitive.ObjectID, page, pag
 		SetSkip(skip).
 		SetLimit(int64(pageSize)).
 		SetSort(bson.D{{Key: "created_at", Value: 1}}) // Ascending order for messages
+
+	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &messages)
+	return messages, total, err
+}
+
+func (r *chatRepository) FindLatestMessageByChat(chatID primitive.ObjectID, page, pageSize int) ([]*models.Message, int64, error) {
+	var messages []*models.Message
+	filter := bson.M{"chat_id": chatID}
+
+	// Get total count
+	total, err := r.messageCollection.CountDocuments(context.Background(), filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Setup pagination
+	skip := int64((page - 1) * pageSize)
+	opts := options.Find().
+		SetSkip(skip).
+		SetLimit(int64(pageSize)).
+		SetSort(bson.D{{Key: "created_at", Value: -1}}) // Descending order for messages, ex: latest message will be first
 
 	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
 	if err != nil {

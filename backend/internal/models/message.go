@@ -9,7 +9,7 @@ import (
 type Message struct {
 	UserID  primitive.ObjectID `bson:"user_id" json:"user_id"`
 	ChatID  primitive.ObjectID `bson:"chat_id" json:"chat_id"`
-	Type    string             `bson:"type" json:"type"` // 'user' or 'ai'
+	Type    string             `bson:"type" json:"type"` // 'user' or 'assistant'
 	Content string             `bson:"content" json:"content"`
 	Queries *[]Query           `bson:"queries,omitempty" json:"queries,omitempty"`
 	Base    `bson:",inline"`
