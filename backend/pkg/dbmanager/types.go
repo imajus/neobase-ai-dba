@@ -20,16 +20,17 @@ const (
 
 // Connection represents an active database connection
 type Connection struct {
-	DB          *gorm.DB
-	LastUsed    time.Time
-	Status      ConnectionStatus
-	Error       string
-	Config      ConnectionConfig
-	UserID      string
-	ChatID      string
-	StreamID    string
-	Subscribers map[string]bool // Map of subscriber IDs (e.g., streamIDs) that need notifications
-	SubLock     sync.RWMutex    // Lock for thread-safe subscriber operations
+	DB             *gorm.DB
+	LastUsed       time.Time
+	Status         ConnectionStatus
+	Error          string
+	Config         ConnectionConfig
+	UserID         string
+	ChatID         string
+	StreamID       string
+	Subscribers    map[string]bool     // Map of subscriber IDs (e.g., streamIDs) that need notifications
+	SubLock        sync.RWMutex        // Lock for thread-safe subscriber operations
+	OnSchemaChange func(chatID string) // Callback for schema changes
 }
 
 // ConnectionConfig holds the configuration for a database connection
@@ -70,14 +71,13 @@ type DatabaseDriver interface {
 	Disconnect(conn *Connection) error
 	Ping(conn *Connection) error
 	IsAlive(conn *Connection) bool
-	// Add new methods for query execution
-	ExecuteQuery(ctx context.Context, conn *Connection, query string) *QueryExecutionResult
+	ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult
 	BeginTx(ctx context.Context, conn *Connection) Transaction
 }
 
 // Add new Transaction interface
 type Transaction interface {
-	ExecuteQuery(ctx context.Context, query string) *QueryExecutionResult
+	ExecuteQuery(ctx context.Context, query string, queryType string) *QueryExecutionResult
 	Commit() error
 	Rollback() error
 }

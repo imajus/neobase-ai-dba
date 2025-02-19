@@ -833,7 +833,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	}
 
 	// Execute query
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, false)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, *query.QueryType, false)
 	if queryErr != nil {
 		// Send event about query execution failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
@@ -845,10 +845,31 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				"error":      queryErr,
 			},
 		})
-		return nil, http.StatusInternalServerError, err
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute query: %v", queryErr)
 	}
 
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
+	log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %+v", result.ResultJSON)
+
+	var formattedResultJSON interface{}
+	var resultListFormatting []interface{} = []interface{}{}
+	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
+	if err := json.Unmarshal([]byte(result.ResultJSON), &resultListFormatting); err != nil {
+		if err := json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting); err != nil {
+			log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
+			// Try to unmarshal as a map
+			err = json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting)
+			if err != nil {
+				log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
+			}
+		}
+	}
+
+	if len(resultListFormatting) > 0 {
+		formattedResultJSON = resultListFormatting
+	} else {
+		formattedResultJSON = resultMapFormatting
+	}
 
 	// Update query status in message
 	query.IsRolledBack = false
@@ -865,55 +886,57 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	}
 	query.ExecutionResult = &result.ResultJSON
 
-	// Save updated message
-	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
-		return nil, http.StatusInternalServerError, err
-	}
-
-	// Update LLM message with query execution results
-	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-	if err != nil {
-		log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
-	} else if llmMsg != nil {
-		// Get the existing content
-		content := llmMsg.Content
-		if content == nil {
-			content = make(map[string]interface{})
+	go func() {
+		// Save updated message
+		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
+			log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
 		}
 
-		// Update the queries in the assistant response
-		if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-			if queries, ok := assistantResponse["queries"].([]interface{}); ok {
-				for i, q := range queries {
-					if queryMap, ok := q.(map[string]interface{}); ok {
-						// Match the query by ID
-						if queryMap["id"] == query.ID.Hex() {
-							// Update execution results
-							queryMap["isExecuted"] = query.IsExecuted
-							queryMap["isRolledBack"] = query.IsRolledBack
-							queryMap["executionTime"] = query.ExecutionTime
-							queryMap["executionResult"] = result.Result
-							if query.Error != nil {
-								queryMap["error"] = query.Error
-							} else {
-								queryMap["error"] = nil
+		// Update LLM message with query execution results
+		llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
+		if err != nil {
+			log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
+		} else if llmMsg != nil {
+			// Get the existing content
+			content := llmMsg.Content
+			if content == nil {
+				content = make(map[string]interface{})
+			}
+
+			// Update the queries in the assistant response
+			if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
+				if queries, ok := assistantResponse["queries"].([]interface{}); ok {
+					for i, q := range queries {
+						if queryMap, ok := q.(map[string]interface{}); ok {
+							// Match the query by ID
+							if queryMap["id"] == query.ID.Hex() {
+								// Update execution results
+								queryMap["isExecuted"] = query.IsExecuted
+								queryMap["isRolledBack"] = query.IsRolledBack
+								queryMap["executionTime"] = query.ExecutionTime
+								queryMap["executionResult"] = formattedResultJSON
+								if query.Error != nil {
+									queryMap["error"] = query.Error
+								} else {
+									queryMap["error"] = nil
+								}
+								queries[i] = queryMap
 							}
-							queries[i] = queryMap
 						}
 					}
+					assistantResponse["queries"] = queries
+					content["assistant_response"] = assistantResponse
 				}
-				assistantResponse["queries"] = queries
-				content["assistant_response"] = assistantResponse
+			}
+
+			// Save updated LLM message
+			llmMsg.Content = content
+			if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+				log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
 			}
 		}
 
-		// Save updated LLM message
-		llmMsg.Content = content
-		if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
-		}
-	}
-
+	}()
 	// Send stream event
 	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 		Event: "query-executed",
@@ -923,7 +946,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			"is_executed":      query.IsExecuted,
 			"is_rolled_back":   query.IsRolledBack,
 			"execution_time":   *query.ExecutionTime,
-			"execution_result": result.Result,
+			"execution_result": formattedResultJSON,
 			"error":            query.Error,
 		},
 	})
@@ -935,7 +958,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		IsExecuted:      query.IsExecuted,
 		IsRolledBack:    query.IsRolledBack,
 		ExecutionTime:   *query.ExecutionTime,
-		ExecutionResult: result.Result,
+		ExecutionResult: formattedResultJSON,
 		Error:           result.Error,
 	}, http.StatusOK, nil
 }
@@ -978,7 +1001,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		}
 
 		// Execute dependent query
-		dependentResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, false)
+		dependentResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, "SELECT", false)
 		if queryErr != nil {
 			// Send event about dependent query failure
 			s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
@@ -1131,7 +1154,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	}
 
 	// Execute rollback query
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, true)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, "DML", true)
 	if queryErr != nil {
 		// Send event about rollback query failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{

@@ -89,7 +89,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
 				Name:        "neobase-response",
 				Description: "A friendly AI Response/Explanation or clarification question (Must Send this)",
-				Schema:      json.RawMessage(constants.LLMResponseSchema),
+				Schema:      json.RawMessage(constants.GetLLMResponseSchema(dbType)),
 				Strict:      false,
 			},
 		},

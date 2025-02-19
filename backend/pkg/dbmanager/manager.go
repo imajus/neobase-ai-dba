@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	cleanupInterval = 5 * time.Minute  // Check every 5 minutes
-	idleTimeout     = 10 * time.Minute // Close after 10 minutes of inactivity
+	cleanupInterval     = 5 * time.Minute  // Check every 5 minutes
+	idleTimeout         = 10 * time.Minute // Close after 10 minutes of inactivity
+	schemaCheckInterval = 10 * time.Minute // Check every 10 minutes
 )
 
 type cleanupMetrics struct {
@@ -40,7 +41,7 @@ type Manager struct {
 
 // NewManager creates a new connection manager
 func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Manager, error) {
-	schemaManager, err := NewSchemaManager(redisRepo, encryptionKey)
+	schemaManager, err := NewSchemaManager(redisRepo, encryptionKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +56,9 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		activeExecutions: make(map[string]*QueryExecution),
 		executionMu:      sync.RWMutex{},
 	}
+
+	// Set the DBManager in the SchemaManager
+	schemaManager.SetDBManager(m)
 
 	// Start cleanup routine in a separate goroutine with error handling
 	go func() {
@@ -171,6 +175,10 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		// Start schema tracking
 		m.StartSchemaTracking(chatID)
 	}()
+
+	conn.OnSchemaChange = func(chatID string) {
+		m.schemaManager.TriggerSchemaCheck(chatID)
+	}
 
 	log.Printf("DBManager -> Connect -> Connection completed successfully for chatID: %s", chatID)
 	return nil
@@ -557,7 +565,7 @@ func (m *Manager) StartSchemaTracking(chatID string) {
 		// Initial delay to let connection stabilize
 		time.Sleep(2 * time.Second)
 
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(schemaCheckInterval)
 		defer ticker.Stop()
 
 		// Do initial schema check
@@ -710,7 +718,7 @@ func (m *Manager) CancelQueryExecution(streamID string) {
 	}
 }
 
-func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, isRollback bool) (*QueryExecutionResult, *dtos.QueryError) {
+func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, queryType string, isRollback bool) (*QueryExecutionResult, *dtos.QueryError) {
 	m.executionMu.Lock()
 
 	// Create cancellable context with timeout
@@ -773,7 +781,10 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 
 	go func() {
 		defer close(done)
-		result = tx.ExecuteQuery(execCtx, query)
+		result = tx.ExecuteQuery(execCtx, query, queryType)
+		if result.Error != nil {
+			queryErr = result.Error
+		}
 	}()
 
 	select {
@@ -791,6 +802,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 		return nil, &dtos.QueryError{
 			Code:    "QUERY_EXECUTION_CANCELLED",
 			Message: "query execution cancelled",
+			Details: "Query execution cancelled",
 		}
 
 	case <-done:

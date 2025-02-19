@@ -1,7 +1,7 @@
 package constants
 
 // LLM response schema for structured query generation
-const LLMResponseSchema = `{
+const PostgresLLMResponseSchema = `{
     "type": "object",
     "required": ["assistantMessage"],
     "properties": {
@@ -77,6 +77,17 @@ const LLMResponseSchema = `{
     },
     "additionalProperties": false
 }`
+
+func GetLLMResponseSchema(dbType string) string {
+	switch dbType {
+	case DatabaseTypePostgreSQL:
+		return PostgresLLMResponseSchema
+	case DatabaseTypeMySQL:
+		return ""
+	default:
+		return PostgresLLMResponseSchema
+	}
+}
 
 // LLMResponse represents the structured response from LLM
 type LLMResponse struct {
