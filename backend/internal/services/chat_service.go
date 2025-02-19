@@ -44,7 +44,7 @@ type ChatService interface {
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 	ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
-	CancelQueryExecution(streamID string)
+	CancelQueryExecution(userID, chatID, messageID, queryID, streamID string)
 }
 
 type chatService struct {
@@ -353,6 +353,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 		return
 	}
 
+	log.Printf("processLLMResponse -> messages: %v", messages)
 	// Helper function to check cancellation
 	checkCancellation := func() bool {
 		select {
@@ -387,6 +388,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 		return
 	}
 
+	log.Printf("processLLMResponse -> schema changed: %v", changed)
+
 	if changed {
 		// Only do full schema comparison if changes detected
 		diff, err := schemaManager.CheckSchemaChanges(ctx, chatID, dbConn, connInfo.Config.Type)
@@ -395,31 +398,41 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 		}
 
 		if diff != nil {
-			// Schema changed, get updated schema for LLM
-			schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type)
-			if err != nil {
-				log.Printf("Error getting schema: %v", err)
+			var schemaMsg string
+			if diff.IsFirstTime {
+				// For first time, format the full schema
+				schemaMsg = fmt.Sprintf("Initial Database Schema:\n%s",
+					schemaManager.FormatSchemaForLLM(diff.FullSchema))
 			} else {
-				// Need to save this schema message to the LLM messages
-				llmMsg := &models.LLMMessage{
-					Base:      models.NewBase(),
-					ChatID:    chatObjID,
-					MessageID: messageObjID,
-					Role:      string(MessageTypeSystem),
-					Content: map[string]interface{}{
-						"schema_update": fmt.Sprintf("%s\n\nChanges:\n%s",
-							schemaManager.FormatSchemaForLLM(schema),
-							s.formatSchemaDiff(diff),
-						),
-					},
+				// For subsequent changes, get current schema and show changes
+				schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type)
+				if err != nil {
+					log.Printf("Error getting schema: %v", err)
+				} else {
+					schemaMsg = fmt.Sprintf("%s\n\nChanges:\n%s",
+						schemaManager.FormatSchemaForLLM(schema),
+						s.formatSchemaDiff(diff))
 				}
-				if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-					log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
-				}
-				messages = append(messages, llmMsg)
 			}
+
+			// Create and save LLM message
+			llmMsg := &models.LLMMessage{
+				Base:      models.NewBase(),
+				ChatID:    chatObjID,
+				MessageID: messageObjID,
+				Role:      string(MessageTypeSystem),
+				Content: map[string]interface{}{
+					"schema_update": schemaMsg,
+				},
+			}
+			if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+				log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
+			}
+			messages = append(messages, llmMsg)
 		}
 	}
+
+	log.Printf("processLLMResponse -> schema changed: %v", changed)
 
 	// Send initial processing message
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
@@ -1255,20 +1268,28 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	}, http.StatusOK, nil
 }
 
-func (s *chatService) CancelQueryExecution(streamID string) {
+func (s *chatService) CancelQueryExecution(userID, chatID, messageID, queryID, streamID string) {
 	log.Printf("ChatService -> CancelQueryExecution -> Cancelling query for streamID: %s", streamID)
 
-	// Cancel the query execution in dbManager
+	// 1. Cancel the query execution in dbManager
 	s.dbManager.CancelQueryExecution(streamID)
 
-	// Send stream event for cancellation
-	s.sendStreamEvent("", "", streamID, dtos.StreamResponse{
+	// 2. Send cancellation event to client
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "query-cancelled",
 		Data: map[string]interface{}{
-			"stream_id": streamID,
-			"message":   "Query execution cancelled",
+			"chat_id":    chatID,
+			"message_id": messageID,
+			"query_id":   queryID,
+			"stream_id":  streamID,
+			"error": map[string]string{
+				"code":    "QUERY_EXECUTION_CANCELLED",
+				"message": "Query execution was cancelled by user",
+			},
 		},
 	})
+
+	log.Printf("ChatService -> CancelQueryExecution -> Query cancelled successfully for streamID: %s", streamID)
 }
 
 // Add helper method to verify query ownership

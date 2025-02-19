@@ -18,7 +18,7 @@ import (
 // Add these constants
 const (
 	schemaKeyPrefix = "schema:"
-	schemaTTL       = 24 * time.Hour // Keep schemas for 24 hours
+	schemaTTL       = 72 * time.Hour // Keep schemas for 77 hours
 )
 
 // SchemaInfo represents database schema information
@@ -70,6 +70,8 @@ type SchemaDiff struct {
 	RemovedTables  []string             `json:"removed_tables,omitempty"`
 	ModifiedTables map[string]TableDiff `json:"modified_tables,omitempty"`
 	UpdatedAt      time.Time            `json:"updated_at"`
+	IsFirstTime    bool                 `json:"is_first_time,omitempty"`
+	FullSchema     *SchemaInfo          `json:"full_schema,omitempty"`
 }
 
 type TableDiff struct {
@@ -231,18 +233,25 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 		return nil, fmt.Errorf("failed to get current schema: %v", err)
 	}
 
-	// Use getStoredSchema instead of direct storage service call
+	// Try to get stored schema
 	storedSchema, err := sm.getStoredSchema(ctx, chatID)
 	if err != nil {
-		log.Printf("SchemaManager -> CheckSchemaChanges -> error getting stored schema: %v", err)
-		// If no previous schema, store current and return
+		log.Printf("SchemaManager -> CheckSchemaChanges -> No stored schema found: %v", err)
+
+		// First time - store current schema
 		if err := sm.storeSchema(ctx, chatID, currentSchema, db, dbType); err != nil {
 			return nil, err
 		}
-		return nil, nil
+
+		// Return special diff for first time with full schema
+		return &SchemaDiff{
+			FullSchema:  currentSchema, // Add this field to SchemaDiff struct
+			UpdatedAt:   time.Now(),
+			IsFirstTime: true,
+		}, nil
 	}
 
-	// Compare schemas
+	// Normal comparison for subsequent changes
 	diff := sm.compareSchemas(storedSchema.FullSchema, currentSchema)
 	if diff == nil {
 		return nil, nil
