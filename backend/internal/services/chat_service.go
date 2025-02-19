@@ -687,8 +687,10 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update LLM message: %v", err)
 	}
 
-	// This will create a new assistant message, but we can update the existing assisant message where user_message_id is message.ID
-	go s.processLLMResponse(context.Background(), userID, chatID, streamID)
+	// Start processing the message asynchronously
+	if err := s.ProcessMessage(context.Background(), userID, chatID, streamID, message.Content); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+	}
 	return s.buildMessageResponse(message), http.StatusOK, nil
 }
 
