@@ -1,12 +1,12 @@
-import { AlertCircle, ChevronDown, Loader2, X } from 'lucide-react';
+import { AlertCircle, ChevronDown, Database, Loader2, X } from 'lucide-react';
 import React, { useState } from 'react';
 import { Chat, Connection } from '../../types/chat';
 
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
-  onSubmit: (connection: Connection) => void;
-  onEdit?: (connection: Connection) => void;
+  onEdit?: (data: Connection) => Promise<{ success: boolean; error?: string }>;
+  onSubmit: (data: Connection) => Promise<void>;
 }
 
 interface FormErrors {
@@ -16,31 +16,18 @@ interface FormErrors {
   username?: string;
 }
 
-export default function ConnectionModal({
-  initialData,
-  onClose,
-  onSubmit,
-  onEdit,
-}: ConnectionModalProps) {
-  const [formData, setFormData] = useState<Chat>(
-    initialData || {
-      id: '',
-      user_id: '',
-      connection: {
-        type: 'postgresql',
-        host: '',
-        port: '',
-        username: '',
-        password: '',
-        database: '',
-      },
-      created_at: '',
-      updated_at: '',
-    }
-  );
+export default function ConnectionModal({ initialData, onClose, onEdit, onSubmit }: ConnectionModalProps) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [formData, setFormData] = useState<Connection>({
+    type: initialData?.connection.type || 'postgresql',
+    host: initialData?.connection.host || '',
+    port: initialData?.connection.port || '',
+    username: initialData?.connection.username || '',
+    password: '',  // Password is never sent back from server
+    database: initialData?.connection.database || ''
+  });
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const validateField = (name: string, value: Connection) => {
@@ -85,13 +72,15 @@ export default function ConnectionModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError(null);
 
     // Validate all fields first
     const newErrors: FormErrors = {};
     let hasErrors = false;
 
     ['host', 'port', 'database', 'username'].forEach(field => {
-      const error = validateField(field, formData.connection);
+      const error = validateField(field, formData);
       if (error) {
         newErrors[field as keyof FormErrors] = error;
         hasErrors = true;
@@ -106,21 +95,25 @@ export default function ConnectionModal({
       username: true,
     });
 
-    if (hasErrors) return;
+    if (hasErrors) {
+      setIsLoading(false);
+      return;
+    }
 
-    setError(null);
-    setIsLoading(true);
     try {
-      await onSubmit({
-        type: formData.connection.type,
-        host: formData.connection.host,
-        port: formData.connection.port,
-        username: formData.connection.username,
-        password: formData.connection.password,
-        database: formData.connection.database,
-      });
-    } catch (error: any) {
-      setError(error.message);
+      if (initialData) {
+        const result = await onEdit?.(formData);
+        if (result?.success) {
+          onClose();
+        } else if (result?.error) {
+          setError(result.error);
+        }
+      } else {
+        await onSubmit(formData);
+        onClose();
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred while updating the connection');
     } finally {
       setIsLoading(false);
     }
@@ -132,15 +125,12 @@ export default function ConnectionModal({
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      connection: {
-        ...prev.connection,
-        [name]: value,
-      }
+      [name]: value,
     }));
 
     if (touched[name]) {
       const error = validateField(name, {
-        ...formData.connection,
+        ...formData,
         [name]: value,
       });
       setErrors(prev => ({
@@ -156,7 +146,7 @@ export default function ConnectionModal({
       ...prev,
       [name]: true,
     }));
-    const error = validateField(name, formData.connection);
+    const error = validateField(name, formData);
     setErrors(prev => ({
       ...prev,
       [name]: error,
@@ -167,7 +157,10 @@ export default function ConnectionModal({
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
       <div className="bg-white neo-border rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto relative z-[201]">
         <div className="flex justify-between items-center p-6 border-b-4 border-black mb-2">
-          <h2 className="text-2xl font-bold">{onEdit ? 'Edit Database Connection' : 'New Database Connection'}</h2>
+          <div className="flex items-center gap-2">
+            <Database className="w-6 h-6" />
+            <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
+          </div>
           <button
             onClick={onClose}
             className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
@@ -192,7 +185,7 @@ export default function ConnectionModal({
             <div className="relative">
               <select
                 name="type"
-                value={formData.connection.type}
+                value={formData.type}
                 onChange={handleChange}
                 className="neo-input w-full appearance-none pr-12"
               >
@@ -221,7 +214,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="host"
-              value={formData.connection.host}
+              value={formData.host}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.host && touched.host ? 'border-neo-error' : ''}`}
@@ -242,7 +235,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="port"
-              value={formData.connection.port}
+              value={formData.port}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.port && touched.port ? 'border-neo-error' : ''}`}
@@ -263,7 +256,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="database"
-              value={formData.connection.database}
+              value={formData.database}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.database && touched.database ? 'border-neo-error' : ''}`}
@@ -284,7 +277,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="username"
-              value={formData.connection.username}
+              value={formData.username}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.username && touched.username ? 'border-neo-error' : ''}`}
@@ -305,7 +298,7 @@ export default function ConnectionModal({
             <input
               type="password"
               name="password"
-              value={formData.connection.password}
+              value={formData.password}
               onChange={handleChange}
               className="neo-input w-full"
               placeholder="Enter your database password"
@@ -322,10 +315,10 @@ export default function ConnectionModal({
               {isLoading ? (
                 <div className="flex items-center justify-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Connecting...</span>
+                  <span>{initialData ? 'Updating...' : 'Creating...'}</span>
                 </div>
               ) : (
-                onEdit ? 'Save & Reconnect' : 'Connect'
+                <span>{initialData ? 'Update' : 'Create'}</span>
               )}
             </button>
             <button

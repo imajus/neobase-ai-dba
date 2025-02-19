@@ -1,8 +1,9 @@
-import { AlertCircle, Braces, Check, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
+import LoadingSteps from './LoadingSteps';
 import { Message, QueryResult } from './types';
 
 interface QueryState {
@@ -149,194 +150,198 @@ export default function MessageTile({
         );
     };
 
-    const renderQuery = (query: QueryResult, index: number) => {
-        const queryId = `${message.id}-${index}`;
-        const shouldShowExampleResult = queryStates[queryId]?.isExample || !queryStates[queryId];
+    const renderQuery = (isStreaming: boolean, query: QueryResult, index: number) => {
+        const queryId = query.id;
+        const shouldShowExampleResult = !query.isExecuted && !query.isRolledBack;
         const resultToShow = shouldShowExampleResult ? query.exampleResult : query.executionResult;
-        const isStreaming = !query.exampleResult && query.query && !query.error;
+
 
         return (
-            <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
-                    <div className="flex items-center gap-2 text-gray-400">
-                        <span>Query {index + 1}:</span>
-                    </div>
-                    <div className="flex items-center">
-                        {queryStates[queryId]?.isExecuting ? (
+            <div>
+                <p className='mb-4 mt-4 font-base text-base'><span className='font-bold'>Explanation:</span> {query.description}</p>
+                <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
+
+                        <div className="flex items-center gap-2">
+                            <span>Query {index + 1}:</span>
+                        </div>
+                        <div className="flex items-center">
+                            {queryStates[queryId]?.isExecuting ? (
+                                <button
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (queryTimeouts.current[queryId]) {
+                                            clearTimeout(queryTimeouts.current[queryId]);
+                                            delete queryTimeouts.current[queryId];
+                                        }
+                                        setQueryStates((prev: Record<string, QueryState>) => ({
+                                            ...prev,
+                                            [queryId]: { isExecuting: false, isExample: true }
+                                        }));
+                                        setTimeout(() => {
+                                            window.scrollTo(window.scrollX, window.scrollY);
+                                        }, 0);
+                                        toast.error('Query cancelled', toastStyle);
+                                    }}
+                                    className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
+                                    title="Cancel query"
+                                >
+                                    <XCircle className="w-4 h-4" />
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleExecuteQuery(index);
+                                        setTimeout(() => {
+                                            window.scrollTo(window.scrollX, window.scrollY);
+                                        }, 0);
+                                    }}
+                                    className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
+                                    title="Run query"
+                                >
+                                    <Play className="w-4 h-4" />
+                                </button>
+                            )}
+                            <div className="w-px h-4 bg-gray-700 mx-2" />
                             <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    if (queryTimeouts.current[queryId]) {
-                                        clearTimeout(queryTimeouts.current[queryId]);
-                                        delete queryTimeouts.current[queryId];
-                                    }
-                                    setQueryStates((prev: Record<string, QueryState>) => ({
-                                        ...prev,
-                                        [queryId]: { isExecuting: false, isExample: true }
-                                    }));
-                                    setTimeout(() => {
-                                        window.scrollTo(window.scrollX, window.scrollY);
-                                    }, 0);
-                                    toast.error('Query cancelled', toastStyle);
-                                }}
-                                className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
-                                title="Cancel query"
+                                onClick={() => handleCopyToClipboard(query.query)}
+                                className="p-2 hover:bg-gray-800 rounded transition-colors text-white hover:text-gray-200"
+                                title="Copy query"
                             >
-                                <XCircle className="w-4 h-4" />
+                                <Copy className="w-4 h-4" />
                             </button>
-                        ) : (
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleExecuteQuery(index);
-                                    setTimeout(() => {
-                                        window.scrollTo(window.scrollX, window.scrollY);
-                                    }, 0);
-                                }}
-                                className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
-                                title="Run query"
-                            >
-                                <Play className="w-4 h-4" />
-                            </button>
-                        )}
-                        <div className="w-px h-4 bg-gray-700 mx-2" />
-                        <button
-                            onClick={() => handleCopyToClipboard(query.query)}
-                            className="p-2 hover:bg-gray-800 rounded transition-colors text-white hover:text-gray-200"
-                            title="Copy query"
-                        >
-                            <Copy className="w-4 h-4" />
-                        </button>
+                        </div>
                     </div>
-                </div>
-                <pre className={`
+                    <pre className={`
                     text-sm overflow-x-auto p-4 border-t border-gray-700
                     ${isStreaming ? 'animate-pulse duration-300' : ''}
                 `}>
-                    <code className="whitespace-pre-wrap break-words">{query.query}</code>
-                </pre>
-                {(query.executionResult || query.exampleResult || query.error) && (
-                    <div className="border-t border-gray-700 mt-2 w-full">
-                        {queryStates[queryId]?.isExecuting ? (
-                            <div className="flex items-center justify-center p-8">
-                                <Loader className="w-8 h-8 animate-spin text-gray-400" />
-                                <span className="ml-3 text-gray-400">Executing query...</span>
-                            </div>
-                        ) : (
-                            <div className="mt-3 px-4 pt-4 w-full">
-                                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                                    <div className="flex items-center gap-2 text-gray-400">
-                                        {query.error ? (
-                                            <span className="text-neo-error font-medium flex items-center gap-2">
-                                                <AlertCircle className="w-4 h-4" />
-                                                Error
-                                            </span>
-                                        ) : (
-                                            <span>
-                                                {shouldShowExampleResult ? 'Example Result:' : 'Result:'}
-                                            </span>
-                                        )}
-                                        {query.executionTime && (
-                                            <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
-                                                <Clock className="w-3 h-3" />
-                                                {query.executionTime.toLocaleString()}ms
-                                            </span>
-                                        )}
-                                    </div>
-                                    {!query.error && <div className="flex gap-2">
-                                        <div className="flex items-center">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    setViewMode('table');
-                                                    setTimeout(() => {
-                                                        window.scrollTo(window.scrollX, window.scrollY);
-                                                    }, 0);
-                                                }}
-                                                className={`p-1 md:p-2 rounded ${viewMode === 'table' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
-                                                title="Table view"
-                                            >
-                                                <Table className="w-4 h-4" />
-                                            </button>
-                                            <div className="w-px h-4 bg-gray-700 mx-2" />
-                                            <button
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    setViewMode('json');
-                                                    setTimeout(() => {
-                                                        window.scrollTo(window.scrollX, window.scrollY);
-                                                    }, 0);
-                                                }}
-                                                className={`p-1 md:p-2 rounded ${viewMode === 'json' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
-                                                title="JSON view"
-                                            >
-                                                <Braces className="w-4 h-4" />
-                                            </button>
-                                            <div className="w-px h-4 bg-gray-700 mx-2" />
-                                            <button
-                                                onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2))}
-                                                className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
-                                                title="Copy result"
-                                            >
-                                                <Copy className="w-4 h-4" />
-                                            </button>
-                                            {!shouldShowExampleResult && query.canRollback && (
+                        <code className="whitespace-pre-wrap break-words">{query.query}</code>
+                    </pre>
+                    {(query.executionResult || query.exampleResult || query.error) && (
+                        <div className="border-t border-gray-700 mt-2 w-full">
+                            {queryStates[queryId]?.isExecuting ? (
+                                <div className="flex items-center justify-center p-8">
+                                    <Loader className="w-8 h-8 animate-spin text-gray-400" />
+                                    <span className="ml-3 text-gray-400">Executing query...</span>
+                                </div>
+                            ) : (
+                                <div className="mt-3 px-4 pt-4 w-full">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                                        <div className="flex items-center gap-2 text-gray-400">
+                                            {query.error ? (
+                                                <span className="text-neo-error font-medium flex items-center gap-2">
+                                                    <AlertCircle className="w-4 h-4" />
+                                                    Error
+                                                </span>
+                                            ) : (
+                                                <span>
+                                                    {shouldShowExampleResult ? 'Example Result:' : 'Result:'}
+                                                </span>
+                                            )}
+                                            {query.executionTime && (
+                                                <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
+                                                    <Clock className="w-3 h-3" />
+                                                    {query.executionTime.toLocaleString()}ms
+                                                </span>
+                                            )}
+                                        </div>
+                                        {!query.error && <div className="flex gap-2">
+                                            <div className="flex items-center">
                                                 <button
                                                     onClick={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
-                                                        setRollbackState({ show: true, queryId });
+                                                        setViewMode('table');
                                                         setTimeout(() => {
                                                             window.scrollTo(window.scrollX, window.scrollY);
                                                         }, 0);
                                                     }}
-                                                    className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
-                                                    title="Rollback changes"
+                                                    className={`p-1 md:p-2 rounded ${viewMode === 'table' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                                                    title="Table view"
                                                 >
-                                                    <History className="w-4 h-4" />
+                                                    <Table className="w-4 h-4" />
                                                 </button>
+                                                <div className="w-px h-4 bg-gray-700 mx-2" />
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        setViewMode('json');
+                                                        setTimeout(() => {
+                                                            window.scrollTo(window.scrollX, window.scrollY);
+                                                        }, 0);
+                                                    }}
+                                                    className={`p-1 md:p-2 rounded ${viewMode === 'json' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                                                    title="JSON view"
+                                                >
+                                                    <Braces className="w-4 h-4" />
+                                                </button>
+                                                <div className="w-px h-4 bg-gray-700 mx-2" />
+                                                <button
+                                                    onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2))}
+                                                    className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
+                                                    title="Copy result"
+                                                >
+                                                    <Copy className="w-4 h-4" />
+                                                </button>
+                                                {!shouldShowExampleResult && query.canRollback && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            setRollbackState({ show: true, queryId });
+                                                            setTimeout(() => {
+                                                                window.scrollTo(window.scrollX, window.scrollY);
+                                                            }, 0);
+                                                        }}
+                                                        className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
+                                                        title="Rollback changes"
+                                                    >
+                                                        <History className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>}
+                                    </div>
+                                    {query.error ? (
+                                        <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
+                                            <div className="font-bold mb-2">{query.error.code}</div>
+                                            <div className="mb-2">{query.error.message}</div>
+                                            {query.error.details && (
+                                                <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
+                                                    {query.error.details}
+                                                </div>
                                             )}
                                         </div>
-                                    </div>}
-                                </div>
-                                {query.error ? (
-                                    <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
-                                        <div className="font-bold mb-2">{query.error.code}</div>
-                                        <div className="mb-2">{query.error.message}</div>
-                                        {query.error.details && (
-                                            <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
-                                                {query.error.details}
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="w-full">
-                                        <div className={`
+                                    ) : (
+                                        <div className="w-full">
+                                            <div className={`
                                             text-green-400 pb-6 w-full
                                             ${!query.exampleResult && !query.error ? 'animate-pulse duration-300' : ''}
                                         `}>
-                                            {viewMode === 'table' ? (
-                                                <div className="w-full">
-                                                    {renderTableView(resultToShow || [])}
-                                                </div>
-                                            ) : (
-                                                <div className="w-full">
-                                                    <pre className="overflow-x-auto whitespace-pre-wrap">
-                                                        {JSON.stringify(resultToShow, null, 2)}
-                                                    </pre>
-                                                </div>
-                                            )}
+                                                {viewMode === 'table' ? (
+                                                    <div className="w-full">
+                                                        {renderTableView(resultToShow || [])}
+                                                    </div>
+                                                ) : (
+                                                    <div className="w-full">
+                                                        <pre className="overflow-x-auto whitespace-pre-wrap">
+                                                            {JSON.stringify(resultToShow, null, 2)}
+                                                        </pre>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                )}
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
         );
     };
@@ -357,6 +362,7 @@ export default function MessageTile({
             flex 
             gap-1
             z-[5]
+
           ">
                         <button
                             onClick={() => handleCopyToClipboard(message.content)}
@@ -399,6 +405,7 @@ export default function MessageTile({
                   border-0
                   bg-white/80
                   backdrop-blur-sm
+
                 "
                                 title="Edit message"
                             >
@@ -425,30 +432,17 @@ export default function MessageTile({
         ${message.queries?.length ? 'min-w-full' : ''}
     `}>
                         <div className="relative">
-                            {message.loadingSteps && (
+                            {message.loadingSteps && message.loadingSteps.length > 0 && (
                                 <div className={`
-                                    flex flex-col gap-2
                                     ${message.content ? 'animate-fade-up-out absolute w-full' : ''}
+                                    text-gray-700
                                 `}>
-                                    {message.loadingSteps.map((step, index) => (
-                                        <div key={index} className="flex items-center gap-3">
-                                            {step.done ? (
-                                                <Check className="w-5 h-5 text-green-500" />
-                                            ) : (
-                                                <Loader className="w-5 h-5 animate-spin" />
-                                            )}
-                                            <span className={`
-                                                text-black
-                                                ${index === message.loadingSteps!.length - 1 && !step.done
-                                                    ? 'font-semibold'
-                                                    : 'font-normal'
-                                                }
-                                                ${step.done ? 'opacity-60' : 'opacity-100'}
-                                            `}>
-                                                {step.text}
-                                            </span>
-                                        </div>
-                                    ))}
+                                    <LoadingSteps
+                                        steps={message.loadingSteps.map((step, index) => ({
+                                            text: step.text,
+                                            done: index !== message.loadingSteps!.length - 1
+                                        }))}
+                                    />
                                 </div>
                             )}
 
@@ -497,12 +491,12 @@ export default function MessageTile({
                                     </div>
                                 </div>
                             ) : (
-                                <div className={message.loadingSteps ? 'animate-fade-in' : 'animate-slide-up'}>
+                                <div className={message.loadingSteps ? 'animate-fade-in' : ''}>
                                     <p className="text-lg whitespace-pre-wrap break-words">{message.content}</p>
                                     {message.queries && message.queries.length > 0 && (
                                         <div className="min-w-full">
                                             {message.queries.map((query: QueryResult, index: number) =>
-                                                renderQuery(query, index)
+                                                renderQuery(message.isStreaming || false, query, index)
                                             )}
                                         </div>
                                     )}

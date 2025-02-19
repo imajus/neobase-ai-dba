@@ -151,7 +151,7 @@ export default function Sidebar({
 
   const handleSelectConnection = useCallback(async (id: string) => {
     try {
-      console.log('handleSelectConnection', { id, currentConnectedChatId });
+      console.log('handleSelectConnection happened', { id, currentConnectedChatId });
 
       // If same connection is selected, just update UI and return
       if (id === currentConnectedChatId) {

@@ -11,12 +11,15 @@ import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
 import ConnectionModal from './components/modals/ConnectionModal';
 import { StreamProvider, useStream } from './contexts/StreamContext';
-import mockMessages, { newMockMessage } from './data/mockMessages';
+import mockMessages from './data/mockMessages';
 import authService from './services/authService';
 import './services/axiosConfig';
 import chatService from './services/chatService';
 import { LoginFormData, SignupFormData } from './types/auth';
 import { Chat, ChatsResponse, Connection } from './types/chat';
+import { SendMessageResponse } from './types/messages';
+import { StreamResponse } from './types/stream';
+
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -33,6 +36,8 @@ function AppContent() {
   const [connectionStatuses, setConnectionStatuses] = useState<Record<string, boolean>>({});
   const [eventSource, setEventSource] = useState<EventSourcePolyfill | null>(null);
   const { streamId, setStreamId, generateStreamId } = useStream();
+  const [isMessageSending, setIsMessageSending] = useState(false);
+  const [temporaryMessage, setTemporaryMessage] = useState<Message | null>(null);
 
   // Check auth status on mount
   useEffect(() => {
@@ -168,15 +173,27 @@ function AppContent() {
       setSuccessMessage('You\'ve been logged out!');
       setIsAuthenticated(false);
       setSelectedConnection(undefined);
-      setMessages(mockMessages);
+      setMessages([]);
     } catch (error: any) {
       console.error('Logout failed:', error);
       setIsAuthenticated(false);
     }
   };
 
-  const handleClearChat = () => {
-    setMessages([]);
+  const handleClearChat = async () => {
+    // Make API call to clear chat
+    try {
+      await axios.delete(`${import.meta.env.VITE_API_URL}/chats/${selectedConnection?.id}/messages`, {
+        withCredentials: true,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      setMessages([]);
+    } catch (error: any) {
+      console.error('Failed to clear chat:', error);
+      toast.error(error.message, errorToast);
+    }
   };
 
   const handleConnectionStatusChange = useCallback((chatId: string, isConnected: boolean, from: string) => {
@@ -190,19 +207,22 @@ function AppContent() {
   }, []);
 
   const handleCloseConnection = useCallback(() => {
-    // Close SSE connection if exists
     if (eventSource) {
       console.log('Closing SSE connection');
       eventSource.close();
       setEventSource(null);
     }
 
+    // Clear messages
+    setMessages([]);
+
     // Clear connection status
     if (selectedConnection) {
       handleConnectionStatusChange(selectedConnection.id, false, 'app-close-connection');
     }
 
-    // Clear selected connection
+    // Clear messages and selected connection
+    setMessages([]);
     setSelectedConnection(undefined);
   }, [eventSource, selectedConnection, handleConnectionStatusChange]);
 
@@ -225,152 +245,242 @@ function AppContent() {
     }
   };
 
-  const handleEditConnection = (id: string, data: Connection) => {
-    setChats(prev => prev.map(chat => {
-      if (chat.id === id) {
-        return {
-          ...chat,
-          id: selectedConnection?.id || '',
-          user_id: selectedConnection?.user_id || '',
-          connection: data,
-          created_at: selectedConnection?.created_at || '',
-          updated_at: selectedConnection?.updated_at || '',
-        };
-      }
-      return chat;
-    }));
-  };
+  const handleEditConnection = async (id: string, data: Connection): Promise<{ success: boolean; error?: string }> => {
+    const loadingToast = toast.loading('Updating connection...', {
+      style: {
+        background: '#000',
+        color: '#fff',
+        borderRadius: '12px',
+        border: '4px solid #000',
+      },
+    });
 
-  const generateAIResponse = async (userMessage: string) => {
-    console.log('Generating AI response for:', userMessage);
-    const aiMessageId = `ai-${Date.now()}`;
-    const loadingSteps = [
-      { text: "NeoBase is analyzing your request..", done: false },
-      { text: "Fetching request relevant entities(tables, columns, etc.) from the database..", done: false },
-      { text: "Generating an optimized query & example results for the request..", done: false },
-      { text: "Analyzing the criticality of the query & if roll back is possible..", done: false }
-    ];
-
-    // Add initial loading message with first step only
-    setMessages(prev => [...prev, {
-      id: aiMessageId,
-      type: 'ai',
-      content: '',
-      isLoading: true,
-      loadingSteps: [loadingSteps[0]]
-    }]);
-
-    // Update steps one by one
-    for (let i = 0; i < loadingSteps.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      setMessages(prev => prev.map(msg =>
-        msg.id === aiMessageId ? {
-          ...msg,
-          loadingSteps: [
-            ...loadingSteps.slice(0, i + 1).map(step => ({ ...step, done: true })),
-            ...(i < loadingSteps.length - 1 ? [loadingSteps[i + 1]] : [])
-          ]
-        } : msg
-      ));
-    }
-
-    // Mark last step as done and immediately start content streaming
-    setMessages(prev => prev.map(msg =>
-      msg.id === aiMessageId ? {
-        ...msg,
-        loadingSteps: loadingSteps.map(step => ({ ...step, done: true })),
-        content: '',
-        startStreaming: true
-      } : msg
-    ));
-
-    // Start content streaming immediately
-    const fullContent = newMockMessage.content;
-    let currentContent = '';
-
-    for (let i = 0; i < fullContent.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
-      currentContent += fullContent[i];
-      setMessages(prev => prev.map(msg =>
-        msg.id === aiMessageId ? {
-          ...msg,
-          content: currentContent,
-          loadingSteps: msg.loadingSteps?.map(step => ({
-            ...step,
-            transitioning: true
-          }))
-        } : msg
-      ));
-    }
-
-    // Remove loading steps but keep isLoading true for query streaming
-    setMessages(prev => prev.map(msg =>
-      msg.id === aiMessageId ? {
-        ...msg,
-        loadingSteps: undefined,
-        queries: []
-      } : msg
-    ));
-
-    // Stream each query one by one
-    for (let i = 0; i < (newMockMessage.queries?.length || 0); i++) {
-      const query = newMockMessage.queries?.[i];
-      if (!query) continue;
-
-      // Stream query text
-      let currentQuery = '';
-      for (let j = 0; j < query.query.length; j++) {
-        await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 10));
-        currentQuery += query.query[j];
-        setMessages(prev => prev.map(msg =>
-          msg.id === aiMessageId ? {
-            ...msg,
-            queries: [
-              ...(msg.queries || []).slice(0, i),
-              { ...query, query: currentQuery, exampleResult: undefined },
-              ...(msg.queries || []).slice(i + 1)
-            ]
-          } : msg
-        ));
-      }
-
-      // Add example result gradually
-      if (Array.isArray(query.exampleResult)) {
-        for (let k = 0; k < query.exampleResult.length; k++) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-          setMessages(prev => prev.map(msg =>
-            msg.id === aiMessageId ? {
-              ...msg,
-              queries: msg.queries?.map((q, index) =>
-                index === i ? {
-                  ...q,
-                  exampleResult: query.exampleResult?.slice(0, k + 1)
-                } : q
-              )
-            } : msg
-          ));
+    try {
+      // Update the connection
+      const response = await axios.put(
+        `${import.meta.env.VITE_API_URL}/chats/${id}`,
+        {
+          connection: data
+        },
+        {
+          withCredentials: true,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
         }
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        setMessages(prev => prev.map(msg =>
-          msg.id === aiMessageId ? {
-            ...msg,
-            queries: msg.queries?.map((q, index) =>
-              index === i ? { ...q, exampleResult: query.exampleResult } : q
-            )
-          } : msg
-        ));
-      }
-    }
+      );
 
-    // Finally remove loading state
-    setMessages(prev => prev.map(msg =>
-      msg.id === aiMessageId ? {
-        ...msg,
-        isLoading: false
-      } : msg
-    ));
+
+      if (response.data.success) {
+
+        // First disconnect the current connection
+        await axios.post(
+          `${import.meta.env.VITE_API_URL}/chats/${id}/disconnect`,
+          {
+            stream_id: streamId
+          },
+          {
+            withCredentials: true,
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          }
+        );
+        // Update local state
+        setChats(prev => prev.map(chat => {
+          if (chat.id === id) {
+            return {
+              ...chat,
+              connection: data
+            };
+          }
+          return chat;
+        }));
+
+        // Reconnect with new connection details
+        await axios.post(
+          `${import.meta.env.VITE_API_URL}/chats/${id}/connect`,
+          {
+            stream_id: streamId
+          },
+          {
+            withCredentials: true,
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          }
+        );
+
+        // Update connection status
+        handleConnectionStatusChange(id, true, 'edit-connection');
+
+        // Dismiss loading toast and show success
+        toast.dismiss(loadingToast);
+        toast.success('Connection updated & reconnected', {
+          style: {
+            background: '#000',
+            color: '#fff',
+            borderRadius: '12px',
+          },
+        });
+
+        return { success: true };
+      }
+
+      throw new Error('Failed to update connection');
+    } catch (error: any) {
+      console.error('Failed to update connection:', error);
+      toast.dismiss(loadingToast);
+      toast.error(error.response?.data?.error || 'Failed to update connection', {
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+        }
+      });
+
+
+      return {
+        success: false,
+        error: error.response?.data?.error || 'Failed to update connection'
+      };
+    }
   };
+
+  // const generateAIResponse = async (userMessage: string) => {
+  //   console.log('Generating AI response for:', userMessage);
+  //   const aiMessageId = `ai-${Date.now()}`;
+  //   const loadingSteps = [
+  //     { text: "NeoBase is analyzing your request..", done: false },
+  //     { text: "Fetching request relevant entities(tables, columns, etc.) from the database..", done: false },
+  //     { text: "Generating an optimized query & example results for the request..", done: false },
+  //     { text: "Analyzing the criticality of the query & if roll back is possible..", done: false }
+  //   ];
+
+  //   // Add initial loading message with first step only
+  //   setMessages(prev => [...prev, {
+  //     id: aiMessageId,
+  //     type: 'ai',
+  //     content: '',
+  //     isLoading: true,
+  //     loadingSteps: [loadingSteps[0]]
+  //   }]);
+
+  //   // Update steps one by one
+  //   for (let i = 0; i < loadingSteps.length; i++) {
+  //     await new Promise(resolve => setTimeout(resolve, 1500));
+  //     setMessages(prev => prev.map(msg =>
+  //       msg.id === aiMessageId ? {
+  //         ...msg,
+  //         loadingSteps: [
+  //           ...loadingSteps.slice(0, i + 1).map(step => ({ ...step, done: true })),
+  //           ...(i < loadingSteps.length - 1 ? [loadingSteps[i + 1]] : [])
+  //         ]
+  //       } : msg
+  //     ));
+  //   }
+
+  //   // Mark last step as done and immediately start content streaming
+  //   setMessages(prev => prev.map(msg =>
+  //     msg.id === aiMessageId ? {
+  //       ...msg,
+  //       loadingSteps: loadingSteps.map(step => ({ ...step, done: true })),
+  //       content: '',
+  //       startStreaming: true
+  //     } : msg
+  //   ));
+
+  //   // Start content streaming immediately
+  //   const fullContent = newMockMessage.content;
+  //   let currentContent = '';
+
+  //   for (let i = 0; i < fullContent.length; i++) {
+  //     await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
+  //     currentContent += fullContent[i];
+  //     setMessages(prev => prev.map(msg =>
+  //       msg.id === aiMessageId ? {
+  //         ...msg,
+  //         content: currentContent,
+  //         loadingSteps: msg.loadingSteps?.map(step => ({
+  //           ...step,
+  //           transitioning: true
+  //         }))
+  //       } : msg
+  //     ));
+  //   }
+
+  //   // Remove loading steps but keep isLoading true for query streaming
+  //   setMessages(prev => prev.map(msg =>
+  //     msg.id === aiMessageId ? {
+  //       ...msg,
+  //       loadingSteps: undefined,
+  //       queries: []
+  //     } : msg
+  //   ));
+
+  //   // Stream each query one by one
+  //   for (let i = 0; i < (newMockMessage.queries?.length || 0); i++) {
+  //     const query = newMockMessage.queries?.[i];
+  //     if (!query) continue;
+
+  //     // Stream query text
+  //     let currentQuery = '';
+  //     for (let j = 0; j < query.query.length; j++) {
+  //       await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 10));
+  //       currentQuery += query.query[j];
+  //       setMessages(prev => prev.map(msg =>
+  //         msg.id === aiMessageId ? {
+  //           ...msg,
+  //           queries: [
+  //             ...(msg.queries || []).slice(0, i),
+  //             { ...query, query: currentQuery, exampleResult: undefined },
+  //             ...(msg.queries || []).slice(i + 1)
+  //           ]
+  //         } : msg
+  //       ));
+  //     }
+
+  //     // Add example result gradually
+  //     if (Array.isArray(query.exampleResult)) {
+  //       for (let k = 0; k < query.exampleResult.length; k++) {
+  //         await new Promise(resolve => setTimeout(resolve, 50));
+  //         setMessages(prev => prev.map(msg =>
+  //           msg.id === aiMessageId ? {
+  //             ...msg,
+  //             queries: msg.queries?.map((q, index) =>
+  //               index === i ? {
+  //                 ...q,
+  //                 exampleResult: query.exampleResult?.slice(0, k + 1)
+  //               } : q
+  //             )
+  //           } : msg
+  //         ));
+  //       }
+  //     } else {
+  //       await new Promise(resolve => setTimeout(resolve, 100));
+  //       setMessages(prev => prev.map(msg =>
+  //         msg.id === aiMessageId ? {
+  //           ...msg,
+  //           queries: msg.queries?.map((q, index) =>
+  //             index === i ? { ...q, exampleResult: query.exampleResult } : q
+  //           )
+  //         } : msg
+  //       ));
+  //     }
+  //   }
+
+  //   // Finally remove loading state
+  //   setMessages(prev => prev.map(msg =>
+  //     msg.id === aiMessageId ? {
+  //       ...msg,
+  //       isLoading: false
+  //     } : msg
+  //   ));
+  // };
 
   // Clear connection status when connection is deselected
   useEffect(() => {
@@ -380,12 +490,32 @@ function AppContent() {
   }, [selectedConnection]);
 
   const handleSelectConnection = useCallback((id: string) => {
-    const connection = chats.find(chat => chat.id === id);
+    console.log('handleSelectConnection happened', { id });
+    const connection = chats.find(c => c.id === id);
     if (connection) {
+      console.log('connection found', { connection });
       setSelectedConnection(connection);
+
     }
   }, [chats]);
 
+  // Add onClose handler for EventSource
+  useEffect(() => {
+    if (!eventSource) return;
+
+    const handleClose = () => {
+      console.log('SSE connection closed');
+      // Update connection status
+      if (selectedConnection) {
+        handleConnectionStatusChange(selectedConnection.id, false, 'sse-close');
+      }
+      setEventSource(null);
+    };
+
+
+  }, [eventSource, selectedConnection, handleConnectionStatusChange]);
+
+  // Update setupSSEConnection to include onclose
   const setupSSEConnection = useCallback(async (chatId: string) => {
     try {
       // Close existing SSE connection if any
@@ -424,13 +554,19 @@ function AppContent() {
         }
       };
 
+      sse.onerror = () => {
+        console.log('SSE connection error');
+        handleConnectionStatusChange(chatId, false, 'sse-close');
+        setEventSource(null);
+      };
+
       setEventSource(sse);
       return newStreamId;
     } catch (error) {
       console.error('Failed to setup SSE connection:', error);
       throw error;
     }
-  }, [eventSource, generateStreamId, setStreamId]);
+  }, [eventSource, generateStreamId, setStreamId, handleConnectionStatusChange]);
 
   // Cleanup SSE on unmount or connection change
   useEffect(() => {
@@ -442,8 +578,317 @@ function AppContent() {
     };
   }, [eventSource]);
 
+  const handleCancelStream = async () => {
+    if (!selectedConnection?.id || !streamId) return;
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/stream/cancel?stream_id=${streamId}`,
+        {},
+        {
+          withCredentials: true,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Failed to cancel stream:', error);
+    }
+  };
+
+  // Add helper function for typing animation
+  const animateTyping = async (text: string, messageId: string) => {
+    const words = text.split(' ');
+    for (const word of words) {
+      await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
+      setMessages(prev => {
+        const [lastMessage, ...rest] = prev;
+        if (lastMessage?.id === messageId) {
+          return [
+            {
+              ...lastMessage,
+              content: lastMessage.content + (lastMessage.content ? ' ' : '') + word,
+            },
+            ...rest
+          ];
+        }
+        return prev;
+      });
+    }
+  };
+
+  const handleSendMessage = async (content: string) => {
+    if (!selectedConnection?.id || !streamId || isMessageSending) return;
+
+    try {
+      console.log('handleSendMessage -> content', content);
+      console.log('handleSendMessage -> streamId', streamId);
+      // Check if the eventSource is open
+      console.log('eventSource?.readyState', eventSource?.readyState);
+      if (eventSource?.readyState === EventSource.OPEN) {
+        console.log('EventSource is open');
+      } else {
+        console.log('EventSource is not open');
+        // Push an error message to the messages array
+        const errorMsg: Message = {
+          id: `error-${Date.now()}`,
+          type: 'assistant',
+          content: '',  // Start empty for animation
+          queries: [],
+          isLoading: false,
+          isStreaming: true
+        };
+
+        setMessages(prev => [errorMsg, ...prev]);
+
+        // Animate error message
+        await animateTyping(
+          '❌ Error: SSE connection is not open. We\'ve automatically reconnected. Please try again.',
+          errorMsg.id
+        );
+
+        // Set final state
+        setMessages(prev => {
+          const [lastMessage, ...rest] = prev;
+          if (lastMessage?.id === errorMsg.id) {
+            return [{ ...lastMessage, isStreaming: false }, ...rest];
+          }
+          return prev;
+        });
+
+        await setupSSEConnection(selectedConnection.id);
+        return;
+      }
+
+      const response = await axios.post<SendMessageResponse>(
+        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/messages`,
+        {
+          stream_id: streamId,
+          content: content
+        },
+        {
+          withCredentials: true,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        const userMessage: Message = {
+          id: response.data.data.id,
+          type: 'user',
+          content: response.data.data.content,
+          isLoading: false,
+          queries: [],
+          isStreaming: false
+        };
+
+        setMessages(prev => [userMessage, ...prev]);
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      toast.error('Failed to send message', errorToast);
+    }
+  };
+
+  // Update SSE handling
+  useEffect(() => {
+    if (!eventSource) return;
+
+    const handleSSEMessage = async function (this: EventSource, e: any) {
+      try {
+        console.log('handleSSEMessage -> msg', e);
+        const response: StreamResponse = JSON.parse(e.data);
+        console.log('handleSSEMessage -> response', response);
+
+        switch (response.event) {
+          case 'ai-response-step':
+            if (!temporaryMessage) {
+              // Set default of 500 ms delay for first step
+              await new Promise(resolve => setTimeout(resolve, 500));
+              console.log('ai-response-step -> !temporaryMessage');
+              const tempMsg: Message = {
+                id: `temp-${Date.now()}`,
+                type: 'assistant',
+                content: response.data,
+                queries: [],
+                isLoading: true,
+                loadingSteps: [{ text: response.data, done: false }],
+                isStreaming: true
+              };
+              setTemporaryMessage(tempMsg);
+              setMessages(prev => [tempMsg, ...prev]);
+            } else {
+              console.log('ai-response-step -> temporaryMessage');
+              // Update the existing message with new step
+              setMessages(prev => {
+                // Find the streaming message (should be the first one)
+                const streamingMessage = prev.find(msg => msg.isStreaming);
+                if (!streamingMessage) return prev;
+
+                // Create updated message with new step
+                const updatedMessage = {
+                  ...streamingMessage,
+                  content: response.data,
+                  loadingSteps: [
+                    ...(streamingMessage.loadingSteps || []).map(step => ({ ...step, done: true })),
+                    { text: response.data, done: false }
+                  ]
+                };
+
+                // Replace the streaming message in the array
+                return prev.map(msg =>
+                  msg.id === streamingMessage.id ? updatedMessage : msg
+                );
+              });
+            }
+            break;
+
+          case 'ai-response':
+            if (response.data) {
+              console.log('ai-response -> response.data', response.data);
+
+              // Create base message with empty loading steps
+              const baseMessage: Message = {
+                id: response.data.id,
+                type: 'assistant' as const,
+                content: '',
+                queries: response.data.queries || [],
+                isLoading: false,
+                loadingSteps: [], // Clear loading steps for final message
+                isStreaming: true
+              };
+
+              setMessages(prev => {
+                const withoutTemp = prev.filter(msg => !msg.isStreaming);
+                console.log('ai-response -> withoutTemp', withoutTemp);
+                return [baseMessage, ...withoutTemp];
+              });
+
+              // Animate both content and queries
+              const finalWords = response.data.content.split(' ');
+              for (const word of finalWords) {
+                await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15 + Math.random() * 15)); // Faster delay
+                setMessages(prev => {
+                  const [lastMessage, ...rest] = prev;
+                  if (lastMessage?.id === response.data.id) {
+                    return [
+                      {
+                        ...lastMessage,
+                        content: lastMessage.content + (lastMessage.content ? ' ' : '') + word,
+                      },
+                      ...rest
+                    ];
+                  }
+                  return prev;
+                });
+              }
+
+              // Animate queries if they exist
+              if (response.data.queries && response.data.queries.length > 0) {
+                for (const query of response.data.queries) {
+                  const queryWords = query.query.split(' ');
+                  for (const word of queryWords) {
+                    await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15)); // Even faster for queries
+                    setMessages(prev => {
+                      const [lastMessage, ...rest] = prev;
+                      if (lastMessage?.id === response.data.id) {
+                        const updatedQueries = [...(lastMessage.queries || [])];
+                        const queryIndex = updatedQueries.findIndex(q => q.id === query.id);
+                        if (queryIndex !== -1) {
+                          updatedQueries[queryIndex] = {
+                            ...updatedQueries[queryIndex],
+                            query: updatedQueries[queryIndex].query + (updatedQueries[queryIndex].query ? ' ' : '') + word
+                          };
+                        }
+                        return [
+                          {
+                            ...lastMessage,
+                            queries: updatedQueries
+                          },
+                          ...rest
+                        ];
+                      }
+                      return prev;
+                    });
+                  }
+                }
+              }
+
+              // Set final state
+              setMessages(prev => {
+                const [lastMessage, ...rest] = prev;
+                if (lastMessage?.id === response.data.id) {
+                  return [
+                    {
+                      ...lastMessage,
+                      isStreaming: false
+                    },
+                    ...rest
+                  ];
+                }
+                return prev;
+              });
+            }
+            setTemporaryMessage(null);
+            break;
+
+          case 'ai-response-error':
+            // Show error message instead of temporary message
+            setMessages(prev => {
+              const withoutTemp = prev.filter(msg => !msg.isStreaming);
+              return [{
+                id: `error-${Date.now()}`,
+                type: 'assistant',
+                content: `⚠️ Error: ${response.data?.error}`,
+                queries: [],
+                isLoading: false,
+                loadingSteps: [],
+                isStreaming: false
+              }, ...withoutTemp];
+            });
+            setTemporaryMessage(null);
+            toast.error(response.data, errorToast);
+            break;
+
+          case 'response-cancelled':
+            handleCancelStream();
+            const cancelMsg: Message = {
+              id: `cancelled-${Date.now()}`,
+              type: 'assistant',
+              content: '',  // Start empty for animation
+              queries: [],
+              isLoading: false,
+              loadingSteps: [], // Clear loading steps
+              isStreaming: false // Set to false immediately
+            };
+
+            setMessages(prev => {
+              const withoutTemp = prev.filter(msg => !msg.isStreaming);
+              return [cancelMsg, ...withoutTemp];
+            });
+
+            // Animate cancel message
+            await animateTyping('❌ Response cancelled', cancelMsg.id);
+            setTemporaryMessage(null);
+            break;
+        }
+      } catch (error) {
+        console.error('Failed to parse SSE message:', error);
+      }
+    };
+
+    eventSource.onmessage = handleSSEMessage
+
+    return () => {
+      eventSource.onmessage = null;
+    };
+  }, [eventSource, temporaryMessage, selectedConnection?.id, streamId]);
+
   if (isLoading) {
-    return <div>Loading...</div>; // Or a proper loading component
+    return <div className="flex items-center justify-center bg-white h-screen">Loading...</div>; // Or a proper loading component
   }
 
   if (!isAuthenticated) {
@@ -495,21 +940,14 @@ function AppContent() {
           isExpanded={isSidebarExpanded}
           messages={messages}
           setMessages={setMessages}
-          onSendMessage={(message) => {
-            const userMessageId = `user-${Date.now()}`;
-            const newMessage = {
-              id: userMessageId,
-              type: 'user' as const,
-              content: message,
-            };
-            setMessages(prev => [...prev, newMessage]);
-            generateAIResponse(message);
-          }}
+          onSendMessage={handleSendMessage}
           onClearChat={handleClearChat}
           onCloseConnection={handleCloseConnection}
           onEditConnection={handleEditConnection}
-          isConnected={connectionStatuses[selectedConnection.id] || false}
           onConnectionStatusChange={handleConnectionStatusChange}
+          isConnected={!!connectionStatuses[selectedConnection.id]}
+          eventSource={eventSource}
+          onCancelStream={handleCancelStream}
         />
       ) : (
         <div className={`

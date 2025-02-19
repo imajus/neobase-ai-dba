@@ -1,9 +1,11 @@
-import { ArrowDown } from 'lucide-react';
+import { EventSourcePolyfill } from 'event-source-polyfill';
+import { ArrowDown, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
 import axios from '../../services/axiosConfig';
 import { Chat, Connection } from '../../types/chat';
+import { MessagesResponse, transformBackendMessage } from '../../types/messages';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import ConnectionModal from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
@@ -16,18 +18,21 @@ interface ChatWindowProps {
   isExpanded: boolean;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string) => Promise<void>;
   onClearChat: () => void;
   onCloseConnection: () => void;
   onEditConnection?: (id: string, connection: Connection) => void;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
+  eventSource: EventSourcePolyfill | null;
+  onCancelStream: () => Promise<void>;
 }
 
 interface QueryState {
   isExecuting: boolean;
   isExample: boolean;
 }
+
 
 export default function ChatWindow({
   chat,
@@ -40,6 +45,8 @@ export default function ChatWindow({
   onEditConnection,
   onConnectionStatusChange,
   isConnected,
+  eventSource,
+  onCancelStream
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -53,6 +60,12 @@ export default function ChatWindow({
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showEditConnection, setShowEditConnection] = useState(false);
   const { streamId, generateStreamId } = useStream();
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const pageSize = 20; // Messages per page
+  const loadingRef = useRef<HTMLDivElement>(null);
+  const [isMessageSending, setIsMessageSending] = useState(false);
 
   useEffect(() => {
     if (isConnected) {
@@ -240,7 +253,7 @@ export default function ChatWindow({
         // Update the edited message
         updated[messageIndex] = { ...editedMessage, content: content.trim() };
         // Keep the AI response if it exists
-        if (aiResponse && aiResponse.type === 'ai') {
+        if (aiResponse && aiResponse.type === 'assistant') {
           updated[messageIndex + 1] = aiResponse;
         }
         return updated;
@@ -249,6 +262,83 @@ export default function ChatWindow({
     setEditingMessageId(null);
     setEditInput('');
   }, [messages, setMessages]);
+
+  const fetchMessages = useCallback(async (pageNum: number) => {
+    if (!chat.id || isLoadingMessages) return;
+
+    try {
+      setIsLoadingMessages(true);
+      const response = await axios.get<MessagesResponse>(
+        `${import.meta.env.VITE_API_URL}/chats/${chat.id}/messages?page=${pageNum}&page_size=${pageSize}`,
+        {
+          withCredentials: true,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        const newMessages = response.data.data.messages.map(transformBackendMessage);
+
+        // Prepend messages to existing ones
+        setMessages(prev => {
+          const combined = [...newMessages, ...prev];
+          // Remove duplicates based on message ID
+          return Array.from(new Map(combined.map(m => [m.id, m])).values());
+        });
+
+        setHasMore(response.data.data.total > pageNum * pageSize);
+      }
+    } catch (error) {
+      console.error('Failed to fetch messages:', error);
+      toast.error('Failed to load messages');
+    } finally {
+      setIsLoadingMessages(false);
+    }
+  }, [chat.id]);
+
+  // Setup intersection observer for infinite scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMessages) {
+          setPage(prev => prev + 1);
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    if (loadingRef.current) {
+      observer.observe(loadingRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMessages]);
+
+  // Fetch messages when page changes
+  useEffect(() => {
+    fetchMessages(page);
+  }, [page, fetchMessages]);
+
+  // Reset pagination when chat changes
+  useEffect(() => {
+    setPage(1);
+    setHasMore(true);
+    setMessages([]);
+  }, [chat.id, setMessages]);
+
+  // Remove handleSendMessage and use the prop instead
+  const handleMessageSubmit = async (content: string) => {
+    if (isMessageSending) return;
+    setIsMessageSending(true);
+    try {
+      await onSendMessage(content);
+    } finally {
+      setIsMessageSending(false);
+    }
+  };
 
   return (
     <div className={`flex-1 flex flex-col h-screen transition-all duration-300 relative ${isExpanded ? 'md:ml-80' : 'md:ml-20'}`}>
@@ -276,6 +366,15 @@ export default function ChatWindow({
           md:mt-0
         "
       >
+        <div ref={loadingRef} className="w-full py-4 text-center">
+          {isLoadingMessages && (
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-gray-600">Loading messages...</span>
+            </div>
+          )}
+        </div>
+
         <div
           className={`
             max-w-5xl 
@@ -293,7 +392,7 @@ export default function ChatWindow({
             }
           `}
         >
-          {messages.map((message) => (
+          {[...messages].reverse().map((message) => (
             <MessageTile
               key={message.id}
               message={message}
@@ -311,10 +410,41 @@ export default function ChatWindow({
         </div>
         <div ref={messagesEndRef} />
 
+        {messages.some(m => m.isStreaming) && (
+          <div className="
+            fixed 
+            bottom-[88px]  // Position it above message input
+            left-1/2 
+            -translate-x-1/2 
+            z-50
+          ">
+            <button
+              onClick={onCancelStream}
+              className="
+                neo-border
+                px-3
+                py-1.5
+                flex
+                items-center
+                gap-1.5
+                bg-white
+                text-sm
+                font-medium
+                hover:bg-red-50
+                active:translate-y-[1px]
+                active:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+              "
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span>Cancel</span>
+            </button>
+          </div>
+        )}
+
         {showScrollButton && (
           <button
             onClick={scrollToBottom}
-            className="fixed bottom-24 z-[10] right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border"
+            className="fixed bottom-24 right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border z-40"
             title="Scroll to bottom"
           >
             <ArrowDown className="w-6 h-6" />
@@ -324,8 +454,9 @@ export default function ChatWindow({
 
       <MessageInput
         isConnected={isConnected}
-        onSendMessage={onSendMessage}
+        onSendMessage={handleMessageSubmit}
         isExpanded={isExpanded}
+        isDisabled={isMessageSending}
       />
 
       {showClearConfirm && (
@@ -351,12 +482,13 @@ export default function ChatWindow({
           <ConnectionModal
             initialData={chat}
             onClose={() => setShowEditConnection(false)}
-            onEdit={(data) => {
-              onEditConnection?.(chat.id, data);
+            onEdit={async (data) => {
+              await onEditConnection?.(chat.id, data);
               setShowEditConnection(false);
+              return { success: true };
             }}
-            onSubmit={(data) => {
-              onEditConnection?.(chat.id, data);
+            onSubmit={async (data) => {
+              await onEditConnection?.(chat.id, data);
               setShowEditConnection(false);
             }}
           />

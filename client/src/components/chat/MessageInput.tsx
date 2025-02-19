@@ -3,8 +3,9 @@ import { FormEvent, useState } from 'react';
 
 interface MessageInputProps {
     isConnected: boolean;
-    onSendMessage: (message: string) => void;
+    onSendMessage: (content: string) => Promise<void>;
     isExpanded: boolean;
+    isDisabled?: boolean;
 }
 
 export default function MessageInput({ isConnected, onSendMessage, isExpanded }: MessageInputProps) {
