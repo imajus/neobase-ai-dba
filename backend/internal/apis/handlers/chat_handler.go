@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"neobase-ai/pkg/dbmanager"
 
@@ -308,6 +309,26 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		`{"event":"sse-connected","data":"SSE Connected successfully"}`)))
 	c.Writer.Flush()
 
+	// Create a done channel to signal goroutine termination
+	done := make(chan struct{})
+
+	// Send heartbeat i.e SSE is alive
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n",
+					`{"event":"heartbeat","data":"SSE is alive"}`)))
+				c.Writer.Flush()
+			}
+		}
+	}()
+
 	// Subscribe to chat service stream
 	h.chatService.SetStreamHandler(h)
 
@@ -321,6 +342,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		h.mu.Unlock()
 		log.Printf("Chat SSE Disconnected: userID=%s, chatID=%s, streamID=%s", userID, chatID, streamID)
 	}()
+
+	// Wait for client disconnect
+	<-c.Request.Context().Done()
+	close(done) // Signal heartbeat goroutine to stop
 
 	// Stream responses
 	c.Stream(func(w io.Writer) bool {

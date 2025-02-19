@@ -802,6 +802,10 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		Password: chatDetails.Connection.Password,
 		Database: chatDetails.Connection.Database,
 	}); err != nil {
+		log.Printf("ChatService -> ConnectDB -> error: %v", err)
+		if strings.Contains(err.Error(), "already exists") {
+			return http.StatusOK, nil
+		}
 		return http.StatusBadRequest, err
 	}
 
