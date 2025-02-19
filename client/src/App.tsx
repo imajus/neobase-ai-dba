@@ -1,6 +1,7 @@
 import axios from 'axios';
+import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes, Database, LineChart, MessageSquare } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
@@ -9,6 +10,7 @@ import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
 import ConnectionModal from './components/modals/ConnectionModal';
+import { StreamProvider, useStream } from './contexts/StreamContext';
 import mockMessages, { newMockMessage } from './data/mockMessages';
 import authService from './services/authService';
 import './services/axiosConfig';
@@ -16,7 +18,7 @@ import chatService from './services/chatService';
 import { LoginFormData, SignupFormData } from './types/auth';
 import { Chat, ChatsResponse, Connection } from './types/chat';
 
-function App() {
+function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
@@ -28,6 +30,9 @@ function App() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [isLoadingChats, setIsLoadingChats] = useState(false);
+  const [connectionStatuses, setConnectionStatuses] = useState<Record<string, boolean>>({});
+  const [eventSource, setEventSource] = useState<EventSourcePolyfill | null>(null);
+  const { streamId, setStreamId, generateStreamId } = useStream();
 
   // Check auth status on mount
   useEffect(() => {
@@ -174,9 +179,32 @@ function App() {
     setMessages([]);
   };
 
-  const handleCloseConnection = () => {
+  const handleConnectionStatusChange = useCallback((chatId: string, isConnected: boolean, from: string) => {
+    console.log('Connection status changed:', { chatId, isConnected, from });
+    if (chatId && typeof isConnected === 'boolean') { // Strict type check
+      setConnectionStatuses(prev => ({
+        ...prev,
+        [chatId]: isConnected
+      }));
+    }
+  }, []);
+
+  const handleCloseConnection = useCallback(() => {
+    // Close SSE connection if exists
+    if (eventSource) {
+      console.log('Closing SSE connection');
+      eventSource.close();
+      setEventSource(null);
+    }
+
+    // Clear connection status
+    if (selectedConnection) {
+      handleConnectionStatusChange(selectedConnection.id, false, 'app-close-connection');
+    }
+
+    // Clear selected connection
     setSelectedConnection(undefined);
-  };
+  }, [eventSource, selectedConnection, handleConnectionStatusChange]);
 
   const handleDeleteConnection = async (id: string) => {
     try {
@@ -197,21 +225,20 @@ function App() {
     }
   };
 
-  const handleEditConnection = (id: string, data: Chat) => {
+  const handleEditConnection = (id: string, data: Connection) => {
     setChats(prev => prev.map(chat => {
       if (chat.id === id) {
         return {
           ...chat,
-          id: data.id,
-          user_id: data.user_id,
-          connection: data.connection,
-          created_at: data.created_at,
-          updated_at: data.updated_at,
+          id: selectedConnection?.id || '',
+          user_id: selectedConnection?.user_id || '',
+          connection: data,
+          created_at: selectedConnection?.created_at || '',
+          updated_at: selectedConnection?.updated_at || '',
         };
       }
       return chat;
     }));
-    setSelectedConnection(data);
   };
 
   const generateAIResponse = async (userMessage: string) => {
@@ -345,6 +372,76 @@ function App() {
     ));
   };
 
+  // Clear connection status when connection is deselected
+  useEffect(() => {
+    if (!selectedConnection) {
+      setConnectionStatuses({});
+    }
+  }, [selectedConnection]);
+
+  const handleSelectConnection = useCallback((id: string) => {
+    const connection = chats.find(chat => chat.id === id);
+    if (connection) {
+      setSelectedConnection(connection);
+    }
+  }, [chats]);
+
+  const setupSSEConnection = useCallback(async (chatId: string) => {
+    try {
+      // Close existing SSE connection if any
+      if (eventSource) {
+        eventSource.close();
+        setEventSource(null);
+      }
+
+      const newStreamId = generateStreamId();
+      setStreamId(newStreamId);
+
+      // Create and setup new SSE connection
+      const sse = new EventSourcePolyfill(
+        `${import.meta.env.VITE_API_URL}/chats/${chatId}/stream?stream_id=${newStreamId}`,
+        {
+          withCredentials: true,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      // Setup SSE event handlers
+      sse.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('SSE message:', data);
+
+          if (data.event === 'db-connected') {
+            handleConnectionStatusChange(chatId, true, 'app-sse-connection');
+          } else if (data.event === 'db-disconnected') {
+            handleConnectionStatusChange(chatId, false, 'app-sse-connection');
+          }
+        } catch (error) {
+          console.error('Failed to parse SSE message:', error);
+        }
+      };
+
+      setEventSource(sse);
+      return newStreamId;
+    } catch (error) {
+      console.error('Failed to setup SSE connection:', error);
+      throw error;
+    }
+  }, [eventSource, generateStreamId, setStreamId]);
+
+  // Cleanup SSE on unmount or connection change
+  useEffect(() => {
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+        setEventSource(null);
+      }
+    };
+  }, [eventSource]);
+
   if (isLoading) {
     return <div>Loading...</div>; // Or a proper loading component
   }
@@ -382,13 +479,14 @@ function App() {
         onToggleExpand={() => setIsSidebarExpanded(!isSidebarExpanded)}
         connections={chats}
         isLoadingConnections={isLoadingChats}
-        onSelectConnection={(id) => {
-          setSelectedConnection(chats.find(chat => chat.id === id));
-        }}
+        onSelectConnection={handleSelectConnection}
         onAddConnection={() => setShowConnectionModal(true)}
         onLogout={handleLogout}
         selectedConnection={selectedConnection}
         onDeleteConnection={handleDeleteConnection}
+        onConnectionStatusChange={handleConnectionStatusChange}
+        setupSSEConnection={setupSSEConnection}
+        eventSource={eventSource}
       />
 
       {selectedConnection ? (
@@ -410,6 +508,8 @@ function App() {
           onClearChat={handleClearChat}
           onCloseConnection={handleCloseConnection}
           onEditConnection={handleEditConnection}
+          isConnected={connectionStatuses[selectedConnection.id] || false}
+          onConnectionStatusChange={handleConnectionStatusChange}
         />
       ) : (
         <div className={`
@@ -582,6 +682,14 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <StreamProvider>
+      <AppContent />
+    </StreamProvider>
   );
 }
 

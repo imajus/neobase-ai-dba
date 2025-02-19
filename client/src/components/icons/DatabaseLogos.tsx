@@ -15,12 +15,6 @@ const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
 };
 
 export default function DatabaseLogo({ type, size = 24, className = '' }: DatabaseLogoProps) {
-  console.log('DatabaseLogo render:', {
-    type,
-    logoPath: databaseLogos[type],
-    fullPath: databaseLogos[type],
-    baseUrl: import.meta.env.VITE_FRONTEND_BASE_URL
-  });
 
   return (
     <div

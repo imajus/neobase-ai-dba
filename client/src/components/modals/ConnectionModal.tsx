@@ -5,8 +5,8 @@ import { Chat, Connection } from '../../types/chat';
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
-  onSubmit: (connection: Connection) => Promise<void>;
-  onEdit?: (data: Chat) => void;
+  onSubmit: (connection: Connection) => void;
+  onEdit?: (connection: Connection) => void;
 }
 
 interface FormErrors {

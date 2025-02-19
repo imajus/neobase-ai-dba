@@ -1,3 +1,5 @@
+import axios from 'axios';
+import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   Boxes,
   Loader2,
@@ -7,7 +9,7 @@ import {
   Plus,
   Trash2
 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import chatService from '../../services/chatService';
 import { Chat } from '../../types/chat';
@@ -21,6 +23,15 @@ export interface Connection {
   type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
 }
 
+interface ConnectionStatus {
+  isConnected: boolean;
+  type: string;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+}
+
 interface SidebarProps {
   isExpanded: boolean;
   onToggleExpand: () => void;
@@ -31,6 +42,14 @@ interface SidebarProps {
   onDeleteConnection?: (id: string) => void;
   selectedConnection?: Chat;
   isLoadingConnections: boolean;
+  onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
+  setupSSEConnection: (chatId: string) => Promise<string>;
+  eventSource: EventSourcePolyfill | null;
+}
+
+interface SSEEvent {
+  event: 'db-connected' | 'db-disconnected';
+  data: string;
 }
 
 export default function Sidebar({
@@ -43,9 +62,23 @@ export default function Sidebar({
   onDeleteConnection,
   selectedConnection,
   isLoadingConnections,
+  onConnectionStatusChange,
+  setupSSEConnection,
 }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [connectionToDelete, setConnectionToDelete] = useState<Chat | null>(null);
+  const [currentConnectedChatId, setCurrentConnectedChatId] = useState<string | null>(null);
+  const previousConnectionRef = useRef<string | null>(null);
+
+  // Watch for selected connection changes
+  useEffect(() => {
+    const selectedId = selectedConnection?.id;
+    // Only setup new connection if selection changed and is different from current
+    if (selectedId && selectedId !== previousConnectionRef.current) {
+      handleSelectConnection(selectedId);
+      previousConnectionRef.current = selectedId;
+    }
+  }, [selectedConnection]);
 
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
@@ -80,6 +113,78 @@ export default function Sidebar({
     }
   };
 
+  const connectToDatabase = async (chatId: string, streamId: string) => {
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/chats/${chatId}/connect`,
+        { stream_id: streamId },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Failed to connect to database:', error);
+      throw error;
+    }
+  };
+
+  const checkConnectionStatus = async (chatId: string, streamId: string) => {
+    try {
+      const response = await axios.get<ConnectionStatus>(
+        `${import.meta.env.VITE_API_URL}/chats/${chatId}/connection-status`,
+        {
+          withCredentials: true,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      return response.data.isConnected;
+    } catch (error) {
+      console.error('Failed to check connection status:', error);
+      return false;
+    }
+  };
+
+  const handleSelectConnection = useCallback(async (id: string) => {
+    try {
+      console.log('handleSelectConnection', { id, currentConnectedChatId });
+
+      // If same connection is selected, just update UI and return
+      if (id === currentConnectedChatId) {
+        onSelectConnection(id);
+        return;
+      }
+
+      setCurrentConnectedChatId(id);
+      onSelectConnection(id);
+      onConnectionStatusChange?.(id, false, 'sidebar-connecting');
+
+      // Setup new SSE connection
+      const newStreamId = await setupSSEConnection(id);
+
+      // Check current connection status before attempting to connect
+      const connectionStatus = await checkConnectionStatus(id, newStreamId);
+      console.log('Current connection status:', { id, connectionStatus });
+
+      if (!connectionStatus) {
+        // Only connect if not already connected
+        await connectToDatabase(id, newStreamId);
+      } else {
+        // If already connected, just update the UI
+        onConnectionStatusChange?.(id, true, 'sidebar-existing-connection');
+      }
+
+    } catch (error) {
+      console.error('Failed to setup connection:', error);
+      onConnectionStatusChange?.(id, false, 'sidebar-select-connection');
+      toast.error('Failed to connect to database');
+    }
+  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, setupSSEConnection]);
+
   return (
     <>
       <div
@@ -106,7 +211,7 @@ export default function Sidebar({
                 <div key={connection.id} className="mb-4">
                   <div className={`relative group ${!isExpanded ? 'md:w-12 md:h-12' : ''}`}>
                     <button
-                      onClick={() => onSelectConnection(connection.id)}
+                      onClick={() => handleSelectConnection(connection.id)}
                       className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
                         }`}
                       title={connection.connection.database}

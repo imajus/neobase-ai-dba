@@ -1,13 +1,16 @@
 import { ArrowDown } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Chat } from '../../types/chat';
+import { useStream } from '../../contexts/StreamContext';
+import axios from '../../services/axiosConfig';
+import { Chat, Connection } from '../../types/chat';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import ConnectionModal from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
 import { Message } from './types';
+
 interface ChatWindowProps {
   chat: Chat;
   isExpanded: boolean;
@@ -16,7 +19,9 @@ interface ChatWindowProps {
   onSendMessage: (message: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
-  onEditConnection?: (id: string, data: Chat) => void;
+  onEditConnection?: (id: string, connection: Connection) => void;
+  onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
+  isConnected: boolean;
 }
 
 interface QueryState {
@@ -33,6 +38,8 @@ export default function ChatWindow({
   onClearChat,
   onCloseConnection,
   onEditConnection,
+  onConnectionStatusChange,
+  isConnected,
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -41,19 +48,17 @@ export default function ChatWindow({
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [queryStates, setQueryStates] = useState<Record<string, QueryState>>({});
-  const [isConnected, setIsConnected] = useState(true);
-  const [isConnecting, setIsConnecting] = useState(true);
+  const [isConnecting, setIsConnecting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showEditConnection, setShowEditConnection] = useState(false);
+  const { streamId, generateStreamId } = useStream();
 
   useEffect(() => {
-    // Simulate connection establishment
-    const timer = setTimeout(() => {
+    if (isConnected) {
       setIsConnecting(false);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, []);
+    }
+  }, [isConnected]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -108,32 +113,84 @@ export default function ChatWindow({
   }, [onClearChat]);
 
   const handleCloseConfirm = useCallback(() => {
-    setIsConnected(false);
     setShowCloseConfirm(false);
   }, []);
 
-  const handleReconnect = useCallback(() => {
-    setIsConnected(true);
-    toast.success('Reconnected to database', {
-      style: {
-        background: '#000',
-        color: '#fff',
-        border: '4px solid #000',
-        borderRadius: '12px',
-        boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
-        padding: '12px 24px',
-        fontSize: '14px',
-        fontWeight: '500',
-      },
-      position: 'bottom-center',
-      duration: 2000,
-    });
-  }, []);
+  const handleReconnect = useCallback(async () => {
+    try {
+      setIsConnecting(true);
+      let currentStreamId = streamId;
 
-  const handleDisconnect = useCallback(() => {
-    onCloseConnection();
-    handleCloseConfirm();
-  }, [onCloseConnection, handleCloseConfirm]);
+      // Generate new streamId if not available
+      if (!currentStreamId) {
+        currentStreamId = generateStreamId();
+      }
+
+      // Check if the connection is already established
+      const connectionStatus = await checkConnectionStatus(chat.id, currentStreamId);
+      if (!connectionStatus) {
+        await connectToDatabase(chat.id, currentStreamId);
+      }
+      console.log('connectionStatus', connectionStatus);
+      onConnectionStatusChange?.(chat.id, true, 'chat-window-reconnect');
+    } catch (error) {
+      console.error('Failed to reconnect to database:', error);
+      onConnectionStatusChange?.(chat.id, false, 'chat-window-reconnect');
+      toast.error('Failed to reconnect to database', {
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+        }
+      });
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [chat.id, streamId, generateStreamId, onConnectionStatusChange]);
+
+  const checkConnectionStatus = async (chatId: string, streamId: string) => {
+    try {
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL}/chats/${chatId}/connection-status`,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Failed to check connection status:', error);
+      return false;
+    }
+  };
+
+  const handleDisconnect = useCallback(async () => {
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/chats/${chat.id}/disconnect`,
+        {
+          stream_id: streamId
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      onConnectionStatusChange?.(chat.id, false, 'chat-window-disconnect');
+      onCloseConnection();
+      handleCloseConfirm();
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+      toast.error('Failed to disconnect from database');
+    }
+  }, [chat.id, onCloseConnection, handleCloseConfirm, onConnectionStatusChange]);
 
   const handleEditMessage = (id: string) => {
     // Prevent auto-scroll
@@ -148,6 +205,24 @@ export default function ChatWindow({
     // Prevent auto-scroll
     setEditingMessageId(null);
     setEditInput('');
+  };
+
+  const connectToDatabase = async (chatId: string, streamId: string) => {
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/chats/${chatId}/connect`,
+        { stream_id: streamId },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Failed to connect to database:', error);
+      throw error;
+    }
   };
 
   const handleSaveEdit = useCallback((id: string, content: string) => {
@@ -277,7 +352,7 @@ export default function ChatWindow({
             initialData={chat}
             onClose={() => setShowEditConnection(false)}
             onEdit={(data) => {
-              onEditConnection?.(data.id, data);
+              onEditConnection?.(chat.id, data);
               setShowEditConnection(false);
             }}
             onSubmit={(data) => {
