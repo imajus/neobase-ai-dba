@@ -380,7 +380,7 @@ func (h *ChatHandler) CancelStream(c *gin.Context) {
 	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
 
 	// First cancel the processing
-	h.chatService.CancelProcessing(streamID)
+	h.chatService.CancelProcessing(userID, chatID, streamID)
 
 	// Then cleanup the stream
 	h.streamMutex.Lock()

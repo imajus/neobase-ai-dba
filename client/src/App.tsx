@@ -731,6 +731,19 @@ function AppContent() {
         console.log('handleSSEMessage -> response', response);
 
         switch (response.event) {
+          case 'db-connected':
+            console.log('db-connected -> response', response);
+            if (selectedConnection) {
+              handleConnectionStatusChange(selectedConnection.id, true, 'app-sse-connection');
+            }
+
+            break;
+          case 'db-disconnected':
+            console.log('db-disconnected -> response', response);
+            if (selectedConnection) {
+              handleConnectionStatusChange(selectedConnection.id, false, 'app-sse-connection');
+            }
+            break;
           case 'ai-response-step':
             // Set default of 500 ms delay for first step
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -862,7 +875,7 @@ function AppContent() {
               return [{
                 id: `error-${Date.now()}`,
                 type: 'assistant',
-                content: `⚠️ Error: ${response.data?.error}`,
+                content: `${typeof response.data === 'object' ? response.data.error : response.data}`, // Handle both string and object errors
                 queries: [],
                 is_loading: false,
                 loading_steps: [],
@@ -870,7 +883,7 @@ function AppContent() {
               }, ...withoutTemp];
             });
             setTemporaryMessage(null);
-            toast.error(response.data, errorToast);
+
             break;
 
           case 'response-cancelled':
@@ -897,7 +910,7 @@ function AppContent() {
             });
 
             // Animate cancel message
-            await animateTyping('❌ Your request was cancelled by you or system timeout.', cancelMsg.id);
+            await animateTyping(response.data, cancelMsg.id);
 
             // Clear temporary message state
             setTemporaryMessage(null);
