@@ -1,6 +1,8 @@
 package models
 
 import (
+	"log"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -39,6 +41,7 @@ type QueryError struct {
 }
 
 func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query) *Message {
+	log.Printf("NewMessage -> queries: %v", queries)
 	return &Message{
 		UserID:  userID,
 		ChatID:  chatID,

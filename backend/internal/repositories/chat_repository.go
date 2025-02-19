@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"log"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
 
@@ -91,6 +92,7 @@ func (r *chatRepository) FindByUserID(userID primitive.ObjectID, page, pageSize 
 }
 
 func (r *chatRepository) CreateMessage(message *models.Message) error {
+	log.Printf("CreateMessage -> message: %v", message)
 	_, err := r.messageCollection.InsertOne(context.Background(), message)
 	return err
 }

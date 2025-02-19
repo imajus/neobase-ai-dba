@@ -721,20 +721,23 @@ func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, ta
 
 	// Get table definition checksum
 	query := `
-		SELECT md5(string_agg(column_definition, ',' ORDER BY ordinal_position)) as checksum
-		FROM (
-			SELECT 
-				ordinal_position,
-				concat(
-					column_name, ':', 
-					data_type, ':', 
-					is_nullable, ':', 
-					coalesce(column_default, ''), ':',
-					coalesce(col_description((table_schema || '.' || table_name)::regclass::oid, ordinal_position), '')
-				) as column_definition
-			FROM information_schema.columns 
-			WHERE table_schema = 'public' AND table_name = $1
-		) t;
+		SELECT COALESCE(
+			(SELECT md5(string_agg(column_definition, ',' ORDER BY ordinal_position))
+			FROM (
+				SELECT 
+					ordinal_position,
+					concat(
+						column_name, ':', 
+						data_type, ':', 
+						is_nullable, ':', 
+						coalesce(column_default, ''), ':',
+						coalesce(col_description((table_schema || '.' || table_name)::regclass::oid, ordinal_position), '')
+					) as column_definition
+				FROM information_schema.columns 
+				WHERE table_schema = 'public' AND table_name = $1
+			) t),
+			'no_columns'
+		) as checksum;
 	`
 
 	var checksum string
@@ -744,61 +747,61 @@ func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, ta
 
 	// Get indexes checksum
 	indexQuery := `
-		SELECT md5(string_agg(index_definition, ',' ORDER BY index_name)) as checksum
-		FROM (
-			SELECT 
-				i.relname as index_name,
-				concat(
-					i.relname, ':', 
-					array_to_string(array_agg(a.attname ORDER BY a.attnum), ','), ':',
-					ix.indisunique
-				) as index_definition
-			FROM pg_class t
-			JOIN pg_index ix ON t.oid = ix.indrelid
-			JOIN pg_class i ON i.oid = ix.indexrelid
-			JOIN pg_attribute a ON a.attrelid = t.oid
-			WHERE a.attnum = ANY(ix.indkey)
-			AND t.relname = $1
-			GROUP BY i.relname, ix.indisunique
-		) t;
+		SELECT COALESCE(
+			(SELECT md5(string_agg(index_definition, ',' ORDER BY index_name))
+			FROM (
+				SELECT 
+					i.relname as index_name,
+					concat(
+						i.relname, ':', 
+						array_to_string(array_agg(a.attname ORDER BY a.attnum), ','), ':',
+						ix.indisunique
+					) as index_definition
+				FROM pg_class t
+				JOIN pg_index ix ON t.oid = ix.indrelid
+				JOIN pg_class i ON i.oid = ix.indexrelid
+				JOIN pg_attribute a ON a.attrelid = t.oid
+				WHERE a.attnum = ANY(ix.indkey)
+				AND t.relname = $1
+				GROUP BY i.relname, ix.indisunique
+			) t),
+			'no_indexes'
+		) as checksum;
 	`
 
 	var indexChecksum string
 	if err := sqlDB.QueryRowContext(ctx, indexQuery, table).Scan(&indexChecksum); err != nil {
-		if err != sql.ErrNoRows {
-			return "", fmt.Errorf("failed to get index checksum: %v", err)
-		}
-		indexChecksum = "no_indexes"
+		return "", fmt.Errorf("failed to get index checksum: %v", err)
 	}
 
 	// Get foreign keys checksum
 	fkQuery := `
-		SELECT md5(string_agg(fk_definition, ',' ORDER BY constraint_name)) as checksum
-		FROM (
-			SELECT 
-				tc.constraint_name,
-				concat(
-					tc.constraint_name, ':',
-					kcu.column_name, ':',
-					ccu.table_name, ':',
-					ccu.column_name, ':',
-					rc.update_rule, ':',
-					rc.delete_rule
-				) as fk_definition
-			FROM information_schema.table_constraints tc
-			JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-			JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-			JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name
-			WHERE tc.table_name = $1 AND tc.constraint_type = 'FOREIGN KEY'
-		) t;
+		SELECT COALESCE(
+			(SELECT md5(string_agg(fk_definition, ',' ORDER BY constraint_name))
+			FROM (
+				SELECT 
+					tc.constraint_name,
+					concat(
+						tc.constraint_name, ':',
+						kcu.column_name, ':',
+						ccu.table_name, ':',
+						ccu.column_name, ':',
+						rc.update_rule, ':',
+						rc.delete_rule
+					) as fk_definition
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+				JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+				JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name
+				WHERE tc.table_name = $1 AND tc.constraint_type = 'FOREIGN KEY'
+			) t),
+			'no_foreign_keys'
+		) as checksum;
 	`
 
 	var fkChecksum string
 	if err := sqlDB.QueryRowContext(ctx, fkQuery, table).Scan(&fkChecksum); err != nil {
-		if err != sql.ErrNoRows {
-			return "", fmt.Errorf("failed to get foreign key checksum: %v", err)
-		}
-		fkChecksum = "no_foreign_keys"
+		return "", fmt.Errorf("failed to get foreign key checksum: %v", err)
 	}
 
 	// Combine all checksums

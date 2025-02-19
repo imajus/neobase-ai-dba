@@ -402,12 +402,14 @@ func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema 
 		}
 	}
 
+	log.Printf("SchemaManager -> storeSchema -> Storage: %v", storage)
 	// Compress and store the schema
 	compressedData, err := sm.compressSchema(storage)
 	if err != nil {
 		return fmt.Errorf("failed to compress schema: %v", err)
 	}
 
+	log.Printf("SchemaManager -> storeSchema -> Compressed data: %v", compressedData)
 	return sm.storageService.StoreCompressed(ctx, chatID, compressedData)
 }
 

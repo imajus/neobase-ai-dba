@@ -523,9 +523,12 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, messageID,
 			RollbackDependentQuery: rollbackDependentQuery,
 		})
 	}
+
+	log.Printf("processLLMResponse -> queries: %v", queries)
 	// Save response and send final message
 	chatResponseMsg := models.NewMessage(userObjID, chatObjID, string(MessageTypeAssistant), jsonResponse["assistantMessage"].(string), &queries)
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
+		log.Printf("processLLMResponse -> Error saving chat response message: %v", err)
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "error",
 			Data:  map[string]string{"error": err.Error()},
