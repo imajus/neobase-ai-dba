@@ -77,7 +77,7 @@ type DatabaseDriver interface {
 
 // Add new Transaction interface
 type Transaction interface {
-	ExecuteQuery(ctx context.Context, query string, queryType string) *QueryExecutionResult
+	ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult
 	Commit() error
 	Rollback() error
 }

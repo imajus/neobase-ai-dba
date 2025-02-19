@@ -872,7 +872,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				"error":      queryErr,
 			},
 		})
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute query: %v", queryErr)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute query: %v", queryErr.Details)
 	}
 
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)

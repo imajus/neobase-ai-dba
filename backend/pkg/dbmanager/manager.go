@@ -177,7 +177,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 	}()
 
 	conn.OnSchemaChange = func(chatID string) {
-		m.schemaManager.TriggerSchemaCheck(chatID)
+		m.schemaManager.TriggerSchemaCheck(chatID, TriggerTypeManual)
 	}
 
 	log.Printf("DBManager -> Connect -> Connection completed successfully for chatID: %s", chatID)
@@ -763,6 +763,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 		}
 	}
 
+	log.Printf("Manager -> ExecuteQuery -> Driver: %v", driver)
 	// Begin transaction
 	tx := driver.BeginTx(execCtx, conn)
 	if tx == nil {
@@ -781,7 +782,9 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 
 	go func() {
 		defer close(done)
-		result = tx.ExecuteQuery(execCtx, query, queryType)
+		log.Printf("Manager -> ExecuteQuery -> Executing query: %v", query)
+		result = tx.ExecuteQuery(execCtx, conn, query, queryType)
+		log.Printf("Manager -> ExecuteQuery -> Result: %v", result)
 		if result.Error != nil {
 			queryErr = result.Error
 		}
@@ -819,6 +822,17 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 				Details: err.Error(),
 			}
 		}
+		log.Println("Manager -> ExecuteQuery -> Commit completed:")
+		log.Printf("Manager -> ExecuteQuery -> Query type: %v", queryType)
+
+		go func() {
+			log.Println("Manager -> ExecuteQuery -> Triggering schema check")
+			time.Sleep(2 * time.Second)
+			if conn.OnSchemaChange != nil {
+				conn.OnSchemaChange(conn.ChatID)
+			}
+		}()
+
 		return result, nil
 	}
 }

@@ -409,7 +409,6 @@ func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema 
 		return fmt.Errorf("failed to compress schema: %v", err)
 	}
 
-	log.Printf("SchemaManager -> storeSchema -> Compressed data: %v", compressedData)
 	return sm.storageService.StoreCompressed(ctx, chatID, compressedData)
 }
 
@@ -782,74 +781,77 @@ func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db
 	return !reflect.DeepEqual(storage.TableChecksums, currentChecksums), nil
 }
 
-// Update TriggerSchemaCheck to handle multiple return values
-func (m *SchemaManager) TriggerSchemaCheck(chatID string) {
-	log.Printf("SchemaManager -> TriggerSchemaCheck -> Starting for chatID: %s", chatID)
+// Add TriggerType enum
+type TriggerType string
 
-	conn, exists := m.dbManager.connections[chatID]
-	if !exists {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> No connection found for chatID: %s", chatID)
-		return
-	}
+const (
+	TriggerTypeManual TriggerType = "manual" // For DDL operations
+	TriggerTypeAuto   TriggerType = "auto"   // For interval checks
+)
 
-	// Get DBExecutor wrapper
-	db, err := m.dbManager.GetConnection(chatID)
+// Update TriggerSchemaCheck to handle different trigger types
+func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerType) error {
+	log.Printf("SchemaManager -> TriggerSchemaCheck -> Starting for chatID: %s, triggerType: %s", chatID, triggerType)
+
+	// Get current connection
+	db, err := sm.dbManager.GetConnection(chatID)
 	if err != nil {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error getting connection: %v", err)
-		return
+		return fmt.Errorf("failed to get connection: %v", err)
 	}
 
-	// First do a quick check
-	hasChanged, err := m.QuickSchemaCheck(context.Background(), chatID, db)
+	// Get connection config
+	conn, exists := sm.dbManager.connections[chatID]
+	if !exists {
+		return fmt.Errorf("connection not found for chatID: %s", chatID)
+	}
+
+	if triggerType == TriggerTypeManual {
+		// For manual triggers (DDL), directly fetch and store new schema
+		log.Printf("SchemaManager -> TriggerSchemaCheck -> Manual trigger, fetching new schema")
+		schema, err := db.GetSchema(context.Background())
+		if err != nil {
+			return fmt.Errorf("failed to get current schema: %v", err)
+		}
+
+		// Store the fresh schema immediately
+		if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
+			return fmt.Errorf("failed to store schema: %v", err)
+		}
+		return nil
+	}
+
+	// For auto triggers, check for changes first
+	hasChanged, err := sm.QuickSchemaCheck(context.Background(), chatID, db)
 	if err != nil {
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error in quick check: %v", err)
 	} else if !hasChanged {
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> No schema changes detected in quick check")
-		return
+		return nil
 	}
 
-	// If quick check indicates changes, do full schema comparison
-	diff, err := m.CheckSchemaChanges(context.Background(), chatID, db, conn.Config.Type)
+	// If changes detected, get fresh schema
+	schema, err := db.GetSchema(context.Background())
 	if err != nil {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error: %v", err)
-		return
+		return fmt.Errorf("failed to get current schema: %v", err)
 	}
 
-	if diff != nil {
-		log.Printf("SchemaManager -> Schema changes detected: %+v", diff)
-
-		// Create LLM-friendly schema
-		schema, err := m.GetSchema(context.Background(), chatID, db, conn.Config.Type)
-		if err != nil {
-			log.Printf("SchemaManager -> TriggerSchemaCheck -> Error getting schema: %v", err)
-			return
-		}
-
-		llmSchema := m.createLLMSchema(schema, conn.Config.Type)
-
-		// Store updated schema with LLM version
-		checksums, err := m.getTableChecksums(context.Background(), db, conn.Config.Type)
-		if err != nil {
-			log.Printf("SchemaManager -> TriggerSchemaCheck -> Error getting checksums: %v", err)
-			return
-		}
-
-		storage := &SchemaStorage{
-			FullSchema:     schema,
-			LLMSchema:      llmSchema,
-			TableChecksums: checksums,
-			UpdatedAt:      time.Now(),
-		}
-
-		if err := m.storageService.Store(context.Background(), chatID, storage); err != nil {
-			log.Printf("SchemaManager -> TriggerSchemaCheck -> Error storing schema: %v", err)
-		}
-
-		// Notify subscribers about schema change
-		if conn.OnSchemaChange != nil {
-			conn.OnSchemaChange(chatID)
-		}
+	// Store the fresh schema and get detailed changes
+	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
+		return fmt.Errorf("failed to store schema: %v", err)
 	}
+
+	// Get and log detailed changes
+	diff, err := sm.CheckSchemaChanges(context.Background(), chatID, db, conn.Config.Type)
+	if err != nil {
+		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error checking changes: %v", err)
+		return err
+	}
+
+	if diff != nil && !diff.IsFirstTime {
+		log.Printf("SchemaManager -> TriggerSchemaCheck -> Schema changes detected: %+v", diff)
+	}
+
+	return nil
 }
 
 // Add method to TableDiff to check if it's empty

@@ -193,9 +193,10 @@ func (d *PostgresDriver) IsAlive(conn *Connection) bool {
 // Modify ExecuteQuery to check for schema changes
 func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	startTime := time.Now()
-
+	log.Printf("PostgreSQL Driver -> ExecuteQuery -> Query: %v", query)
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
+		log.Printf("PostgreSQL Driver -> ExecuteQuery -> Failed to get SQL connection: %v", err)
 		return &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
 			Error: &dtos.QueryError{
@@ -206,159 +207,212 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 		}
 	}
 
-	rows, err := sqlDB.QueryContext(ctx, query)
-	if err != nil {
-		return &QueryExecutionResult{
-			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Error: &dtos.QueryError{
-				Code:    "QUERY_EXECUTION_FAILED",
-				Message: "Query execution failed",
-				Details: err.Error(),
-			},
+	// Split multiple statements
+	statements := splitStatements(query)
+	var lastResult *sql.Rows
+	var lastError error
+
+	log.Printf("PostgreSQL Driver -> ExecuteQuery -> Statements: %v", statements)
+	// Execute each statement
+	for _, stmt := range statements {
+		if stmt = strings.TrimSpace(stmt); stmt == "" {
+			continue
+		}
+
+		lastResult, lastError = sqlDB.QueryContext(ctx, stmt)
+		if lastError != nil {
+			log.Printf("PostgreSQL Driver -> ExecuteQuery -> Query execution failed: %v", lastError)
+			return &QueryExecutionResult{
+				ExecutionTime: int(time.Since(startTime).Milliseconds()),
+				Error: &dtos.QueryError{
+					Code:    "QUERY_EXECUTION_FAILED",
+					Message: "Query execution failed",
+					Details: lastError.Error(),
+				},
+			}
+		}
+		if lastResult != nil {
+			defer lastResult.Close()
 		}
 	}
-	defer rows.Close()
 
-	result := d.processRows(rows, startTime)
-
-	// If DDL, trigger schema check
-	if queryType == QueryTypeDDL {
-		// Notify manager to update schema
-		if conn.OnSchemaChange != nil {
-			go conn.OnSchemaChange(conn.ChatID)
+	// Process results from the last statement if it returned rows
+	var result *QueryExecutionResult
+	if lastResult != nil {
+		result = processRows(lastResult, startTime)
+	} else {
+		result = &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Result: map[string]interface{}{
+				"message": "Query executed successfully",
+			},
 		}
 	}
 
 	return result
 }
 
+// Helper function to split SQL statements
+func splitStatements(query string) []string {
+	// Basic statement splitting - can be enhanced for more complex cases
+	statements := strings.Split(query, ";")
+
+	// Clean up statements
+	var result []string
+	for _, stmt := range statements {
+		if stmt = strings.TrimSpace(stmt); stmt != "" {
+			result = append(result, stmt)
+		}
+	}
+	return result
+}
+
 func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
+	log.Printf("PostgreSQL Driver -> BeginTx -> Starting transaction")
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
+		log.Printf("PostgreSQL Driver -> BeginTx -> Failed to get SQL connection: %v", err)
 		return nil
 	}
 
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
+		log.Printf("PostgreSQL Driver -> BeginTx -> Failed to begin transaction: %v", err)
 		return nil
 	}
 
-	return &PostgresTransaction{tx: tx}
+	// Pass connection to transaction
+	return &PostgresTransaction{
+		tx:   tx,
+		conn: conn,
+	}
 }
 
-// Add PostgreSQL transaction implementation
+// Update PostgresTransaction to handle schema updates
 type PostgresTransaction struct {
-	tx *sql.Tx
+	tx   *sql.Tx
+	conn *Connection // Add connection reference
 }
 
-func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, query string, queryType string) *QueryExecutionResult {
+func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	startTime := time.Now()
+	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Query: %v", query)
 
-	rows, err := t.tx.QueryContext(ctx, query)
-	if err != nil {
-		return &QueryExecutionResult{
+	// Split multiple statements
+	statements := splitStatements(query)
+	var lastResult *sql.Rows
+	var lastError error
+
+	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Statements: %v", statements)
+
+	// Execute each statement in transaction
+	for _, stmt := range statements {
+		if stmt = strings.TrimSpace(stmt); stmt == "" {
+			continue
+		}
+
+		lastResult, lastError = t.tx.QueryContext(ctx, stmt)
+		if lastError != nil {
+			log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Failed to execute statement: %v", lastError)
+			return &QueryExecutionResult{
+				ExecutionTime: int(time.Since(startTime).Milliseconds()),
+				Error: &dtos.QueryError{
+					Code:    "QUERY_EXECUTION_FAILED",
+					Message: "Query execution failed",
+					Details: lastError.Error(),
+				},
+			}
+		}
+		if lastResult != nil {
+			defer lastResult.Close()
+		}
+	}
+
+	// Process results
+	var result *QueryExecutionResult
+	if lastResult != nil {
+		result = processRows(lastResult, startTime)
+	} else {
+		result = &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Error: &dtos.QueryError{
-				Code:    "QUERY_ERROR",
-				Message: "Query execution failed",
-				Details: err.Error(),
+			Result: map[string]interface{}{
+				"message": "Query executed successfully",
 			},
 		}
 	}
-	defer rows.Close()
 
-	return (&PostgresDriver{}).processRows(rows, startTime)
+	return result
 }
 
 func (t *PostgresTransaction) Commit() error {
+	log.Printf("PostgreSQL Transaction -> Commit -> Committing transaction")
 	return t.tx.Commit()
 }
 
 func (t *PostgresTransaction) Rollback() error {
+	log.Printf("PostgreSQL Transaction -> Rollback -> Rolling back transaction")
 	return t.tx.Rollback()
 }
 
-// Helper method to process rows
-func (d *PostgresDriver) processRows(rows *sql.Rows, startTime time.Time) *QueryExecutionResult {
-	log.Printf("PostgreSQL Driver -> processRows -> Starting to process rows")
+// Helper function to process rows (moved from driver to be shared)
+func processRows(rows *sql.Rows, startTime time.Time) *QueryExecutionResult {
 	columns, err := rows.Columns()
-	log.Printf("PostgreSQL Driver -> processRows -> Columns: %+v", columns)
 	if err != nil {
 		return &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
 			Error: &dtos.QueryError{
-				Code:    "METADATA_ERROR",
-				Message: "Failed to get column metadata",
+				Code:    "FAILED_TO_GET_COLUMNS",
+				Message: "Failed to get columns",
 				Details: err.Error(),
 			},
 		}
 	}
 
-	result := make([]map[string]interface{}, 0)
-
+	var results []map[string]interface{}
 	for rows.Next() {
+		result := make(map[string]interface{})
 		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-
-		for i := range columns {
-			valuePtrs[i] = &values[i]
+		pointers := make([]interface{}, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
 		}
 
-		if err := rows.Scan(valuePtrs...); err != nil {
+		if err := rows.Scan(pointers...); err != nil {
 			return &QueryExecutionResult{
 				ExecutionTime: int(time.Since(startTime).Milliseconds()),
 				Error: &dtos.QueryError{
-					Code:    "SCAN_ERROR",
-					Message: "Failed to scan row data",
+					Code:    "FAILED_TO_SCAN_ROWS",
+					Message: "Failed to scan rows",
 					Details: err.Error(),
 				},
 			}
 		}
 
-		entry := make(map[string]interface{})
 		for i, col := range columns {
-			var v interface{}
 			val := values[i]
-			b, ok := val.([]byte)
-			if ok {
-				v = string(b)
-			} else {
-				v = val
-			}
-			entry[col] = v
+			result[col] = val
 		}
-		result = append(result, entry)
+		results = append(results, result)
 	}
 
-	log.Printf("PostgreSQL Driver -> processRows -> Result: %+v", result)
-
-	resultJSON, err := json.Marshal(result)
+	resultJSON, err := json.Marshal(results)
 	if err != nil {
 		return &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
 			Error: &dtos.QueryError{
-				Code:    "JSON_ERROR",
-				Message: "Failed to marshal result to JSON",
+				Code:    "FAILED_TO_MARSHAL_RESULTS",
+				Message: "Failed to marshal results",
 				Details: err.Error(),
 			},
 		}
 	}
 
-	log.Printf("PostgreSQL Driver -> processRows -> Result JSON: %s", string(resultJSON))
-
-	var resultMap map[string]interface{}
-	if len(result) > 0 {
-		resultMap = result[0]
-	} else {
-		resultMap = make(map[string]interface{})
-	}
-
-	log.Printf("PostgreSQL Driver -> processRows -> Result Map: %+v", resultMap)
-
 	return &QueryExecutionResult{
-		Result:        resultMap,
-		ResultJSON:    string(resultJSON),
 		ExecutionTime: int(time.Since(startTime).Milliseconds()),
+		Result: map[string]interface{}{
+			"results": results,
+		},
+		ResultJSON: string(resultJSON),
 	}
 }
 
