@@ -1,41 +1,164 @@
+import axios from 'axios';
 import { Boxes, Database, LineChart, MessageSquare } from 'lucide-react';
-import { useState } from 'react';
-import { Toaster } from 'react-hot-toast';
+import { useEffect, useState } from 'react';
+import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
 import { Message } from './components/chat/types';
 import StarUsButton from './components/common/StarUsButton';
+import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
-import ConnectionModal, { ConnectionFormData } from './components/modals/ConnectionModal';
-import mockConnections from './data/mockConnections';
+import ConnectionModal from './components/modals/ConnectionModal';
 import mockMessages, { newMockMessage } from './data/mockMessages';
+import authService from './services/authService';
+import './services/axiosConfig';
 import { LoginFormData, SignupFormData } from './types/auth';
+import { Chat, ChatsResponse } from './types/chat';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
-  const [connections, setConnections] = useState<ConnectionFormData[]>(mockConnections);
+  const [connections, setConnections] = useState<Chat[]>([]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
-  const [selectedConnection, setSelectedConnection] = useState<ConnectionFormData>();
+  const [selectedConnection, setSelectedConnection] = useState<Chat>();
   const [messages, setMessages] = useState<Message[]>(mockMessages);
-  const handleLogin = (data: LoginFormData) => {
-    console.log('Login:', data);
-    setIsAuthenticated(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [isLoadingChats, setIsLoadingChats] = useState(false);
+
+  // Check auth status on mount
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  // First, update the toast configurations
+  const toastStyle = {
+    style: {
+      background: '#000',
+      color: '#fff',
+      border: '4px solid #000',
+      borderRadius: '12px',
+      boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+      padding: '12px 24px',
+      fontSize: '16px',
+      fontWeight: '500',
+      zIndex: 9999,
+    },
+  } as const;
+
+
+  const errorToast = {
+    style: {
+      ...toastStyle.style,
+      background: '#ff4444',  // Red background for errors
+      border: '4px solid #cc0000',
+      color: '#fff',
+      fontWeight: 'bold',
+    },
+    duration: 4000,
+    icon: '⚠️',
   };
 
-  const handleSignup = (data: SignupFormData) => {
-    console.log('Signup:', data);
-    setIsAuthenticated(true);
+  const checkAuth = async () => {
+    try {
+      console.log("Starting auth check...");
+      const isAuth = await authService.checkAuth();
+      console.log("Auth check result:", isAuth);
+      setIsAuthenticated(isAuth);
+      setAuthError(null);
+    } catch (error: any) {
+      console.error('Auth check failed:', error);
+      setIsAuthenticated(false);
+      setAuthError(error.message);
+      toast.error(error.message, errorToast);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add useEffect debug
+  useEffect(() => {
+    console.log("Auth state changed:", isAuthenticated);
+  }, [isAuthenticated]);
+
+  // Update useEffect to handle auth errors
+  useEffect(() => {
+    if (authError) {
+      toast.error(authError, errorToast);
+      setAuthError(null);
+    }
+  }, [authError]);
+
+  // Load chats when authenticated
+  useEffect(() => {
+    const loadChats = async () => {
+      if (!isAuthenticated) return;
+
+      setIsLoadingChats(true);
+      try {
+        const response = await axios.get<ChatsResponse>(`${import.meta.env.VITE_API_URL}/chats`, {
+          withCredentials: true,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log("Loaded chats:", response.data);
+        if (response.data?.data?.chats) {
+          setChats(response.data.data.chats);
+        }
+      } catch (error) {
+        console.error("Failed to load chats:", error);
+      } finally {
+        setIsLoadingChats(false);
+      }
+    };
+
+    loadChats();
+  }, [isAuthenticated]);
+
+  const handleLogin = async (data: LoginFormData) => {
+    try {
+      const response = await authService.login(data);
+      console.log("handleLogin response", response);
+      setIsAuthenticated(true);
+      setSuccessMessage(`Welcome back, ${response.data.user.username}!`);
+    } catch (error: any) {
+      console.error("Login error:", error);
+      throw error;
+    }
+  };
+
+  const handleSignup = async (data: SignupFormData) => {
+    try {
+      const response = await authService.signup(data);
+      console.log("handleSignup response", response);
+      setIsAuthenticated(true);
+      setSuccessMessage(`Welcome to NeoBase, ${response.data.user.username}!`);
+    } catch (error: any) {
+      console.error("Signup error:", error);
+      throw error;
+    }
   };
 
   const handleAddConnection = () => {
     setShowConnectionModal(true);
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setSelectedConnection(undefined);
-    setMessages(mockMessages);
+  const handleLogout = async () => {
+    try {
+      await authService.logout();
+      setSuccessMessage('You\'ve been logged out!');
+      setIsAuthenticated(false);
+      setSelectedConnection(undefined);
+      setMessages(mockMessages);
+    } catch (error: any) {
+      console.error('Logout failed:', error);
+      setIsAuthenticated(false);
+    }
   };
 
   const handleClearChat = () => {
@@ -53,21 +176,19 @@ function App() {
     }
   };
 
-  const handleEditConnection = (id: string, data: ConnectionFormData) => {
-    setConnections(prev => prev.map(conn => {
-      if (conn.id === id) {
+  const handleEditConnection = (id: string, data: Chat) => {
+    setChats(prev => prev.map(chat => {
+      if (chat.id === id) {
         return {
-          ...conn,
+          ...chat,
           id: data.id,
-          type: data.type,
-          host: data.host,
-          port: data.port,
-          database: data.database,
-          username: data.username,
-          password: data.password,
+          user_id: data.user_id,
+          connection: data.connection,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
         };
       }
-      return conn;
+      return chat;
     }));
     setSelectedConnection(data);
   };
@@ -203,6 +324,10 @@ function App() {
     ));
   };
 
+  if (isLoading) {
+    return <div>Loading...</div>; // Or a proper loading component
+  }
+
   if (!isAuthenticated) {
     return (
       <>
@@ -234,9 +359,10 @@ function App() {
       <Sidebar
         isExpanded={isSidebarExpanded}
         onToggleExpand={() => setIsSidebarExpanded(!isSidebarExpanded)}
-        connections={connections}
+        connections={chats}
+        isLoadingConnections={isLoadingChats}
         onSelectConnection={(id) => {
-          setSelectedConnection(connections.find(conn => conn.id === id));
+          setSelectedConnection(chats.find(chat => chat.id === id));
         }}
         onAddConnection={handleAddConnection}
         onLogout={handleLogout}
@@ -246,7 +372,7 @@ function App() {
 
       {selectedConnection ? (
         <ChatWindow
-          connection={selectedConnection}
+          chat={selectedConnection}
           isExpanded={isSidebarExpanded}
           messages={messages}
           setMessages={setMessages}
@@ -400,21 +526,52 @@ function App() {
         <ConnectionModal
           onClose={() => setShowConnectionModal(false)}
           onSubmit={(data) => {
-            const newConnection: ConnectionFormData = {
+            const newConnection: Chat = {
               id: Date.now().toString(),
-              type: data.type,
-              host: data.host,
-              port: data.port,
-              database: data.database,
-              username: data.username,
-              password: data.password,
+              user_id: '1',
+              connection: data.connection,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             };
             setConnections(prev => [...prev, newConnection]);
             setShowConnectionModal(false);
           }}
         />
       )}
-      <Toaster />
+      <Toaster
+        position="bottom-center"
+        reverseOrder={false}
+        gutter={8}
+        containerClassName="!fixed"
+        containerStyle={{
+          zIndex: 9999,
+          bottom: '2rem'
+        }}
+        toastOptions={{
+          success: {
+            style: toastStyle.style,
+            duration: 2000,
+            icon: '👋',
+          },
+          error: {
+            style: {
+              ...toastStyle.style,
+              background: '#ff4444',
+              border: '4px solid #cc0000',
+              color: '#fff',
+              fontWeight: 'bold',
+            },
+            duration: 4000,
+            icon: '⚠️',
+          },
+        }}
+      />
+      {successMessage && (
+        <SuccessBanner
+          message={successMessage}
+          onClose={() => setSuccessMessage(null)}
+        />
+      )}
     </div>
   );
 }

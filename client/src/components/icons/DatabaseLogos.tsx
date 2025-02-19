@@ -6,15 +6,22 @@ interface DatabaseLogoProps {
 
 // Import all logos using Vite's import.meta.env.BASE_URL
 const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
-  postgresql: `${import.meta.env.BASE_URL}postgresql-logo.png`,
-  mysql: `${import.meta.env.BASE_URL}mysql-logo.png`,
-  mongodb: `${import.meta.env.BASE_URL}mongodb-logo.png`,
-  redis: `${import.meta.env.BASE_URL}redis-logo.svg`,
-  clickhouse: `${import.meta.env.BASE_URL}clickhouse-logo.svg`,
-  neo4j: `${import.meta.env.BASE_URL}neo4j-logo.png`
+  postgresql: `${import.meta.env.VITE_FRONTEND_BASE_URL}postgresql-logo.png`,
+  mysql: `${import.meta.env.VITE_FRONTEND_BASE_URL}mysql-logo.png`,
+  mongodb: `${import.meta.env.VITE_FRONTEND_BASE_URL}mongodb-logo.png`,
+  redis: `${import.meta.env.VITE_FRONTEND_BASE_URL}redis-logo.svg`,
+  clickhouse: `${import.meta.env.VITE_FRONTEND_BASE_URL}clickhouse-logo.svg`,
+  neo4j: `${import.meta.env.VITE_FRONTEND_BASE_URL}neo4j-logo.png`
 };
 
 export default function DatabaseLogo({ type, size = 24, className = '' }: DatabaseLogoProps) {
+  console.log('DatabaseLogo render:', {
+    type,
+    logoPath: databaseLogos[type],
+    fullPath: databaseLogos[type],
+    baseUrl: import.meta.env.VITE_FRONTEND_BASE_URL
+  });
+
   return (
     <div
       className={`relative flex items-center justify-center ${className}`}
@@ -25,6 +32,11 @@ export default function DatabaseLogo({ type, size = 24, className = '' }: Databa
         alt={`${type} database logo`}
         className="w-full h-full object-contain"
         onError={(e) => {
+          console.error('Logo failed to load:', {
+            type,
+            src: e.currentTarget.src,
+            error: e
+          });
           // Fallback to a generic database icon if the logo fails to load
           e.currentTarget.style.display = 'none';
           const parent = e.currentTarget.parentElement;

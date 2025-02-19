@@ -37,7 +37,27 @@ func main() {
 	ginApp.Use(gin.Logger())
 
 	// Add CORS middleware
-	ginApp.Use(cors.Default())
+	// CORS
+	ginApp.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Accept",
+			"Authorization",
+			"User-Agent",
+			"Referer",
+			"sec-ch-ua",
+			"sec-ch-ua-mobile",
+			"sec-ch-ua-platform",
+			"Access-Control-Allow-Origin",
+			"Access-Control-Allow-Credentials",
+		},
+		ExposeHeaders:    []string{"Content-Length", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// Setup routes
 	routes.SetupDefaultRoutes(ginApp)

@@ -1,21 +1,12 @@
 import { AlertCircle, ChevronDown, X } from 'lucide-react';
 import React, { useState } from 'react';
+import { Chat, Connection } from '../../types/chat';
 
 interface ConnectionModalProps {
-  initialData?: ConnectionFormData;
+  initialData?: Chat;
   onClose: () => void;
-  onSubmit: (data: ConnectionFormData) => void;
-  onEdit?: (data: ConnectionFormData) => void;
-}
-
-export interface ConnectionFormData {
-  id: string;
-  type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
-  host: string;
-  port: string;
-  username: string;
-  password: string;
-  database: string;
+  onSubmit: (data: Chat) => void;
+  onEdit?: (data: Chat) => void;
 }
 
 interface FormErrors {
@@ -31,58 +22,64 @@ export default function ConnectionModal({
   onSubmit,
   onEdit,
 }: ConnectionModalProps) {
-  const [formData, setFormData] = useState<ConnectionFormData>(
+  const [formData, setFormData] = useState<Chat>(
     initialData || {
       id: '',
-      type: 'postgresql',
-      host: '',
-      port: '',
-      username: '',
-      password: '',
-      database: '',
+      user_id: '',
+      connection: {
+        id: '',
+        type: 'postgresql',
+        host: '',
+        port: '',
+        username: '',
+        password: '',
+        database: '',
+      },
+      created_at: '',
+      updated_at: '',
     }
   );
-
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
-  const validateField = (name: string, value: string) => {
+  const validateField = (name: string, value: Connection) => {
     switch (name) {
       case 'host':
-        if (!value.trim()) {
+        if (!value.host.trim()) {
           return 'Host is required';
         }
-        if (!/^[a-zA-Z0-9.-]+$/.test(value)) {
+        if (!/^[a-zA-Z0-9.-]+$/.test(value.host)) {
           return 'Invalid host format';
         }
         break;
       case 'port':
-        if (!value.trim()) {
+        if (!value.port.trim()) {
           return 'Port is required';
         }
-        const port = parseInt(value);
+        const port = parseInt(value.port);
         if (isNaN(port) || port < 1 || port > 65535) {
           return 'Port must be between 1 and 65535';
         }
         break;
       case 'database':
-        if (!value.trim()) {
+        if (!value.database.trim()) {
           return 'Database name is required';
         }
-        if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+        if (!/^[a-zA-Z0-9_-]+$/.test(value.database)) {
           return 'Invalid database name format';
         }
         break;
       case 'username':
-        if (!value.trim()) {
+        if (!value.username.trim()) {
           return 'Username is required';
         }
-        if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+        if (!/^[a-zA-Z0-9_-]+$/.test(value.username)) {
           return 'Invalid username format';
         }
         break;
+      default:
+        return '';
     }
-    return '';
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -93,7 +90,7 @@ export default function ConnectionModal({
     let hasErrors = false;
 
     ['host', 'port', 'database', 'username'].forEach(field => {
-      const error = validateField(field, formData[field as keyof ConnectionFormData]);
+      const error = validateField(field, formData.connection);
       if (error) {
         newErrors[field as keyof FormErrors] = error;
         hasErrors = true;
@@ -123,7 +120,7 @@ export default function ConnectionModal({
     }));
 
     if (touched[name]) {
-      const error = validateField(name, value);
+      const error = validateField(name, formData.connection);
       setErrors(prev => ({
         ...prev,
         [name]: error,
@@ -132,12 +129,12 @@ export default function ConnectionModal({
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
     setTouched(prev => ({
       ...prev,
       [name]: true,
     }));
-    const error = validateField(name, value);
+    const error = validateField(name, formData.connection);
     setErrors(prev => ({
       ...prev,
       [name]: error,
@@ -164,7 +161,7 @@ export default function ConnectionModal({
             <div className="relative">
               <select
                 name="type"
-                value={formData.type}
+                value={formData.connection.type}
                 onChange={handleChange}
                 className="neo-input w-full appearance-none pr-12"
               >
@@ -193,7 +190,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="host"
-              value={formData.host}
+              value={formData.connection.host}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.host && touched.host ? 'border-neo-error' : ''}`}
@@ -214,7 +211,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="port"
-              value={formData.port}
+              value={formData.connection.port}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.port && touched.port ? 'border-neo-error' : ''}`}
@@ -235,7 +232,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="database"
-              value={formData.database}
+              value={formData.connection.database}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.database && touched.database ? 'border-neo-error' : ''}`}
@@ -256,7 +253,7 @@ export default function ConnectionModal({
             <input
               type="text"
               name="username"
-              value={formData.username}
+              value={formData.connection.username}
               onChange={handleChange}
               onBlur={handleBlur}
               className={`neo-input w-full ${errors.username && touched.username ? 'border-neo-error' : ''}`}
@@ -277,7 +274,7 @@ export default function ConnectionModal({
             <input
               type="password"
               name="password"
-              value={formData.password}
+              value={formData.connection.password}
               onChange={handleChange}
               className="neo-input w-full"
               placeholder="Enter your database password"

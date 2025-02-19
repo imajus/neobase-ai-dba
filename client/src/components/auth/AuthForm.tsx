@@ -1,10 +1,10 @@
-import { AlertCircle, Boxes, KeyRound, Lock, UserRound } from 'lucide-react';
+import { AlertCircle, Boxes, KeyRound, Loader, Lock, UserRound } from 'lucide-react';
 import React, { useState } from 'react';
 import { LoginFormData, SignupFormData } from '../../types/auth';
 
 interface AuthFormProps {
-  onLogin: (data: LoginFormData) => void;
-  onSignup: (data: SignupFormData) => void;
+  onLogin: (data: LoginFormData) => Promise<void>;
+  onSignup: (data: SignupFormData) => Promise<void>;
 }
 
 interface FormErrors {
@@ -18,12 +18,14 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState<SignupFormData>({
     userName: '',
     password: '',
     confirmPassword: '',
     userSignupSecret: ''
   });
+  const [formError, setFormError] = useState<string | null>(null);
 
   const validateUserName = (userName: string) => {
     if (!userName) return 'Username is required';
@@ -63,17 +65,25 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+    setFormError(null);
 
     if (!validateForm()) return;
 
-    if (isLogin) {
-      const { userName, password } = formData;
-      onLogin({ userName, password });
-    } else {
-      onSignup(formData);
+    setIsLoading(true);
+    try {
+      if (isLogin) {
+        const { userName, password } = formData;
+        await onLogin({ userName, password });
+      } else {
+        await onSignup(formData);
+      }
+    } catch (error: any) {
+      setFormError(error.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -128,6 +138,15 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
         <p className="text-gray-600 text-center mb-8">
           {isLogin ? 'Welcome back to the NeoBase!' : 'Create your account to start using NeoBase'}
         </p>
+
+        {formError && (
+          <div className="mb-6 p-4 bg-red-50 border-2 border-red-500 rounded-lg">
+            <div className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="w-5 h-5" />
+              <p className="font-medium">{formError}</p>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -229,14 +248,26 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
             </div>
           )}
 
-          <button type="submit" className="neo-button w-full">
-            {isLogin ? 'Login' : 'Sign Up'}
+          <button
+            type="submit"
+            className="neo-button w-full relative"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <div className="flex items-center justify-center">
+                <Loader className="w-4 h-4 animate-spin text-gray-400 mr-2" />
+                {isLogin ? 'Logging in...' : 'Signing up...'}
+              </div>
+            ) : (
+              isLogin ? 'Login' : 'Sign Up'
+            )}
           </button>
           <div className="my-2" />
           <button
             type="button"
             onClick={() => setIsLogin(!isLogin)}
             className="neo-button-secondary w-full"
+            disabled={isLoading}
           >
             {isLogin ? 'Switch to Sign Up' : 'Switch to Login'}
           </button>

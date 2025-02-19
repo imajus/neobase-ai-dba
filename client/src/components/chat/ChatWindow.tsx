@@ -1,22 +1,22 @@
 import { ArrowDown } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { Chat } from '../../types/chat';
 import ConfirmationModal from '../modals/ConfirmationModal';
-import ConnectionModal, { ConnectionFormData } from '../modals/ConnectionModal';
+import ConnectionModal from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
 import { Message } from './types';
-
 interface ChatWindowProps {
-  connection: ConnectionFormData;
+  chat: Chat;
   isExpanded: boolean;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
-  onEditConnection?: (id: string, data: ConnectionFormData) => void;
+  onEditConnection?: (id: string, data: Chat) => void;
 }
 
 interface QueryState {
@@ -25,7 +25,7 @@ interface QueryState {
 }
 
 export default function ChatWindow({
-  connection,
+  chat,
   isExpanded,
   messages,
   setMessages,
@@ -178,7 +178,7 @@ export default function ChatWindow({
   return (
     <div className={`flex-1 flex flex-col h-screen transition-all duration-300 relative ${isExpanded ? 'md:ml-80' : 'md:ml-20'}`}>
       <ChatHeader
-        connection={connection}
+        chat={chat}
         isConnecting={isConnecting}
         isConnected={isConnected}
         onClearChat={() => setShowClearConfirm(true)}
@@ -274,22 +274,14 @@ export default function ChatWindow({
       {showEditConnection && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <ConnectionModal
-            initialData={{
-              id: connection.id,
-              type: connection.type,
-              host: connection.host,
-              port: connection.port.toString(),
-              database: connection.database,
-              username: connection.username,
-              password: '', // Don't pre-fill password for security
-            }}
+            initialData={chat}
             onClose={() => setShowEditConnection(false)}
             onEdit={(data) => {
               onEditConnection?.(data.id, data);
               setShowEditConnection(false);
             }}
             onSubmit={(data) => {
-              onEditConnection?.(connection.id, data);
+              onEditConnection?.(chat.id, data);
               setShowEditConnection(false);
             }}
           />
