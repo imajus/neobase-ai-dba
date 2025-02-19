@@ -819,9 +819,11 @@ func (s *chatService) CancelProcessing(streamID string) {
 	defer s.processesMu.Unlock()
 
 	if cancel, exists := s.activeProcesses[streamID]; exists {
+		log.Printf("CancelProcessing -> canceling processing for streamID: %s", streamID)
 		cancel() // Cancel the context
 		delete(s.activeProcesses, streamID)
 	}
+	log.Printf("CancelProcessing -> activeProcesses: %+v", s.activeProcesses)
 }
 
 func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error) {

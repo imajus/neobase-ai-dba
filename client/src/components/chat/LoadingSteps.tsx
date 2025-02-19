@@ -1,4 +1,4 @@
-import { Check, Loader2 } from 'lucide-react';
+import { Check, Loader } from 'lucide-react';
 
 interface Step {
     text: string;
@@ -16,22 +16,21 @@ export default function LoadingSteps({ steps }: LoadingStepsProps) {
                 <div key={index} className="flex items-start gap-2">
                     <div className="mt-1 flex-shrink-0">
                         {step.done ? (
-                            <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
-                                <Check className="w-3 h-3 text-white stroke-[3]" />
-                            </div>
+                            <Check className="w-5 h-5 text-green-500 stroke-[3]" />
                         ) : (
-                            <Loader2 className="w-4 h-4 text-gray-700 animate-spin" />
+                            <Loader className="w-5 h-5 animate-spin" />
                         )}
                     </div>
                     <p className={`
-                        text-gray-700 
+                        text-black
                         whitespace-pre-wrap
-                        ${step.done ? 'text-gray-500' : 'text-black'}
+                        ${step.done ? 'font-normal' : 'font-semibold'}
                     `}>
                         {step.text}
                     </p>
                 </div>
-            ))}
-        </div>
+            ))
+            }
+        </div >
     );
 } 

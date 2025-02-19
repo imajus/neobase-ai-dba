@@ -2,28 +2,29 @@ export interface QueryResult {
     id: string;
     query: string;
     description: string;
-    executionTime?: number;
-    exampleResult?: any[] | null;
-    executionResult?: any[] | null;
-    isExecuted?: boolean;
-    isRolledBack?: boolean;
+    execution_time?: number;
+    example_execution_time?: number;
+    example_result?: any[] | null;
+    execution_result?: any[] | null;
+    is_executed?: boolean;
+    is_rolled_back?: boolean;
     error?: {
         code: string;
         message: string;
         details?: string;
     };
-    isCritical?: boolean;
-    canRollback?: boolean;
+    is_critical?: boolean;
+    can_rollback?: boolean;
 }
 
 export interface Message {
     id: string;
     type: 'user' | 'assistant';
     content: string;
-    isLoading?: boolean;
-    loadingSteps?: LoadingStep[];
+    is_loading?: boolean;
+    loading_steps?: LoadingStep[];
     queries?: QueryResult[];
-    isStreaming?: boolean;
+    is_streaming?: boolean;
 }
 
 export interface LoadingStep {

@@ -66,7 +66,7 @@ export default function MessageTile({
 
     const handleExecuteQuery = (queryIndex: number) => {
         const query = message.queries?.[queryIndex];
-        if (query?.isCritical) {
+        if (query?.is_critical) {
             setQueryToExecute(queryIndex);
             setShowCriticalConfirm(true);
             return;
@@ -152,9 +152,8 @@ export default function MessageTile({
 
     const renderQuery = (isStreaming: boolean, query: QueryResult, index: number) => {
         const queryId = query.id;
-        const shouldShowExampleResult = !query.isExecuted && !query.isRolledBack;
-        const resultToShow = shouldShowExampleResult ? query.exampleResult : query.executionResult;
-
+        const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
+        const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
 
         return (
             <div>
@@ -221,7 +220,7 @@ export default function MessageTile({
                 `}>
                         <code className="whitespace-pre-wrap break-words">{query.query}</code>
                     </pre>
-                    {(query.executionResult || query.exampleResult || query.error) && (
+                    {(query.execution_result || query.example_result || query.error) && (
                         <div className="border-t border-gray-700 mt-2 w-full">
                             {queryStates[queryId]?.isExecuting ? (
                                 <div className="flex items-center justify-center p-8">
@@ -242,10 +241,10 @@ export default function MessageTile({
                                                     {shouldShowExampleResult ? 'Example Result:' : 'Result:'}
                                                 </span>
                                             )}
-                                            {query.executionTime && (
+                                            {query.execution_time && (
                                                 <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
                                                     <Clock className="w-3 h-3" />
-                                                    {query.executionTime.toLocaleString()}ms
+                                                    {query.execution_time.toLocaleString()}ms
                                                 </span>
                                             )}
                                         </div>
@@ -288,7 +287,7 @@ export default function MessageTile({
                                                 >
                                                     <Copy className="w-4 h-4" />
                                                 </button>
-                                                {!shouldShowExampleResult && query.canRollback && (
+                                                {!shouldShowExampleResult && query.can_rollback && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.preventDefault();
@@ -321,7 +320,7 @@ export default function MessageTile({
                                         <div className="w-full">
                                             <div className={`
                                             text-green-400 pb-6 w-full
-                                            ${!query.exampleResult && !query.error ? 'animate-pulse duration-300' : ''}
+                                            ${!query.example_result && !query.error ? 'animate-pulse duration-300' : ''}
                                         `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
@@ -432,15 +431,15 @@ export default function MessageTile({
         ${message.queries?.length ? 'min-w-full' : ''}
     `}>
                         <div className="relative">
-                            {message.loadingSteps && message.loadingSteps.length > 0 && (
+                            {message.content.length === 0 && message.loading_steps && message.loading_steps.length > 0 && (
                                 <div className={`
                                     ${message.content ? 'animate-fade-up-out absolute w-full' : ''}
                                     text-gray-700
                                 `}>
                                     <LoadingSteps
-                                        steps={message.loadingSteps.map((step, index) => ({
+                                        steps={message.loading_steps.map((step, index) => ({
                                             text: step.text,
-                                            done: index !== message.loadingSteps!.length - 1
+                                            done: index !== message.loading_steps!.length - 1
                                         }))}
                                     />
                                 </div>
@@ -491,12 +490,12 @@ export default function MessageTile({
                                     </div>
                                 </div>
                             ) : (
-                                <div className={message.loadingSteps ? 'animate-fade-in' : ''}>
+                                <div className={message.loading_steps ? 'animate-fade-in' : ''}>
                                     <p className="text-lg whitespace-pre-wrap break-words">{message.content}</p>
                                     {message.queries && message.queries.length > 0 && (
                                         <div className="min-w-full">
                                             {message.queries.map((query: QueryResult, index: number) =>
-                                                renderQuery(message.isStreaming || false, query, index)
+                                                renderQuery(message.is_streaming || false, query, index)
                                             )}
                                         </div>
                                     )}

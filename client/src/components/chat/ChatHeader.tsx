@@ -22,9 +22,6 @@ export default function ChatHeader({
     onShowCloseConfirm,
     onReconnect,
 }: ChatHeaderProps) {
-    // Add debug logging
-    console.log('ChatHeader connection status:', { isConnecting, isConnected, chatId: chat.id });
-
     const connectionStatus = useMemo(() => {
         if (isConnecting) {
             return (

@@ -1,4 +1,3 @@
-import { EventSourcePolyfill } from 'event-source-polyfill';
 import { ArrowDown, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
@@ -24,7 +23,6 @@ interface ChatWindowProps {
   onEditConnection?: (id: string, connection: Connection) => void;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
-  eventSource: EventSourcePolyfill | null;
   onCancelStream: () => Promise<void>;
 }
 
@@ -45,7 +43,6 @@ export default function ChatWindow({
   onEditConnection,
   onConnectionStatusChange,
   isConnected,
-  eventSource,
   onCancelStream
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
@@ -410,7 +407,7 @@ export default function ChatWindow({
         </div>
         <div ref={messagesEndRef} />
 
-        {messages.some(m => m.isStreaming) && (
+        {messages.some(m => m.is_streaming) && (
           <div className="
             fixed 
             bottom-[88px]  // Position it above message input
@@ -423,7 +420,7 @@ export default function ChatWindow({
               className="
                 neo-border
                 px-3
-                py-1.5
+                py-2
                 flex
                 items-center
                 gap-1.5
@@ -436,7 +433,7 @@ export default function ChatWindow({
               "
             >
               <XCircle className="w-3.5 h-3.5" />
-              <span>Cancel</span>
+              <span>Cancel Request</span>
             </button>
           </div>
         )}

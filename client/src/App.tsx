@@ -5,13 +5,12 @@ import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
-import { Message } from './components/chat/types';
+import { LoadingStep, Message } from './components/chat/types';
 import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
 import ConnectionModal from './components/modals/ConnectionModal';
 import { StreamProvider, useStream } from './contexts/StreamContext';
-import mockMessages from './data/mockMessages';
 import authService from './services/authService';
 import './services/axiosConfig';
 import chatService from './services/chatService';
@@ -28,7 +27,7 @@ function AppContent() {
   const [connections, setConnections] = useState<Chat[]>([]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<Chat>();
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -554,8 +553,8 @@ function AppContent() {
         }
       };
 
-      sse.onerror = () => {
-        console.log('SSE connection error');
+      sse.onerror = (e: any) => {
+        console.log('SSE connection error', e);
         handleConnectionStatusChange(chatId, false, 'sse-close');
         setEventSource(null);
       };
@@ -581,6 +580,7 @@ function AppContent() {
   const handleCancelStream = async () => {
     if (!selectedConnection?.id || !streamId) return;
     try {
+      console.log('handleCancelStream -> streamId', streamId);
       await axios.post(
         `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/stream/cancel?stream_id=${streamId}`,
         {},
@@ -591,6 +591,13 @@ function AppContent() {
           }
         }
       );
+
+      // Remove temporary streaming message
+      setMessages(prev => {
+        return prev.filter(msg => !(msg.is_streaming && msg.id === 'temp'));
+      });
+
+
     } catch (error) {
       console.error('Failed to cancel stream:', error);
     }
@@ -635,8 +642,8 @@ function AppContent() {
           type: 'assistant',
           content: '',  // Start empty for animation
           queries: [],
-          isLoading: false,
-          isStreaming: true
+          is_loading: false,
+          is_streaming: true
         };
 
         setMessages(prev => [errorMsg, ...prev]);
@@ -651,7 +658,7 @@ function AppContent() {
         setMessages(prev => {
           const [lastMessage, ...rest] = prev;
           if (lastMessage?.id === errorMsg.id) {
-            return [{ ...lastMessage, isStreaming: false }, ...rest];
+            return [{ ...lastMessage, is_streaming: false }, ...rest];
           }
           return prev;
         });
@@ -680,12 +687,32 @@ function AppContent() {
           id: response.data.data.id,
           type: 'user',
           content: response.data.data.content,
-          isLoading: false,
+          is_loading: false,
           queries: [],
-          isStreaming: false
+          is_streaming: false
         };
 
+
         setMessages(prev => [userMessage, ...prev]);
+
+        console.log('ai-response-step -> creating new temp message');
+        const tempMsg: Message = {
+          id: `temp`,
+          type: 'assistant',
+          content: '',
+          queries: [],
+          is_loading: true,
+          loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
+          is_streaming: true
+        };
+
+        // Update messages first to remove any existing streaming messages
+        setMessages(prev => {
+          const withoutTemp = prev.filter(msg => !msg.is_streaming);
+          return [tempMsg, ...withoutTemp];
+        });
+
+        setTemporaryMessage(tempMsg);
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -705,35 +732,28 @@ function AppContent() {
 
         switch (response.event) {
           case 'ai-response-step':
+            // Set default of 500 ms delay for first step
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             if (!temporaryMessage) {
-              // Set default of 500 ms delay for first step
-              await new Promise(resolve => setTimeout(resolve, 500));
-              console.log('ai-response-step -> !temporaryMessage');
-              const tempMsg: Message = {
-                id: `temp-${Date.now()}`,
-                type: 'assistant',
-                content: response.data,
-                queries: [],
-                isLoading: true,
-                loadingSteps: [{ text: response.data, done: false }],
-                isStreaming: true
-              };
-              setTemporaryMessage(tempMsg);
-              setMessages(prev => [tempMsg, ...prev]);
+              console.log('ai-response-step -> creating new temp message');
             } else {
-              console.log('ai-response-step -> temporaryMessage');
+              console.log('ai-response-step -> updating existing temp message');
               // Update the existing message with new step
               setMessages(prev => {
-                // Find the streaming message (should be the first one)
-                const streamingMessage = prev.find(msg => msg.isStreaming);
+                // Find the streaming message
+                const streamingMessage = prev.find(msg => msg.is_streaming);
                 if (!streamingMessage) return prev;
 
+                // No need to update the message if the step is NeoBase is analyzing your request..
+                if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && streamingMessage.loading_steps.some(step => step.text === 'NeoBase is analyzing your request..')) {
+                  return prev;
+                }
                 // Create updated message with new step
                 const updatedMessage = {
                   ...streamingMessage,
-                  content: response.data,
-                  loadingSteps: [
-                    ...(streamingMessage.loadingSteps || []).map(step => ({ ...step, done: true })),
+                  loading_steps: [
+                    ...(streamingMessage.loading_steps || []).map((step: LoadingStep) => ({ ...step, done: true })),
                     { text: response.data, done: false }
                   ]
                 };
@@ -756,21 +776,21 @@ function AppContent() {
                 type: 'assistant' as const,
                 content: '',
                 queries: response.data.queries || [],
-                isLoading: false,
-                loadingSteps: [], // Clear loading steps for final message
-                isStreaming: true
+                is_loading: false,
+                loading_steps: [], // Clear loading steps for final message
+                is_streaming: true
               };
 
               setMessages(prev => {
-                const withoutTemp = prev.filter(msg => !msg.isStreaming);
+                const withoutTemp = prev.filter(msg => !msg.is_streaming);
                 console.log('ai-response -> withoutTemp', withoutTemp);
                 return [baseMessage, ...withoutTemp];
               });
 
-              // Animate both content and queries
+              // Animate both content and queries with slower speed
               const finalWords = response.data.content.split(' ');
               for (const word of finalWords) {
-                await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15 + Math.random() * 15)); // Faster delay
+                await new Promise(resolve => setTimeout(resolve, 50)); // Increased delay to 50ms
                 setMessages(prev => {
                   const [lastMessage, ...rest] = prev;
                   if (lastMessage?.id === response.data.id) {
@@ -786,12 +806,12 @@ function AppContent() {
                 });
               }
 
-              // Animate queries if they exist
+              // Slower animation for queries too
               if (response.data.queries && response.data.queries.length > 0) {
                 for (const query of response.data.queries) {
                   const queryWords = query.query.split(' ');
                   for (const word of queryWords) {
-                    await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15)); // Even faster for queries
+                    await new Promise(resolve => setTimeout(resolve, 40)); // Increased delay to 40ms
                     setMessages(prev => {
                       const [lastMessage, ...rest] = prev;
                       if (lastMessage?.id === response.data.id) {
@@ -824,7 +844,7 @@ function AppContent() {
                   return [
                     {
                       ...lastMessage,
-                      isStreaming: false
+                      is_streaming: false
                     },
                     ...rest
                   ];
@@ -838,15 +858,15 @@ function AppContent() {
           case 'ai-response-error':
             // Show error message instead of temporary message
             setMessages(prev => {
-              const withoutTemp = prev.filter(msg => !msg.isStreaming);
+              const withoutTemp = prev.filter(msg => !msg.is_streaming);
               return [{
                 id: `error-${Date.now()}`,
                 type: 'assistant',
                 content: `⚠️ Error: ${response.data?.error}`,
                 queries: [],
-                isLoading: false,
-                loadingSteps: [],
-                isStreaming: false
+                is_loading: false,
+                loading_steps: [],
+                is_streaming: false
               }, ...withoutTemp];
             });
             setTemporaryMessage(null);
@@ -854,25 +874,41 @@ function AppContent() {
             break;
 
           case 'response-cancelled':
-            handleCancelStream();
+
+            // Remove temporary streaming message
+            setMessages(prev => {
+              return prev.filter(msg => !(msg.is_streaming && msg.id === 'temp'));
+            });
+
             const cancelMsg: Message = {
               id: `cancelled-${Date.now()}`,
               type: 'assistant',
               content: '',  // Start empty for animation
               queries: [],
-              isLoading: false,
-              loadingSteps: [], // Clear loading steps
-              isStreaming: false // Set to false immediately
+              is_loading: false,
+              loading_steps: [], // Clear loading steps
+              is_streaming: false // Set to false immediately
             };
 
+            // Add cancel message
             setMessages(prev => {
-              const withoutTemp = prev.filter(msg => !msg.isStreaming);
+              const withoutTemp = prev.filter(msg => !msg.is_streaming);
               return [cancelMsg, ...withoutTemp];
             });
 
             // Animate cancel message
-            await animateTyping('❌ Response cancelled', cancelMsg.id);
+            await animateTyping('❌ Your request was cancelled by you or system timeout.', cancelMsg.id);
+
+            // Clear temporary message state
             setTemporaryMessage(null);
+
+            // Set streaming to false for all messages
+            setMessages(prev =>
+              prev.map(msg => ({
+                ...msg,
+                is_streaming: false
+              }))
+            );
             break;
         }
       } catch (error) {
@@ -946,7 +982,6 @@ function AppContent() {
           onEditConnection={handleEditConnection}
           onConnectionStatusChange={handleConnectionStatusChange}
           isConnected={!!connectionStatuses[selectedConnection.id]}
-          eventSource={eventSource}
           onCancelStream={handleCancelStream}
         />
       ) : (

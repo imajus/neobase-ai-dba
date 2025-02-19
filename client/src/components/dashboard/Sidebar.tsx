@@ -131,7 +131,7 @@ export default function Sidebar({
     }
   };
 
-  const checkConnectionStatus = async (chatId: string, streamId: string) => {
+  const checkConnectionStatus = async (chatId: string): Promise<boolean> => {
     try {
       const response = await axios.get<ConnectionStatus>(
         `${import.meta.env.VITE_API_URL}/chats/${chatId}/connection-status`,
@@ -142,7 +142,8 @@ export default function Sidebar({
           }
         }
       );
-      return response.data.isConnected;
+      console.log('checkConnectionStatus -> response', response.data);
+      return true;
     } catch (error) {
       console.error('Failed to check connection status:', error);
       return false;
@@ -167,7 +168,7 @@ export default function Sidebar({
       const newStreamId = await setupSSEConnection(id);
 
       // Check current connection status before attempting to connect
-      const connectionStatus = await checkConnectionStatus(id, newStreamId);
+      const connectionStatus = await checkConnectionStatus(id);
       console.log('Current connection status:', { id, connectionStatus });
 
       if (!connectionStatus) {
