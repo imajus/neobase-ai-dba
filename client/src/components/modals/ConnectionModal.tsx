@@ -1,11 +1,11 @@
-import { AlertCircle, ChevronDown, X } from 'lucide-react';
+import { AlertCircle, ChevronDown, Loader2, X } from 'lucide-react';
 import React, { useState } from 'react';
 import { Chat, Connection } from '../../types/chat';
 
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
-  onSubmit: (data: Chat) => void;
+  onSubmit: (connection: Connection) => Promise<void>;
   onEdit?: (data: Chat) => void;
 }
 
@@ -27,7 +27,6 @@ export default function ConnectionModal({
       id: '',
       user_id: '',
       connection: {
-        id: '',
         type: 'postgresql',
         host: '',
         port: '',
@@ -41,6 +40,8 @@ export default function ConnectionModal({
   );
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const validateField = (name: string, value: Connection) => {
     switch (name) {
@@ -82,10 +83,10 @@ export default function ConnectionModal({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate all fields
+    // Validate all fields first
     const newErrors: FormErrors = {};
     let hasErrors = false;
 
@@ -105,8 +106,23 @@ export default function ConnectionModal({
       username: true,
     });
 
-    if (!hasErrors) {
-      onEdit?.(formData) ?? onSubmit(formData);
+    if (hasErrors) return;
+
+    setError(null);
+    setIsLoading(true);
+    try {
+      await onSubmit({
+        type: formData.connection.type,
+        host: formData.connection.host,
+        port: formData.connection.port,
+        username: formData.connection.username,
+        password: formData.connection.password,
+        database: formData.connection.database,
+      });
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -116,11 +132,17 @@ export default function ConnectionModal({
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      connection: {
+        ...prev.connection,
+        [name]: value,
+      }
     }));
 
     if (touched[name]) {
-      const error = validateField(name, formData.connection);
+      const error = validateField(name, {
+        ...formData.connection,
+        [name]: value,
+      });
       setErrors(prev => ({
         ...prev,
         [name]: error,
@@ -155,6 +177,15 @@ export default function ConnectionModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {error && (
+            <div className="p-4 bg-red-50 border-2 border-red-500 rounded-lg">
+              <div className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="w-5 h-5" />
+                <p className="font-medium">{error}</p>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block font-bold mb-2 text-lg">Database Type</label>
             <p className="text-gray-600 text-sm mb-2">Select your database system</p>
@@ -283,13 +314,25 @@ export default function ConnectionModal({
           </div>
 
           <div className="flex gap-4 pt-4">
-            <button type="submit" className="neo-button flex-1">
-              {onEdit ? 'Save & Reconnect' : 'Connect'}
+            <button
+              type="submit"
+              className="neo-button flex-1 relative"
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Connecting...</span>
+                </div>
+              ) : (
+                onEdit ? 'Save & Reconnect' : 'Connect'
+              )}
             </button>
             <button
               type="button"
               onClick={onClose}
               className="neo-button-secondary flex-1"
+              disabled={isLoading}
             >
               Cancel
             </button>

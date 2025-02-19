@@ -12,8 +12,9 @@ import ConnectionModal from './components/modals/ConnectionModal';
 import mockMessages, { newMockMessage } from './data/mockMessages';
 import authService from './services/authService';
 import './services/axiosConfig';
+import chatService from './services/chatService';
 import { LoginFormData, SignupFormData } from './types/auth';
-import { Chat, ChatsResponse } from './types/chat';
+import { Chat, ChatsResponse, Connection } from './types/chat';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -144,8 +145,16 @@ function App() {
     }
   };
 
-  const handleAddConnection = () => {
-    setShowConnectionModal(true);
+  const handleAddConnection = async (connection: Connection) => {
+    try {
+      const newChat = await chatService.createChat(connection);
+      setChats(prev => [...prev, newChat]);
+      setSuccessMessage('Connection added successfully!');
+      setShowConnectionModal(false);
+    } catch (error: any) {
+      console.error('Failed to add connection:', error);
+      toast.error(error.message, errorToast);
+    }
   };
 
   const handleLogout = async () => {
@@ -169,10 +178,22 @@ function App() {
     setSelectedConnection(undefined);
   };
 
-  const handleDeleteConnection = (id: string) => {
-    setConnections(prev => prev.filter(conn => conn.id !== id));
-    if (selectedConnection?.id === id) {
-      setSelectedConnection(undefined);
+  const handleDeleteConnection = async (id: string) => {
+    try {
+      // Remove from UI state
+      setChats(prev => prev.filter(chat => chat.id !== id));
+
+      // If the deleted chat was selected, clear the selection
+      if (selectedConnection?.id === id) {
+        setSelectedConnection(undefined);
+        setMessages([]); // Clear messages if showing deleted chat
+      }
+
+      // Show success message
+      setSuccessMessage('Connection deleted successfully');
+    } catch (error: any) {
+      console.error('Failed to delete connection:', error);
+      toast.error(error.message, errorToast);
     }
   };
 
@@ -364,7 +385,7 @@ function App() {
         onSelectConnection={(id) => {
           setSelectedConnection(chats.find(chat => chat.id === id));
         }}
-        onAddConnection={handleAddConnection}
+        onAddConnection={() => setShowConnectionModal(true)}
         onLogout={handleLogout}
         selectedConnection={selectedConnection}
         onDeleteConnection={handleDeleteConnection}
@@ -399,7 +420,7 @@ function App() {
                 justify-center
                 p-8 
                 mt-24
-                md:mt-16
+                md:mt-12
                 min-h-[calc(100vh-4rem)] 
                 transition-all 
                 duration-300 
@@ -436,7 +457,6 @@ function App() {
                             disabled:opacity-50
                             disabled:cursor-not-allowed
                         "
-              disabled={!connections.length}
             >
               <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
                 <MessageSquare className="w-6 h-6 text-black" />
@@ -450,7 +470,7 @@ function App() {
             </button>
 
             <button
-              onClick={handleAddConnection}
+              onClick={() => setShowConnectionModal(true)}
               className="
                             neo-border 
                             bg-white 
@@ -493,7 +513,6 @@ function App() {
                             disabled:opacity-50
                             disabled:cursor-not-allowed
                         "
-              disabled={!connections.length}
             >
               <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
                 <LineChart className="w-6 h-6 text-black" />
@@ -510,7 +529,7 @@ function App() {
           {/* CTA Section */}
           <div className="text-center">
             <button
-              onClick={handleAddConnection}
+              onClick={() => setShowConnectionModal(true)}
               className="neo-button text-lg px-8 py-4 mb-4"
             >
               Create New Connection
@@ -525,17 +544,7 @@ function App() {
       {showConnectionModal && (
         <ConnectionModal
           onClose={() => setShowConnectionModal(false)}
-          onSubmit={(data) => {
-            const newConnection: Chat = {
-              id: Date.now().toString(),
-              user_id: '1',
-              connection: data.connection,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            };
-            setConnections(prev => [...prev, newConnection]);
-            setShowConnectionModal(false);
-          }}
+          onSubmit={handleAddConnection}
         />
       )}
       <Toaster

@@ -76,11 +76,24 @@ func NewChatService(
 
 func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error) {
 	log.Printf("Creating chat for user %s", userID)
+
+	// Test connection without creating a persistent connection
+	err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
+		Type:     req.Connection.Type,
+		Host:     req.Connection.Host,
+		Port:     req.Connection.Port,
+		Username: &req.Connection.Username,
+		Password: &req.Connection.Password,
+		Database: req.Connection.Database,
+	})
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
+	}
+
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 	}
-
 	// Create connection object
 	connection := models.Connection{
 		Type:     req.Connection.Type,
@@ -95,9 +108,8 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	// Create chat with connection
 	chat := models.NewChat(userObjID, connection)
 	if err := s.chatRepo.Create(chat); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create chat: %v", err)
+		return nil, http.StatusInternalServerError, err
 	}
-
 	return s.buildChatResponse(chat), http.StatusCreated, nil
 }
 
@@ -122,6 +134,19 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	}
 	if chat.UserID != userObjID {
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Test connection without creating a persistent connection
+	err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
+		Type:     req.Connection.Type,
+		Host:     req.Connection.Host,
+		Port:     req.Connection.Port,
+		Username: &req.Connection.Username,
+		Password: &req.Connection.Password,
+		Database: req.Connection.Database,
+	})
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
 	}
 
 	// Update chat fields
@@ -171,9 +196,17 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 	if err := s.chatRepo.Delete(chatObjID); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat: %v", err)
 	}
-	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID); err != nil {
+	// We want to delete messages, except system messages
+	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID, false); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
 	}
+
+	go func() {
+		// Delete DB connection
+		if err := s.dbManager.Disconnect(chatID, userID); err != nil {
+			log.Printf("failed to delete DB connection: %v", err)
+		}
+	}()
 
 	return http.StatusOK, nil
 }
@@ -639,6 +672,11 @@ func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete messages: %v", err)
 	}
 
+	// Delete LLM messages
+	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID, true); err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to delete LLM messages: %v", err)
+	}
+
 	return http.StatusOK, nil
 }
 
@@ -764,7 +802,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		Password: chatDetails.Connection.Password,
 		Database: chatDetails.Connection.Database,
 	}); err != nil {
-		return http.StatusBadRequest, fmt.Errorf("failed to connect: %v", err)
+		return http.StatusBadRequest, err
 	}
 
 	log.Printf("ChatService -> ConnectDB -> connected to chat: %s", chatID)

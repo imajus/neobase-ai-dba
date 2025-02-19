@@ -8,6 +8,8 @@ import {
   Trash2
 } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { toast } from 'react-hot-toast';
+import chatService from '../../services/chatService';
 import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
@@ -58,12 +60,25 @@ export default function Sidebar({
     setConnectionToDelete(connection);
   }, []);
 
-  const handleDeleteConfirm = useCallback(() => {
-    if (connectionToDelete && onDeleteConnection) {
-      onDeleteConnection(connectionToDelete.id);
+  const handleDeleteConfirm = async (chatId: string) => {
+    try {
+      await chatService.deleteChat(chatId);
+      if (onDeleteConnection) {
+        onDeleteConnection(chatId);
+      }
+      setConnectionToDelete(null);
+    } catch (error: any) {
+      toast.error(error.message, {
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+        },
+      });
     }
-    setConnectionToDelete(null);
-  }, [connectionToDelete, onDeleteConnection]);
+  };
 
   return (
     <>
@@ -125,8 +140,9 @@ export default function Sidebar({
               ))
             ) : (
               // Make good looking empty state
-              <div className="flex items-center justify-center h-full bg-neo-gray rounded-lg p-4">
-                <p className="text-gray-600">No connections found</p>
+              <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
+                <p className="text-black font-bold text-lg">No connections found</p>
+                <p className="text-gray-600">Add a connection to get started</p>
               </div>
             )
           )}
@@ -218,6 +234,7 @@ export default function Sidebar({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <DeleteConnectionModal
             connectionName={connectionToDelete.connection.database}
+            chatId={connectionToDelete.id}
             onConfirm={handleDeleteConfirm}
             onCancel={() => setConnectionToDelete(null)}
           />

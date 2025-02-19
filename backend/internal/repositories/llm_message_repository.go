@@ -18,7 +18,7 @@ type LLMMessageRepository interface {
 	FindMessageByID(id primitive.ObjectID) (*models.LLMMessage, error)
 	FindMessageByChatMessageID(messageID primitive.ObjectID) (*models.LLMMessage, error)
 	FindMessagesByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, int64, error)
-	DeleteMessagesByChatID(chatID primitive.ObjectID) error
+	DeleteMessagesByChatID(chatID primitive.ObjectID, dontDeleteSystemMessages bool) error
 	GetByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, error)
 }
 
@@ -79,8 +79,11 @@ func (r *llmMessageRepository) FindMessagesByChatID(chatID primitive.ObjectID) (
 	return messages, total, err
 }
 
-func (r *llmMessageRepository) DeleteMessagesByChatID(chatID primitive.ObjectID) error {
+func (r *llmMessageRepository) DeleteMessagesByChatID(chatID primitive.ObjectID, dontDeleteSystemMessages bool) error {
 	filter := bson.M{"chat_id": chatID}
+	if dontDeleteSystemMessages {
+		filter["role"] = bson.M{"$ne": "system"}
+	}
 	_, err := r.messageCollection.DeleteMany(context.Background(), filter)
 	return err
 }

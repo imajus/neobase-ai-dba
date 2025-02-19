@@ -8,8 +8,15 @@ import (
 	"sync"
 	"time"
 
+	// Database drivers
+	_ "github.com/go-sql-driver/mysql" // MySQL driver
+	_ "github.com/lib/pq"              // PostgreSQL driver
+
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/pkg/redis"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -835,4 +842,65 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 
 		return result, nil
 	}
+}
+
+// TestConnection tests if the provided credentials are valid without creating a persistent connection
+func (m *Manager) TestConnection(config *ConnectionConfig) error {
+	switch config.Type {
+	case "postgresql":
+		dsn := fmt.Sprintf(
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+			config.Host, config.Port, *config.Username, *config.Password, config.Database,
+		)
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return fmt.Errorf("failed to create PostgreSQL connection: %v", err)
+		}
+		defer db.Close()
+
+		err = db.Ping()
+		if err != nil {
+			return fmt.Errorf("failed to connect to PostgreSQL: %v", err)
+		}
+
+	case "mysql":
+		dsn := fmt.Sprintf(
+			"%s:%s@tcp(%s:%s)/%s",
+			*config.Username, *config.Password, config.Host, config.Port, config.Database,
+		)
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			return fmt.Errorf("failed to create MySQL connection: %v", err)
+		}
+		defer db.Close()
+
+		err = db.Ping()
+		if err != nil {
+			return fmt.Errorf("failed to connect to MySQL: %v", err)
+		}
+
+	case "mongodb":
+		uri := fmt.Sprintf(
+			"mongodb://%s:%s@%s:%s/%s",
+			*config.Username, *config.Password, config.Host, config.Port, config.Database,
+		)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+		if err != nil {
+			return fmt.Errorf("failed to create MongoDB connection: %v", err)
+		}
+		defer client.Disconnect(ctx)
+
+		err = client.Ping(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to connect to MongoDB: %v", err)
+		}
+
+	default:
+		return fmt.Errorf("unsupported database type: %s", config.Type)
+	}
+
+	return nil
 }

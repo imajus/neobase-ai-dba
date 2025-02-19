@@ -1,12 +1,11 @@
 // Create a new file for chat types
 export interface Connection {
-    id: string;
-    type: string;
+    type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
     host: string;
     port: string;
     username: string;
-    database: string;
     password?: string;
+    database: string;
 }
 
 export interface Chat {
@@ -23,4 +22,9 @@ export interface ChatsResponse {
         chats: Chat[];
         total: number;
     };
+}
+
+export interface CreateChatResponse {
+    success: boolean;
+    data: Chat;
 } 
