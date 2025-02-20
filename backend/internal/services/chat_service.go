@@ -1067,26 +1067,25 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		query.Error = nil
 	}
 	// Update query status in message
-	// if msg.Queries != nil {
-	// 	for i := range *msg.Queries {
-	// 		if (*msg.Queries)[i].ID == query.ID {
-	// 			(*msg.Queries)[i].IsRolledBack = false
-	// 			(*msg.Queries)[i].IsExecuted = true
-	// 			(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
-	// 			if result.Error != nil {
-	// 				(*msg.Queries)[i].Error = &models.QueryError{
-	// 					Code:    result.Error.Code,
-	// 					Message: result.Error.Message,
-	// 					Details: result.Error.Details,
-	// 				}
-	// 			} else {
-	// 				(*msg.Queries)[i].Error = nil
-	// 			}
-	// 			(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
-	// 			break
-	// 		}
-	// 	}
-	// }
+	if msg.Queries != nil {
+		for i := range *msg.Queries {
+			if (*msg.Queries)[i].ID == query.ID {
+				(*msg.Queries)[i].IsRolledBack = false
+				(*msg.Queries)[i].IsExecuted = true
+				(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+				if result.Error != nil {
+					(*msg.Queries)[i].Error = &models.QueryError{
+						Code:    result.Error.Code,
+						Message: result.Error.Message,
+						Details: result.Error.Details,
+					}
+				} else {
+					(*msg.Queries)[i].Error = nil
+				}
+				break
+			}
+		}
+	}
 
 	log.Printf("ChatService -> ExecuteQuery -> Updating message")
 	// Save updated message
