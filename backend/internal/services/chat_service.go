@@ -305,10 +305,11 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 
 	// Make LLM Message
 	llmMsg := &models.LLMMessage{
-		Base:   models.NewBase(),
-		UserID: userObjID,
-		ChatID: chatObjID,
-		Role:   string(MessageTypeUser),
+		Base:      models.NewBase(),
+		UserID:    userObjID,
+		ChatID:    chatObjID,
+		MessageID: msg.ID,
+		Role:      string(MessageTypeUser),
 		Content: map[string]interface{}{
 			"user_message": content,
 		},
@@ -691,9 +692,12 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 		return nil, http.StatusBadRequest, fmt.Errorf("message does not belong to chat")
 	}
 
+	log.Printf("UpdateMessage -> content: %+v", req.Content)
 	// Update message content, This is a user message
 	message.Content = req.Content
 
+	log.Printf("UpdateMessage -> message: %+v", message)
+	log.Printf("UpdateMessage -> message.Content: %+v", message.Content)
 	err = s.chatRepo.UpdateMessage(message.ID, message)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message: %v", err)
@@ -704,8 +708,9 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch LLM message: %v", err)
 	}
 
+	log.Printf("UpdateMessage -> llmMsg: %+v", llmMsg)
 	llmMsg.Content = map[string]interface{}{
-		"user_message": message.Content,
+		"user_message": req.Content,
 	}
 
 	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {

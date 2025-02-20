@@ -672,32 +672,6 @@ function AppContent() {
         console.log('EventSource is open');
       } else {
         console.log('EventSource is not open');
-        // // Push an error message to the messages array
-        // const errorMsg: Message = {
-        //   id: `error-${Date.now()}`,
-        //   type: 'assistant',
-        //   content: '',  // Start empty for animation
-        //   queries: [],
-        //   is_loading: false,
-        //   is_streaming: true
-        // };
-
-        // setMessages(prev => [errorMsg, ...prev]);
-
-        // // Animate error message
-        // await animateTyping(
-        //   '❌ Error: SSE connection is not open. We\'ve automatically reconnected. Please try again.',
-        //   errorMsg.id
-        // );
-
-        // // Set final state
-        // setMessages(prev => {
-        //   const [lastMessage, ...rest] = prev;
-        //   if (lastMessage?.id === errorMsg.id) {
-        //     return [{ ...lastMessage, is_streaming: false }, ...rest];
-        //   }
-        //   return prev;
-        // });
 
         await setupSSEConnection(selectedConnection.id);
         return;
@@ -731,6 +705,63 @@ function AppContent() {
 
         setMessages(prev => [userMessage, ...prev]);
 
+        console.log('ai-response-step -> creating new temp message');
+        const tempMsg: Message = {
+          id: `temp`,
+          type: 'assistant',
+          content: '',
+          queries: [],
+          is_loading: true,
+          loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
+          is_streaming: true
+        };
+
+        // Update messages first to remove any existing streaming messages
+        setMessages(prev => {
+          const withoutTemp = prev.filter(msg => !msg.is_streaming);
+          return [tempMsg, ...withoutTemp];
+        });
+
+        setTemporaryMessage(tempMsg);
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      toast.error('Failed to send message', errorToast);
+    }
+  };
+
+  const handleEditMessage = async (id: string, content: string) => {
+    console.log('handleEditMessage -> id', id);
+    console.log('handleEditMessage -> content', content);
+    if (!selectedConnection?.id || !streamId || isMessageSending || content === '') return;
+    try {
+      console.log('handleSendMessage -> content', content);
+      console.log('handleSendMessage -> streamId', streamId);
+      // Check if the eventSource is open
+      console.log('eventSource?.readyState', eventSource?.readyState);
+      if (eventSource?.readyState === EventSource.OPEN) {
+        console.log('EventSource is open');
+      } else {
+        console.log('EventSource is not open');
+        await setupSSEConnection(selectedConnection.id);
+      }
+
+      const response = await axios.patch<SendMessageResponse>(
+        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/messages/${id}`,
+        {
+          stream_id: streamId,
+          content: content
+        },
+        {
+          withCredentials: true,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (response.data.success) {
         console.log('ai-response-step -> creating new temp message');
         const tempMsg: Message = {
           id: `temp`,
@@ -973,7 +1004,7 @@ function AppContent() {
                         is_rolled_back: false,
                         execution_time: response.data.execution_time,
                         execution_result: response.data.execution_result,
-                        error: undefined // Clear any existing error
+                        error: undefined
                       } as QueryResult;
                     }
                     return q;
@@ -982,7 +1013,7 @@ function AppContent() {
               }
               return msg;
             }));
-            // Show success toast
+            // Show success toast without scrolling
             toast('Query executed!', {
               ...toastStyle,
               icon: '✅',
@@ -1129,6 +1160,7 @@ function AppContent() {
           setMessages={setMessages}
           onSendMessage={handleSendMessage}
           onClearChat={handleClearChat}
+          onEditMessage={handleEditMessage}
           onCloseConnection={handleCloseConnection}
           onEditConnection={handleEditConnection}
           onConnectionStatusChange={handleConnectionStatusChange}

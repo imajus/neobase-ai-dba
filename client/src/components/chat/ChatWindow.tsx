@@ -18,6 +18,7 @@ interface ChatWindowProps {
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: string) => Promise<void>;
+  onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
   onEditConnection?: (id: string, connection: Connection) => void;
@@ -34,6 +35,7 @@ interface QueryState {
 
 export default function ChatWindow({
   chat,
+  onEditMessage,
   isExpanded,
   messages,
   setMessages,
@@ -196,6 +198,8 @@ export default function ChatWindow({
       setEditingMessageId(id);
       setEditInput(message.content);
     }
+
+
   };
 
   const handleCancelEdit = () => {
@@ -231,7 +235,7 @@ export default function ChatWindow({
       // Get the edited message and the next message (AI response)
       const editedMessage = messages[messageIndex];
       const aiResponse = messages[messageIndex + 1];
-
+      onEditMessage(id, content);
       setMessages(prev => {
         const updated = [...prev];
         // Update the edited message
