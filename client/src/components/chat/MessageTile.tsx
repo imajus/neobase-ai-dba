@@ -69,34 +69,19 @@ export default function MessageTile({
     const [currentDescription, setCurrentDescription] = useState('');
     const [currentQuery, setCurrentQuery] = useState('');
 
+    console.log('MessageTile', message);
     useEffect(() => {
         const streamQueries = async () => {
             if (!message.queries || !message.is_streaming) return;
 
-            // Stream each query one by one
+            // Just set the content immediately without streaming
             for (let i = 0; i < message.queries.length; i++) {
                 const query = message.queries[i];
                 setStreamingQueryIndex(i);
+                setCurrentDescription(query.description);
+                setCurrentQuery(query.query);
 
-                // Stream description
-                setIsDescriptionStreaming(true);
-                for (let j = 0; j <= query.description.length; j++) {
-                    await new Promise(resolve => setTimeout(resolve, 40));
-                    setCurrentDescription(query.description.slice(0, j));
-                }
-                setIsDescriptionStreaming(false);
-
-                // Only stream query text if message is not currently streaming
-                if (!message.is_streaming) {
-                    setIsQueryStreaming(true);
-                    for (let j = 0; j <= query.query.length; j++) {
-                        await new Promise(resolve => setTimeout(resolve, 40));
-                        setCurrentQuery(query.query.slice(0, j));
-                    }
-                    setIsQueryStreaming(false);
-                }
-
-                // Mark query as done streaming
+                // Keep the existing query state management
                 if (message.queries) {
                     message.queries[i].is_streaming = false;
                 }
