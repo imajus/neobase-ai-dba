@@ -1,4 +1,4 @@
-import { ArrowDown, XCircle } from 'lucide-react';
+import { ArrowDown, Loader2, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -181,19 +181,6 @@ export default function ChatWindow({
 
   const handleDisconnect = useCallback(async () => {
     try {
-      await axios.post(
-        `${import.meta.env.VITE_API_URL}/chats/${chat.id}/disconnect`,
-        {
-          stream_id: streamId
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
-      onConnectionStatusChange?.(chat.id, false, 'chat-window-disconnect');
       onCloseConnection();
       handleCloseConfirm();
     } catch (error) {
@@ -366,7 +353,7 @@ export default function ChatWindow({
         <div ref={loadingRef} className="w-full py-4 text-center">
           {isLoadingMessages && (
             <div className="flex items-center justify-center gap-2">
-              <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+              <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm text-gray-600">Loading messages...</span>
             </div>
           )}

@@ -1,5 +1,5 @@
 import { AlertCircle, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
@@ -58,6 +58,47 @@ export default function MessageTile({
         show: boolean;
         queryId: string | null;
     }>({ show: false, queryId: null });
+    const [streamingQueryIndex, setStreamingQueryIndex] = useState<number>(-1);
+    const [isDescriptionStreaming, setIsDescriptionStreaming] = useState(false);
+    const [isQueryStreaming, setIsQueryStreaming] = useState(false);
+    const [currentDescription, setCurrentDescription] = useState('');
+    const [currentQuery, setCurrentQuery] = useState('');
+
+    useEffect(() => {
+        const streamQueries = async () => {
+            if (!message.queries || !message.is_streaming) return;
+
+            // Stream each query one by one
+            for (let i = 0; i < message.queries.length; i++) {
+                const query = message.queries[i];
+                setStreamingQueryIndex(i);
+
+                // Stream description
+                setIsDescriptionStreaming(true);
+                for (let j = 0; j <= query.description.length; j++) {
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                    setCurrentDescription(query.description.slice(0, j));
+                }
+                setIsDescriptionStreaming(false);
+
+                // Stream query text
+                setIsQueryStreaming(true);
+                for (let j = 0; j <= query.query.length; j++) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                    setCurrentQuery(query.query.slice(0, j));
+                }
+                setIsQueryStreaming(false);
+
+                // Mark query as done streaming
+                if (message.queries) {
+                    message.queries[i].is_streaming = false;
+                }
+            }
+            setStreamingQueryIndex(-1);
+        };
+
+        streamQueries();
+    }, [message.queries, message.is_streaming]);
 
     const handleCopyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -150,14 +191,19 @@ export default function MessageTile({
         );
     };
 
-    const renderQuery = (isStreaming: boolean, query: QueryResult, index: number) => {
+    const renderQuery = (_: boolean, query: QueryResult, index: number) => {
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
+        const isCurrentlyStreaming = streamingQueryIndex === index;
 
         return (
             <div>
-                <p className='mb-4 mt-4 font-base text-base'><span className='font-bold'>Explanation:</span> {query.description}</p>
+                <p className="mb-4 mt-4 font-base text-base">
+                    <span className="text-black font-semibold">Explanation:</span> {isCurrentlyStreaming && isDescriptionStreaming
+                        ? currentDescription
+                        : query.description}
+                </p>
                 <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
 
@@ -216,9 +262,13 @@ export default function MessageTile({
                     </div>
                     <pre className={`
                     text-sm overflow-x-auto p-4 border-t border-gray-700
-                    ${isStreaming ? 'animate-pulse duration-300' : ''}
+                    ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
                 `}>
-                        <code className="whitespace-pre-wrap break-words">{query.query}</code>
+                        <code className="whitespace-pre-wrap break-words">
+                            {isCurrentlyStreaming && isQueryStreaming
+                                ? currentQuery
+                                : query.query}
+                        </code>
                     </pre>
                     {(query.execution_result || query.example_result || query.error) && (
                         <div className="border-t border-gray-700 mt-2 w-full">

@@ -37,6 +37,36 @@ const chatService = {
             console.error('Delete chat error:', error);
             throw new Error(error.response?.data?.error || 'Failed to delete chat');
         }
+    },
+
+    async checkConnectionStatus(chatId: string): Promise<boolean> {
+        try {
+            const response = await axios.get(`${API_URL}/chats/${chatId}/connection-status`);
+            return response.data.success;
+        } catch (error: any) {
+            console.error('Check connection status error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to check connection status');
+        }
+    },
+
+    async connectToConnection(chatId: string, streamId: string): Promise<void> {
+        try {
+            const response = await axios.post(`${API_URL}/chats/${chatId}/connect`, { stream_id: streamId });
+            return response.data.success;
+        } catch (error: any) {
+            console.error('Connect to connection error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to connect to connection');
+        }
+    },
+
+    async disconnectFromConnection(chatId: string): Promise<void> {
+        try {
+            const response = await axios.post(`${API_URL}/chats/${chatId}/disconnect`);
+            return response.data.success;
+        } catch (error: any) {
+            console.error('Disconnect from connection error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to disconnect from connection');
+        }
     }
 };
 

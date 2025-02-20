@@ -45,7 +45,7 @@ type ChatService interface {
 	ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	CancelQueryExecution(userID, chatID, messageID, queryID, streamID string)
-	ProcessMessage(ctx context.Context, userID, chatID string, streamID string, content string) error
+	ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error
 }
 
 type chatService struct {
@@ -318,7 +318,7 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	}
 
 	// Start processing the message asynchronously
-	if err := s.ProcessMessage(ctx, userID, chatID, streamID, content); err != nil {
+	if err := s.ProcessMessage(ctx, userID, chatID, streamID); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
 	}
 
@@ -688,7 +688,7 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 	}
 
 	// Start processing the message asynchronously
-	if err := s.ProcessMessage(context.Background(), userID, chatID, streamID, message.Content); err != nil {
+	if err := s.ProcessMessage(context.Background(), userID, chatID, streamID); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
 	}
 	return s.buildMessageResponse(message), http.StatusOK, nil
@@ -822,10 +822,34 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 		cancel() // Only cancels the LLM context
 		delete(s.activeProcesses, streamID)
 
+		go func() {
+			chatObjID, err := primitive.ObjectIDFromHex(chatID)
+			if err != nil {
+				log.Printf("CancelProcessing -> error fetching chatID: %v", err)
+			}
+
+			userObjID, err := primitive.ObjectIDFromHex(userID)
+			if err != nil {
+				log.Printf("CancelProcessing -> error fetching userID: %v", err)
+			}
+
+			msg := &models.Message{
+				Base:    models.NewBase(),
+				ChatID:  chatObjID,
+				UserID:  userObjID,
+				Type:    string(MessageTypeAssistant),
+				Content: "Response cancelled by user",
+			}
+
+			// Save cancelled event to database
+			if err := s.chatRepo.CreateMessage(msg); err != nil {
+				log.Printf("CancelProcessing -> error creating message: %v", err)
+			}
+		}()
 		// Send cancelled event using stream
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "response-cancelled",
-			Data:  "Response cancelled",
+			Data:  "Response cancelled by user",
 		})
 	}
 }
@@ -1451,11 +1475,11 @@ func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string)
 }
 
 // Update the ProcessMessage method to use a separate context for LLM processing
-func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string, streamID string, content string) error {
+func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error {
 	// Create a new context specifically for LLM processing
 	llmCtx, cancel := context.WithCancel(context.Background())
 
-	log.Printf("ProcessMessage -> userID: %s, chatID: %s, streamID: %s, content: %s", userID, chatID, streamID, content)
+	log.Printf("ProcessMessage -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
 	s.processesMu.Lock()
 	s.activeProcesses[streamID] = cancel
@@ -1470,7 +1494,7 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 			s.processesMu.Unlock()
 		}()
 
-		if err := s.processMessageInternal(llmCtx, ctx, userID, chatID, streamID, content); err != nil {
+		if err := s.processMessageInternal(llmCtx, ctx, userID, chatID, streamID); err != nil {
 			log.Printf("Error processing message: %v", err)
 			// Use parent context for sending stream events
 			select {
@@ -1505,18 +1529,6 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 						log.Printf("Error processing message: %v", err)
 						return
 					}
-
-					if err := s.llmRepo.CreateMessage(&models.LLMMessage{
-						Base:   models.NewBase(),
-						UserID: userObjID,
-						ChatID: chatObjID,
-						Role:   string(MessageTypeAssistant),
-						Content: map[string]interface{}{
-							"error": errorMsg.Content,
-						},
-					}); err != nil {
-						log.Printf("Error processing message: %v", err)
-					}
 				}()
 
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
@@ -1531,59 +1543,14 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 }
 
 // Update processMessageInternal to use both contexts
-func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, userID, chatID, streamID, content string) error {
-	// Convert IDs
-	chatObjID, err := primitive.ObjectIDFromHex(chatID)
-	if err != nil {
-		return fmt.Errorf("invalid chat ID format")
-	}
-
-	log.Printf("processMessageInternal -> userID: %s, chatID: %s, streamID: %s, content: %s", userID, chatID, streamID, content)
-	userObjID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return fmt.Errorf("invalid user ID format")
-	}
-
-	// 1. Save user message using parent context
+func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, userID, chatID, streamID string) error {
+	log.Printf("processMessageInternal -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 	select {
 	case <-sseCtx.Done():
 		return fmt.Errorf("sse connection closed")
 	default:
-		msg := &models.Message{
-			Base:    models.NewBase(),
-			UserID:  userObjID,
-			ChatID:  chatObjID,
-			Content: content,
-			Type:    string(MessageTypeUser),
-		}
-
-		if err := s.chatRepo.CreateMessage(msg); err != nil {
-			return fmt.Errorf("failed to save message: %v", err)
-		}
-
-		// Save to LLM messages for context
-		llmMsg := &models.LLMMessage{
-			Base:   models.NewBase(),
-			UserID: userObjID,
-			ChatID: chatObjID,
-			Role:   "user",
-			Content: map[string]interface{}{
-				"user_message": content,
-			},
-		}
-
-		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-			log.Printf("Warning: failed to save LLM message: %v", err)
-			// Continue even if LLM message save fails
-		}
-
-		// 2. Start LLM processing with cancellable context
-		select {
-		case <-llmCtx.Done():
-			return fmt.Errorf("processing cancelled")
-		default:
-			s.processLLMResponse(llmCtx, userID, chatID, streamID)
-		}
+		// LLM processing will be handled in this method
+		s.processLLMResponse(llmCtx, userID, chatID, streamID)
 	}
 
 	return nil

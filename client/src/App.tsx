@@ -205,11 +205,15 @@ function AppContent() {
     }
   }, []);
 
-  const handleCloseConnection = useCallback(() => {
+  const handleCloseConnection = useCallback(async () => {
     if (eventSource) {
       console.log('Closing SSE connection');
       eventSource.close();
       setEventSource(null);
+      // Disconnect from the connection
+      await chatService.disconnectFromConnection(selectedConnection?.id || '');
+      // Update connection status
+      handleConnectionStatusChange(selectedConnection?.id || '', false, 'app-close-connection');
     }
 
     // Clear messages
@@ -236,6 +240,9 @@ function AppContent() {
         setMessages([]); // Clear messages if showing deleted chat
       }
 
+      if (chats.length === 0) {
+        setSelectedConnection(undefined);
+      }
       // Show success message
       setSuccessMessage('Connection deleted successfully');
     } catch (error: any) {
@@ -488,15 +495,41 @@ function AppContent() {
     }
   }, [selectedConnection]);
 
-  const handleSelectConnection = useCallback((id: string) => {
-    console.log('handleSelectConnection happened', { id });
+  const handleSelectConnection = useCallback(async (id: string) => {
+    console.log('handleSelectConnection happened in app.tsx', { id });
     const connection = chats.find(c => c.id === id);
     if (connection) {
       console.log('connection found', { connection });
       setSelectedConnection(connection);
 
+      // Check if the connection is already connected
+      const isConnected = connectionStatuses[id];
+      if (isConnected) {
+        handleConnectionStatusChange(id, true, 'app-select-connection');
+      } else {
+        // Make api call to to check connection status
+        const connectionStatus = await chatService.checkConnectionStatus(id);
+        console.log('connectionStatus in handleSelectConnection', { connectionStatus });
+        if (connectionStatus) {
+          handleConnectionStatusChange(id, true, 'app-select-connection');
+        } else {
+          console.log('connectionStatus is false, connecting to the connection');
+          // Make api call to connect to the connection
+          await chatService.connectToConnection(id, streamId || '');
+          handleConnectionStatusChange(id, true, 'app-select-connection');
+        }
+      }
+
+      // Check eventsource state
+      console.log('eventSource?.readyState', eventSource?.readyState);
+      if (eventSource?.readyState === EventSource.OPEN) {
+        console.log('eventSource is open');
+      } else {
+        console.log('eventSource is not open, setting up');
+        await setupSSEConnection(id);
+      }
     }
-  }, [chats]);
+  }, [chats, connectionStatuses, handleConnectionStatusChange]);
 
   // Add onClose handler for EventSource
   useEffect(() => {
@@ -759,7 +792,7 @@ function AppContent() {
                 if (!streamingMessage) return prev;
 
                 // No need to update the message if the step is NeoBase is analyzing your request..
-                if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && streamingMessage.loading_steps.some(step => step.text === 'NeoBase is analyzing your request..')) {
+                if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && response.data === 'NeoBase is analyzing your request..') {
                   return prev;
                 }
                 // Create updated message with new step

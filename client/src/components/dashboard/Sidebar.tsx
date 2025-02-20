@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   Boxes,
@@ -113,42 +112,7 @@ export default function Sidebar({
     }
   };
 
-  const connectToDatabase = async (chatId: string, streamId: string) => {
-    try {
-      await axios.post(
-        `${import.meta.env.VITE_API_URL}/chats/${chatId}/connect`,
-        { stream_id: streamId },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
-    } catch (error) {
-      console.error('Failed to connect to database:', error);
-      throw error;
-    }
-  };
 
-  const checkConnectionStatus = async (chatId: string): Promise<boolean> => {
-    try {
-      const response = await axios.get<ConnectionStatus>(
-        `${import.meta.env.VITE_API_URL}/chats/${chatId}/connection-status`,
-        {
-          withCredentials: true,
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
-      console.log('checkConnectionStatus -> response', response.data);
-      return true;
-    } catch (error) {
-      console.error('Failed to check connection status:', error);
-      return false;
-    }
-  };
 
   const handleSelectConnection = useCallback(async (id: string) => {
     try {
@@ -163,21 +127,6 @@ export default function Sidebar({
       setCurrentConnectedChatId(id);
       onSelectConnection(id);
       onConnectionStatusChange?.(id, false, 'sidebar-connecting');
-
-      // Setup new SSE connection
-      const newStreamId = await setupSSEConnection(id);
-
-      // Check current connection status before attempting to connect
-      const connectionStatus = await checkConnectionStatus(id);
-      console.log('Current connection status:', { id, connectionStatus });
-
-      if (!connectionStatus) {
-        // Only connect if not already connected
-        await connectToDatabase(id, newStreamId);
-      } else {
-        // If already connected, just update the UI
-        onConnectionStatusChange?.(id, true, 'sidebar-existing-connection');
-      }
 
     } catch (error) {
       console.error('Failed to setup connection:', error);
@@ -246,10 +195,12 @@ export default function Sidebar({
               ))
             ) : (
               // Make good looking empty state
-              <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
-                <p className="text-black font-bold text-lg">No connections found</p>
-                <p className="text-gray-600">Add a connection to get started</p>
-              </div>
+              isExpanded && (
+                <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
+                  <p className="text-black font-bold text-lg">No connections found</p>
+                  <p className="text-gray-600">Add a connection to get started</p>
+                </div>
+              )
             )
           )}
         </div>

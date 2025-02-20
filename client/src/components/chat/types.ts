@@ -15,6 +15,7 @@ export interface QueryResult {
     };
     is_critical?: boolean;
     can_rollback?: boolean;
+    is_streaming?: boolean;
 }
 
 export interface Message {
