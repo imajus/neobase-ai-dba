@@ -86,13 +86,15 @@ export default function MessageTile({
                 }
                 setIsDescriptionStreaming(false);
 
-                // Stream query text
-                setIsQueryStreaming(true);
-                for (let j = 0; j <= query.query.length; j++) {
-                    await new Promise(resolve => setTimeout(resolve, 40));
-                    setCurrentQuery(query.query.slice(0, j));
+                // Only stream query text if message is not currently streaming
+                if (!message.is_streaming) {
+                    setIsQueryStreaming(true);
+                    for (let j = 0; j <= query.query.length; j++) {
+                        await new Promise(resolve => setTimeout(resolve, 40));
+                        setCurrentQuery(query.query.slice(0, j));
+                    }
+                    setIsQueryStreaming(false);
                 }
-                setIsQueryStreaming(false);
 
                 // Mark query as done streaming
                 if (message.queries) {
@@ -225,11 +227,11 @@ export default function MessageTile({
         );
     };
 
-    const renderQuery = (_: boolean, query: QueryResult, index: number) => {
+    const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
-        const isCurrentlyStreaming = streamingQueryIndex === index;
+        const isCurrentlyStreaming = !isMessageStreaming && streamingQueryIndex === index;
 
         const shouldShowRollback = query.can_rollback &&
             query.is_executed &&

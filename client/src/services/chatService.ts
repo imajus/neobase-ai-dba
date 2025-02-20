@@ -45,7 +45,7 @@ const chatService = {
             return response.data.success;
         } catch (error: any) {
             console.error('Check connection status error:', error);
-            throw new Error(error.response?.data?.error || 'Failed to check connection status');
+            return false;
         }
     },
 

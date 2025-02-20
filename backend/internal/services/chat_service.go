@@ -514,44 +514,46 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 	}
 
 	queries := []models.Query{}
-	for _, query := range jsonResponse["queries"].([]interface{}) {
-		queryMap := query.(map[string]interface{})
-		var exampleResult *string
-		log.Printf("processLLMResponse -> queryMap: %v", queryMap)
-		if queryMap["exampleResult"] != nil {
-			log.Printf("processLLMResponse -> queryMap[\"exampleResult\"]: %v", queryMap["exampleResult"])
-			result, _ := json.Marshal(queryMap["exampleResult"].([]interface{}))
-			exampleResult = utils.ToStringPtr(string(result))
-			log.Printf("processLLMResponse -> saving exampleResult: %v", *exampleResult)
-		} else {
-			exampleResult = nil
-			log.Println("processLLMResponse -> saving exampleResult: nil")
-		}
+	if jsonResponse["queries"] != nil {
+		for _, query := range jsonResponse["queries"].([]interface{}) {
+			queryMap := query.(map[string]interface{})
+			var exampleResult *string
+			log.Printf("processLLMResponse -> queryMap: %v", queryMap)
+			if queryMap["exampleResult"] != nil {
+				log.Printf("processLLMResponse -> queryMap[\"exampleResult\"]: %v", queryMap["exampleResult"])
+				result, _ := json.Marshal(queryMap["exampleResult"].([]interface{}))
+				exampleResult = utils.ToStringPtr(string(result))
+				log.Printf("processLLMResponse -> saving exampleResult: %v", *exampleResult)
+			} else {
+				exampleResult = nil
+				log.Println("processLLMResponse -> saving exampleResult: nil")
+			}
 
-		var rollbackDependentQuery *string
-		if queryMap["rollbackDependentQuery"] != nil {
-			rollbackDependentQuery = utils.ToStringPtr(queryMap["rollbackDependentQuery"].(string))
-		} else {
-			rollbackDependentQuery = nil
+			var rollbackDependentQuery *string
+			if queryMap["rollbackDependentQuery"] != nil {
+				rollbackDependentQuery = utils.ToStringPtr(queryMap["rollbackDependentQuery"].(string))
+			} else {
+				rollbackDependentQuery = nil
+			}
+			queries = append(queries, models.Query{
+				ID:                     primitive.NewObjectID(),
+				Query:                  queryMap["query"].(string),
+				Description:            queryMap["explanation"].(string),
+				ExecutionTime:          nil,
+				ExampleExecutionTime:   int(queryMap["estimateResponseTime"].(float64)),
+				CanRollback:            queryMap["canRollback"].(bool),
+				IsCritical:             queryMap["isCritical"].(bool),
+				IsExecuted:             false,
+				IsRolledBack:           false,
+				ExampleResult:          exampleResult,
+				ExecutionResult:        nil,
+				Error:                  nil,
+				QueryType:              utils.ToStringPtr(queryMap["queryType"].(string)),
+				Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
+				RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
+				RollbackDependentQuery: rollbackDependentQuery,
+			})
 		}
-		queries = append(queries, models.Query{
-			ID:                     primitive.NewObjectID(),
-			Query:                  queryMap["query"].(string),
-			Description:            queryMap["explanation"].(string),
-			ExecutionTime:          nil,
-			ExampleExecutionTime:   int(queryMap["estimateResponseTime"].(float64)),
-			CanRollback:            queryMap["canRollback"].(bool),
-			IsCritical:             queryMap["isCritical"].(bool),
-			IsExecuted:             false,
-			IsRolledBack:           false,
-			ExampleResult:          exampleResult,
-			ExecutionResult:        nil,
-			Error:                  nil,
-			QueryType:              utils.ToStringPtr(queryMap["queryType"].(string)),
-			Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
-			RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
-			RollbackDependentQuery: rollbackDependentQuery,
-		})
 	}
 
 	log.Printf("processLLMResponse -> queries: %v", queries)
