@@ -535,12 +535,35 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 			} else {
 				rollbackDependentQuery = nil
 			}
+
+			var estimateResponseTime *float64
+			// First check if the estimateResponseTime is a string, if not string & it is float then set value
+			if queryMap["estimateResponseTime"] != nil {
+				switch v := queryMap["estimateResponseTime"].(type) {
+				case string:
+					if f, err := strconv.ParseFloat(v, 64); err == nil {
+						estimateResponseTime = &f
+					} else {
+						defaultVal := float64(100)
+						estimateResponseTime = &defaultVal
+					}
+				case float64:
+					estimateResponseTime = &v
+				default:
+					defaultVal := float64(100)
+					estimateResponseTime = &defaultVal
+				}
+			} else {
+				defaultVal := float64(100)
+				estimateResponseTime = &defaultVal
+			}
+
 			queries = append(queries, models.Query{
 				ID:                     primitive.NewObjectID(),
 				Query:                  queryMap["query"].(string),
 				Description:            queryMap["explanation"].(string),
 				ExecutionTime:          nil,
-				ExampleExecutionTime:   int(queryMap["estimateResponseTime"].(float64)),
+				ExampleExecutionTime:   int(*estimateResponseTime),
 				CanRollback:            queryMap["canRollback"].(bool),
 				IsCritical:             queryMap["isCritical"].(bool),
 				IsExecuted:             false,

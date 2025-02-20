@@ -59,9 +59,17 @@ const chatService = {
         }
     },
 
-    async disconnectFromConnection(chatId: string): Promise<void> {
+    async disconnectFromConnection(chatId: string, streamId: string): Promise<void> {
         try {
-            const response = await axios.post(`${API_URL}/chats/${chatId}/disconnect`);
+            const response = await axios.post(`${API_URL}/chats/${chatId}/disconnect`, {
+                stream_id: streamId
+            }, {
+                withCredentials: true,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
             return response.data.success;
         } catch (error: any) {
             console.error('Disconnect from connection error:', error);

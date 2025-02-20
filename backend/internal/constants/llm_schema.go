@@ -105,6 +105,6 @@ type QueryInfo struct {
 	Explanation            string                   `json:"explanation"`
 	ExampleResult          []map[string]interface{} `json:"exampleResult,omitempty"`
 	RollbackQuery          string                   `json:"rollbackQuery,omitempty"`
-	EstimateResponseTime   float64                  `json:"estimateResponseTime"`
+	EstimateResponseTime   interface{}              `json:"estimateResponseTime"`
 	RollbackDependentQuery string                   `json:"rollbackDependentQuery,omitempty"`
 }

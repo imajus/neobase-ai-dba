@@ -331,6 +331,12 @@ export default function MessageTile({
                                                     {shouldShowExampleResult ? 'Example Result:' : 'Result:'}
                                                 </span>
                                             )}
+                                            {query.example_execution_time && !query.execution_time && !query.is_executed && (
+                                                <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
+                                                    <Clock className="w-3 h-3" />
+                                                    {query.example_execution_time.toLocaleString()}ms
+                                                </span>
+                                            )}
                                             {query.execution_time && (
                                                 <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
                                                     <Clock className="w-3 h-3" />
@@ -415,7 +421,15 @@ export default function MessageTile({
                                         `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
-                                                        {renderTableView(resultToShow || [])}
+                                                        {Object.keys(resultToShow || {}).length === 0 ? (
+                                                            <div className="w-full">
+                                                                Query Successful
+                                                            </div>
+                                                        ) : (
+                                                            <div className="w-full">
+                                                                {renderTableView(resultToShow || [])}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <div className="w-full">

@@ -211,7 +211,7 @@ function AppContent() {
       eventSource.close();
       setEventSource(null);
       // Disconnect from the connection
-      await chatService.disconnectFromConnection(selectedConnection?.id || '');
+      await chatService.disconnectFromConnection(selectedConnection?.id || '', streamId || '');
       // Update connection status
       handleConnectionStatusChange(selectedConnection?.id || '', false, 'app-close-connection');
     }
