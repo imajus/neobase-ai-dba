@@ -67,6 +67,48 @@ const chatService = {
             console.error('Disconnect from connection error:', error);
             throw new Error(error.response?.data?.error || 'Failed to disconnect from connection');
         }
+    },
+
+    async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string): Promise<void> {
+        try {
+            await axios.post(`${API_URL}/chats/${chatId}/queries/execute`, {
+                message_id: messageId,
+                query_id: queryId,
+                stream_id: streamId
+            },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+        } catch (error: any) {
+            console.error('Execute query error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to execute query');
+        }
+    },
+
+    async rollbackQuery(chatId: string, messageId: string, queryId: string, streamId: string): Promise<void> {
+        try {
+            await axios.post(`${API_URL}/chats/${chatId}/queries/rollback`, {
+                message_id: messageId,
+                query_id: queryId,
+                stream_id: streamId
+            },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+        } catch (error: any) {
+            console.error('Rollback query error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to rollback query');
+        }
     }
 };
 

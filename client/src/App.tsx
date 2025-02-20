@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
-import { LoadingStep, Message } from './components/chat/types';
+import { LoadingStep, Message, QueryResult } from './components/chat/types';
 import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
@@ -955,6 +955,108 @@ function AppContent() {
                 is_streaming: false
               }))
             );
+            break;
+
+          case 'query-executed':
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === response.data.message_id) {
+                return {
+                  ...msg,
+                  queries: msg.queries?.map(q => {
+                    if (q.id === response.data.query_id) {
+                      return {
+                        ...q,
+                        is_executed: true,
+                        is_rolled_back: false,
+                        execution_time: response.data.execution_time,
+                        execution_result: response.data.execution_result,
+                        error: undefined // Clear any existing error
+                      } as QueryResult;
+                    }
+                    return q;
+                  })
+                };
+              }
+              return msg;
+            }));
+            // Show success toast
+            toast('Query executed!', {
+              ...toastStyle,
+              icon: '✅',
+            });
+            break;
+
+          case 'query-execution-failed':
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === response.data.message_id) {
+                return {
+                  ...msg,
+                  queries: msg.queries?.map(q => {
+                    if (q.id === response.data.query_id) {
+                      return {
+                        ...q,
+                        is_executed: false,
+                        is_rolled_back: false,
+                        execution_result: undefined,
+                        error: response.data.error
+                      } as QueryResult;
+                    }
+                    return q;
+                  })
+                };
+              }
+              return msg;
+            }));
+            break;
+
+          case 'rollback-executed':
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === response.data.message_id) {
+                return {
+                  ...msg,
+                  queries: msg.queries?.map(q => {
+                    if (q.id === response.data.query_id) {
+                      return {
+                        ...q,
+                        is_executed: true,
+                        is_rolled_back: true,
+                        execution_time: response.data.execution_time,
+                        execution_result: response.data.execution_result,
+                        error: undefined
+                      } as QueryResult;
+                    }
+                    return q;
+                  })
+                };
+              }
+              return msg;
+            }));
+            toast('Changes reverted', {
+              ...toastStyle,
+              icon: '↺',
+            });
+            break;
+
+          case 'rollback-query-failed':
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === response.data.message_id) {
+                return {
+                  ...msg,
+                  queries: msg.queries?.map(q => {
+                    if (q.id === response.data.query_id) {
+                      return {
+                        ...q,
+                        is_rolled_back: false,
+                        error: response.data.error
+                      } as QueryResult;
+                    }
+                    return q;
+                  })
+                };
+              }
+              return msg;
+            }));
+            toast.error(`Rollback failed: ${response.data.error.message}`, errorToast);
             break;
         }
       } catch (error) {

@@ -1,6 +1,8 @@
 import { AlertCircle, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { useStream } from '../../contexts/StreamContext';
+import chatService from '../../services/chatService';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
 import LoadingSteps from './LoadingSteps';
@@ -12,6 +14,7 @@ interface QueryState {
 }
 
 interface MessageTileProps {
+    chatId: string;
     message: Message;
     onEdit?: (id: string) => void;
     editingMessageId: string | null;
@@ -40,6 +43,7 @@ const toastStyle = {
 };
 
 export default function MessageTile({
+    chatId,
     message,
     onEdit,
     editingMessageId,
@@ -51,9 +55,10 @@ export default function MessageTile({
     setQueryStates,
     queryTimeouts,
 }: MessageTileProps) {
+    const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
     const [showCriticalConfirm, setShowCriticalConfirm] = useState(false);
-    const [queryToExecute, setQueryToExecute] = useState<number | null>(null);
+    const [queryToExecute, setQueryToExecute] = useState<string | null>(null);
     const [rollbackState, setRollbackState] = useState<{
         show: boolean;
         queryId: string | null;
@@ -76,7 +81,7 @@ export default function MessageTile({
                 // Stream description
                 setIsDescriptionStreaming(true);
                 for (let j = 0; j <= query.description.length; j++) {
-                    await new Promise(resolve => setTimeout(resolve, 20));
+                    await new Promise(resolve => setTimeout(resolve, 40));
                     setCurrentDescription(query.description.slice(0, j));
                 }
                 setIsDescriptionStreaming(false);
@@ -84,7 +89,7 @@ export default function MessageTile({
                 // Stream query text
                 setIsQueryStreaming(true);
                 for (let j = 0; j <= query.query.length; j++) {
-                    await new Promise(resolve => setTimeout(resolve, 10));
+                    await new Promise(resolve => setTimeout(resolve, 40));
                     setCurrentQuery(query.query.slice(0, j));
                 }
                 setIsQueryStreaming(false);
@@ -105,49 +110,78 @@ export default function MessageTile({
         toast.success('Copied to clipboard!', toastStyle);
     };
 
-    const handleExecuteQuery = (queryIndex: number) => {
-        const query = message.queries?.[queryIndex];
-        if (query?.is_critical) {
-            setQueryToExecute(queryIndex);
+    const handleExecuteQuery = async (queryId: string) => {
+        const query = message.queries?.find(q => q.id === queryId);
+        if (!query) return;
+
+        if (query.is_critical) {
+            setQueryToExecute(queryId);
             setShowCriticalConfirm(true);
             return;
         }
-        executeQuery(queryIndex);
+        executeQuery(queryId);
     };
 
-    const executeQuery = (queryIndex: number) => {
-        const queryId = `${message.id}-${queryIndex}`;
+    const executeQuery = async (queryId: string) => {
+        const query = message.queries?.find(q => q.id === queryId);
+        if (!query) return;
+
         if (queryTimeouts.current[queryId]) {
             clearTimeout(queryTimeouts.current[queryId]);
             delete queryTimeouts.current[queryId];
         }
-        setQueryStates((prev: Record<string, QueryState>) => ({
+
+        setQueryStates(prev => ({
             ...prev,
             [queryId]: { isExecuting: true, isExample: false }
         }));
 
-        queryTimeouts.current[queryId] = setTimeout(() => {
-            if (queryTimeouts.current[queryId]) {
-                setQueryStates((prev: Record<string, QueryState>) => ({
-                    ...prev,
-                    [queryId]: { isExecuting: false, isExample: false }
-                }));
-                delete queryTimeouts.current[queryId];
+        try {
+            await chatService.executeQuery(chatId, message.id, query.id, streamId || '');
+
+            // Update query state
+            if (message.queries) {
+                message.queries.find(q => q.id === queryId)!.is_executed = true;
+                message.queries.find(q => q.id === queryId)!.is_rolled_back = false;
             }
-        }, 2000);
+        } catch (error: any) {
+            console.log('error', error.message);
+            toast.error("Query execution failed");
+        } finally {
+            setQueryStates(prev => ({
+                ...prev,
+                [queryId]: { isExecuting: false, isExample: false }
+            }));
+        }
     };
 
-    const handleRollback = (queryId: string) => {
-        setQueryStates((prev: Record<string, QueryState>) => ({
-            ...prev,
-            [queryId]: { isExecuting: false, isExample: true }
-        }));
-        toast('Changes reverted', {
-            ...toastStyle,
-            icon: '↺',
-        });
-        setRollbackState({ show: false, queryId: null });
+    const handleRollback = async (queryId: string) => {
+        const queryIndex = message.queries?.findIndex(q => q.id === queryId) ?? -1;
+        if (queryIndex === -1) return;
 
+
+        try {
+            setQueryStates(prev => ({
+                ...prev,
+                [queryId]: { isExecuting: true, isExample: true }
+            }));
+
+            await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '');
+
+            // Update query state
+            if (message.queries) {
+                message.queries[queryIndex].is_rolled_back = true;
+            }
+
+        } catch (error: any) {
+            toast.error(error.message);
+        } finally {
+            setQueryStates(prev => ({
+                ...prev,
+                [queryId]: { isExecuting: false, isExample: true }
+            }));
+            setRollbackState({ show: false, queryId: null });
+        }
     };
 
     const renderTableView = (data: any[]) => {
@@ -197,6 +231,10 @@ export default function MessageTile({
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
         const isCurrentlyStreaming = streamingQueryIndex === index;
 
+        const shouldShowRollback = query.can_rollback &&
+            query.is_executed &&
+            !query.is_rolled_back;
+
         return (
             <div>
                 <p className="mb-4 mt-4 font-base text-base">
@@ -239,7 +277,7 @@ export default function MessageTile({
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        handleExecuteQuery(index);
+                                        handleExecuteQuery(queryId);
                                         setTimeout(() => {
                                             window.scrollTo(window.scrollX, window.scrollY);
                                         }, 0);
@@ -337,7 +375,7 @@ export default function MessageTile({
                                                 >
                                                     <Copy className="w-4 h-4" />
                                                 </button>
-                                                {!shouldShowExampleResult && query.can_rollback && (
+                                                {shouldShowRollback && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.preventDefault();
@@ -346,9 +384,10 @@ export default function MessageTile({
                                                             setTimeout(() => {
                                                                 window.scrollTo(window.scrollX, window.scrollY);
                                                             }, 0);
+                                                            handleRollback(query.id);
                                                         }}
                                                         className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
-                                                        title="Rollback changes"
+                                                        disabled={queryStates[queryId]?.isExecuting}
                                                     >
                                                         <History className="w-4 h-4" />
                                                     </button>
@@ -359,7 +398,7 @@ export default function MessageTile({
                                     {query.error ? (
                                         <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
                                             <div className="font-bold mb-2">{query.error.code}</div>
-                                            <div className="mb-2">{query.error.message}</div>
+                                            {query.error.message != query.error.details && <div className="mb-2">{query.error.message}</div>}
                                             {query.error.details && (
                                                 <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
                                                     {query.error.details}

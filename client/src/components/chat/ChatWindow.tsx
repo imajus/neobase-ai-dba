@@ -379,6 +379,7 @@ export default function ChatWindow({
           {[...messages].reverse().map((message) => (
             <MessageTile
               key={message.id}
+              chatId={chat.id}
               message={message}
               onEdit={handleEditMessage}
               editingMessageId={editingMessageId}

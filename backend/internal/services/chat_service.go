@@ -993,7 +993,11 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				"chat_id":    chatID,
 				"message_id": msg.ID.Hex(),
 				"query_id":   query.ID.Hex(),
-				"error":      queryErr,
+				"error": &dtos.QueryError{
+					Code:    queryErr.Code,
+					Message: queryErr.Message,
+					Details: queryErr.Details,
+				},
 			},
 		})
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute query: %v", queryErr.Details)
@@ -1092,6 +1096,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 		Event: "query-executed",
 		Data: map[string]interface{}{
+			"chat_id":          chatID,
 			"message_id":       msg.ID.Hex(),
 			"query_id":         query.ID.Hex(),
 			"is_executed":      query.IsExecuted,
@@ -1156,7 +1161,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		if queryErr != nil {
 			// Send event about dependent query failure
 			s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
-				Event: "rollback-dependent-query-failed",
+				Event: "rollback-query-failed",
 				Data: map[string]interface{}{
 					"chat_id":    chatID,
 					"message_id": msg.ID.Hex(),
@@ -1384,6 +1389,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 		Event: "rollback-executed",
 		Data: map[string]interface{}{
+			"chat_id":          chatID,
 			"message_id":       msg.ID.Hex(),
 			"query_id":         query.ID.Hex(),
 			"is_executed":      query.IsExecuted,
