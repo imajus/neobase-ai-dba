@@ -18,7 +18,7 @@ import (
 // Add these constants
 const (
 	schemaKeyPrefix = "schema:"
-	schemaTTL       = 72 * time.Hour // Keep schemas for 77 hours
+	schemaTTL       = 72 * time.Hour // Keep schemas for 72 hours
 )
 
 // SchemaInfo represents database schema information
