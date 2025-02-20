@@ -392,7 +392,7 @@ function AppContent() {
   }, [chats, connectionStatuses, handleConnectionStatusChange]);
 
   // Update setupSSEConnection to include onclose
-  const setupSSEConnection = useCallback(async (chatId: string) => {
+  const setupSSEConnection = useCallback(async (chatId: string): Promise<string> => {
     try {
       // Close existing SSE connection if any
       if (eventSource) {
@@ -400,12 +400,16 @@ function AppContent() {
         setEventSource(null);
       }
 
-      const newStreamId = generateStreamId();
-      setStreamId(newStreamId);
+      let localStreamId = streamId;
+
+      if (!localStreamId) {
+        localStreamId = generateStreamId();
+        setStreamId(localStreamId);
+      }
 
       // Create and setup new SSE connection
       const sse = new EventSourcePolyfill(
-        `${import.meta.env.VITE_API_URL}/chats/${chatId}/stream?stream_id=${newStreamId}`,
+        `${import.meta.env.VITE_API_URL}/chats/${chatId}/stream?stream_id=${localStreamId}`,
         {
           withCredentials: true,
           headers: {
@@ -437,7 +441,7 @@ function AppContent() {
       };
 
       setEventSource(sse);
-      return newStreamId;
+      return localStreamId;
     } catch (error) {
       console.error('Failed to setup SSE connection:', error);
       throw error;
@@ -530,11 +534,10 @@ function AppContent() {
         console.log('EventSource is open');
       } else {
         console.log('EventSource is not open');
-
+        console.log('current stream id', streamId);
         await setupSSEConnection(selectedConnection.id);
-        return;
       }
-
+      console.log('new stream id', streamId);
       const response = await axios.post<SendMessageResponse>(
         `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/messages`,
         {
