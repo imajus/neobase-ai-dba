@@ -69,7 +69,6 @@ export default function MessageTile({
     const [currentDescription, setCurrentDescription] = useState('');
     const [currentQuery, setCurrentQuery] = useState('');
 
-    console.log('MessageTile', message);
     useEffect(() => {
         const streamQueries = async () => {
             if (!message.queries || !message.is_streaming) return;

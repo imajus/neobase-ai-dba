@@ -154,15 +154,17 @@ function AppContent() {
     }
   };
 
-  const handleAddConnection = async (connection: Connection) => {
+  const handleAddConnection = async (connection: Connection): Promise<{ success: boolean, error?: string }> => {
     try {
       const newChat = await chatService.createChat(connection);
       setChats(prev => [...prev, newChat]);
       setSuccessMessage('Connection added successfully!');
       setShowConnectionModal(false);
+      return { success: true };
     } catch (error: any) {
       console.error('Failed to add connection:', error);
       toast.error(error.message, errorToast);
+      return { success: false, error: error.message };
     }
   };
 
@@ -263,22 +265,10 @@ function AppContent() {
 
     try {
       // Update the connection
-      const response = await axios.put(
-        `${import.meta.env.VITE_API_URL}/chats/${id}`,
-        {
-          connection: data
-        },
-        {
-          withCredentials: true,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      const response = await chatService.editChat(id, data);
 
-
-      if (response.data.success) {
+      console.log("handleEditConnection response", response);
+      if (response) {
 
         // First disconnect the current connection
         await axios.post(
@@ -334,11 +324,11 @@ function AppContent() {
         return { success: true };
       }
 
-      throw new Error('Failed to update connection');
+      return { success: false, error: 'Failed to update connection' };
     } catch (error: any) {
       console.error('Failed to update connection:', error);
       toast.dismiss(loadingToast);
-      toast.error(error.response?.data?.error || 'Failed to update connection', {
+      toast.error(error.message || 'Failed to update connection', {
         style: {
           background: '#ff4444',
           color: '#fff',
@@ -349,146 +339,13 @@ function AppContent() {
         }
       });
 
-
       return {
         success: false,
-        error: error.response?.data?.error || 'Failed to update connection'
+        error: error.message || 'Failed to update connection'
       };
     }
   };
 
-  // const generateAIResponse = async (userMessage: string) => {
-  //   console.log('Generating AI response for:', userMessage);
-  //   const aiMessageId = `ai-${Date.now()}`;
-  //   const loadingSteps = [
-  //     { text: "NeoBase is analyzing your request..", done: false },
-  //     { text: "Fetching request relevant entities(tables, columns, etc.) from the database..", done: false },
-  //     { text: "Generating an optimized query & example results for the request..", done: false },
-  //     { text: "Analyzing the criticality of the query & if roll back is possible..", done: false }
-  //   ];
-
-  //   // Add initial loading message with first step only
-  //   setMessages(prev => [...prev, {
-  //     id: aiMessageId,
-  //     type: 'ai',
-  //     content: '',
-  //     isLoading: true,
-  //     loadingSteps: [loadingSteps[0]]
-  //   }]);
-
-  //   // Update steps one by one
-  //   for (let i = 0; i < loadingSteps.length; i++) {
-  //     await new Promise(resolve => setTimeout(resolve, 1500));
-  //     setMessages(prev => prev.map(msg =>
-  //       msg.id === aiMessageId ? {
-  //         ...msg,
-  //         loadingSteps: [
-  //           ...loadingSteps.slice(0, i + 1).map(step => ({ ...step, done: true })),
-  //           ...(i < loadingSteps.length - 1 ? [loadingSteps[i + 1]] : [])
-  //         ]
-  //       } : msg
-  //     ));
-  //   }
-
-  //   // Mark last step as done and immediately start content streaming
-  //   setMessages(prev => prev.map(msg =>
-  //     msg.id === aiMessageId ? {
-  //       ...msg,
-  //       loadingSteps: loadingSteps.map(step => ({ ...step, done: true })),
-  //       content: '',
-  //       startStreaming: true
-  //     } : msg
-  //   ));
-
-  //   // Start content streaming immediately
-  //   const fullContent = newMockMessage.content;
-  //   let currentContent = '';
-
-  //   for (let i = 0; i < fullContent.length; i++) {
-  //     await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
-  //     currentContent += fullContent[i];
-  //     setMessages(prev => prev.map(msg =>
-  //       msg.id === aiMessageId ? {
-  //         ...msg,
-  //         content: currentContent,
-  //         loadingSteps: msg.loadingSteps?.map(step => ({
-  //           ...step,
-  //           transitioning: true
-  //         }))
-  //       } : msg
-  //     ));
-  //   }
-
-  //   // Remove loading steps but keep isLoading true for query streaming
-  //   setMessages(prev => prev.map(msg =>
-  //     msg.id === aiMessageId ? {
-  //       ...msg,
-  //       loadingSteps: undefined,
-  //       queries: []
-  //     } : msg
-  //   ));
-
-  //   // Stream each query one by one
-  //   for (let i = 0; i < (newMockMessage.queries?.length || 0); i++) {
-  //     const query = newMockMessage.queries?.[i];
-  //     if (!query) continue;
-
-  //     // Stream query text
-  //     let currentQuery = '';
-  //     for (let j = 0; j < query.query.length; j++) {
-  //       await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 10));
-  //       currentQuery += query.query[j];
-  //       setMessages(prev => prev.map(msg =>
-  //         msg.id === aiMessageId ? {
-  //           ...msg,
-  //           queries: [
-  //             ...(msg.queries || []).slice(0, i),
-  //             { ...query, query: currentQuery, exampleResult: undefined },
-  //             ...(msg.queries || []).slice(i + 1)
-  //           ]
-  //         } : msg
-  //       ));
-  //     }
-
-  //     // Add example result gradually
-  //     if (Array.isArray(query.exampleResult)) {
-  //       for (let k = 0; k < query.exampleResult.length; k++) {
-  //         await new Promise(resolve => setTimeout(resolve, 50));
-  //         setMessages(prev => prev.map(msg =>
-  //           msg.id === aiMessageId ? {
-  //             ...msg,
-  //             queries: msg.queries?.map((q, index) =>
-  //               index === i ? {
-  //                 ...q,
-  //                 exampleResult: query.exampleResult?.slice(0, k + 1)
-  //               } : q
-  //             )
-  //           } : msg
-  //         ));
-  //       }
-  //     } else {
-  //       await new Promise(resolve => setTimeout(resolve, 100));
-  //       setMessages(prev => prev.map(msg =>
-  //         msg.id === aiMessageId ? {
-  //           ...msg,
-  //           queries: msg.queries?.map((q, index) =>
-  //             index === i ? { ...q, exampleResult: query.exampleResult } : q
-  //           )
-  //         } : msg
-  //       ));
-  //     }
-  //   }
-
-  //   // Finally remove loading state
-  //   setMessages(prev => prev.map(msg =>
-  //     msg.id === aiMessageId ? {
-  //       ...msg,
-  //       isLoading: false
-  //     } : msg
-  //   ));
-  // };
-
-  // Clear connection status when connection is deselected
   useEffect(() => {
     if (!selectedConnection) {
       setConnectionStatuses({});
@@ -533,22 +390,6 @@ function AppContent() {
       }
     }
   }, [chats, connectionStatuses, handleConnectionStatusChange]);
-
-  // Add onClose handler for EventSource
-  useEffect(() => {
-    if (!eventSource) return;
-
-    const handleClose = () => {
-      console.log('SSE connection closed');
-      // Update connection status
-      if (selectedConnection) {
-        handleConnectionStatusChange(selectedConnection.id, false, 'sse-close');
-      }
-      setEventSource(null);
-    };
-
-
-  }, [eventSource, selectedConnection, handleConnectionStatusChange]);
 
   // Update setupSSEConnection to include onclose
   const setupSSEConnection = useCallback(async (chatId: string) => {
@@ -992,28 +833,34 @@ function AppContent() {
             break;
 
           case 'query-executed':
-            setMessages(prev => prev.map(msg => {
-              if (msg.id === response.data.message_id) {
-                return {
-                  ...msg,
-                  queries: msg.queries?.map(q => {
-                    if (q.id === response.data.query_id) {
-                      return {
-                        ...q,
-                        is_executed: true,
-                        is_rolled_back: false,
-                        execution_time: response.data.execution_time,
-                        execution_result: response.data.execution_result,
-                        error: undefined
-                      } as QueryResult;
-                    }
-                    return q;
-                  })
-                };
-              }
-              return msg;
-            }));
-            // Show success toast without scrolling
+            setMessages(prev => {
+              const newMessages = prev.map(msg => {
+                if (msg.id === response.data.message_id) {
+                  return {
+                    ...msg,
+                    queries: msg.queries?.map(q => {
+                      if (q.id === response.data.query_id) {
+                        return {
+                          ...q,
+                          is_executed: true,
+                          is_rolled_back: false,
+                          execution_time: response.data.execution_time,
+                          execution_result: response.data.execution_result,
+                          error: undefined
+                        } as QueryResult;
+                      }
+                      return q;
+                    })
+                  };
+                }
+                return msg;
+              });
+
+              // Only update state if there are actual changes
+              const hasChanges = JSON.stringify(prev) !== JSON.stringify(newMessages);
+              return hasChanges ? newMessages : prev;
+            });
+
             toast('Query executed!', {
               ...toastStyle,
               icon: '✅',

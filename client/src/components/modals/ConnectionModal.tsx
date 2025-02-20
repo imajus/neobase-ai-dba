@@ -5,8 +5,8 @@ import { Chat, Connection } from '../../types/chat';
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
-  onEdit?: (data: Connection) => Promise<{ success: boolean; error?: string }>;
-  onSubmit: (data: Connection) => Promise<void>;
+  onEdit?: (data: Connection) => Promise<{ success: boolean, error?: string }>;
+  onSubmit: (data: Connection) => Promise<{ success: boolean, error?: string }>;
 }
 
 interface FormErrors {
@@ -103,14 +103,20 @@ export default function ConnectionModal({ initialData, onClose, onEdit, onSubmit
     try {
       if (initialData) {
         const result = await onEdit?.(formData);
+        console.log("edit result in connection modal", result);
         if (result?.success) {
           onClose();
         } else if (result?.error) {
           setError(result.error);
         }
       } else {
-        await onSubmit(formData);
-        onClose();
+        const result = await onSubmit(formData);
+        console.log("submit result in connection modal", result);
+        if (result?.success) {
+          onClose();
+        } else if (result?.error) {
+          setError(result.error);
+        }
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred while updating the connection');

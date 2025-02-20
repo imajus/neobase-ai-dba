@@ -21,7 +21,7 @@ interface ChatWindowProps {
   onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
-  onEditConnection?: (id: string, connection: Connection) => void;
+  onEditConnection?: (id: string, connection: Connection) => Promise<{ success: boolean, error?: string }>;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
   onCancelStream: () => Promise<void>;
@@ -65,6 +65,7 @@ export default function ChatWindow({
   const pageSize = 20; // Messages per page
   const loadingRef = useRef<HTMLDivElement>(null);
   const [isMessageSending, setIsMessageSending] = useState(false);
+  const prevMessageCountRef = useRef(messages.length);
 
   useEffect(() => {
     if (isConnected) {
@@ -72,7 +73,8 @@ export default function ChatWindow({
     }
   }, [isConnected]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (origin: string) => {
+    console.log("scrollToBottom called from ", origin);
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
@@ -81,13 +83,14 @@ export default function ChatWindow({
     if (!chatContainer) return;
 
     const observer = new MutationObserver(() => {
-      // Only auto-scroll if user is already at bottom
       const { scrollTop, scrollHeight, clientHeight } = chatContainer;
       const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 
-      if (isNearBottom) {
-        scrollToBottom();
+      if (messages.length > prevMessageCountRef.current && isNearBottom) {
+        scrollToBottom('mutation-observer');
       }
+
+      prevMessageCountRef.current = messages.length;
     });
 
     observer.observe(chatContainer, {
@@ -97,6 +100,12 @@ export default function ChatWindow({
     });
 
     return () => observer.disconnect();
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom('initial-load');
+    }
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -108,7 +117,9 @@ export default function ChatWindow({
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    if (messages.length > 0 && prevMessageCountRef.current < messages.length) {
+      scrollToBottom('useEffect=3');
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -432,7 +443,7 @@ export default function ChatWindow({
 
         {showScrollButton && (
           <button
-            onClick={scrollToBottom}
+            onClick={() => scrollToBottom('scroll-button')}
             className="fixed bottom-24 right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border z-40"
             title="Scroll to bottom"
           >
@@ -472,13 +483,12 @@ export default function ChatWindow({
             initialData={chat}
             onClose={() => setShowEditConnection(false)}
             onEdit={async (data) => {
-              await onEditConnection?.(chat.id, data);
-              setShowEditConnection(false);
-              return { success: true };
+              const result = await onEditConnection?.(chat.id, data);
+              return { success: result?.success || false, error: result?.error };
             }}
             onSubmit={async (data) => {
-              await onEditConnection?.(chat.id, data);
-              setShowEditConnection(false);
+              const result = await onEditConnection?.(chat.id, data);
+              return { success: result?.success || false, error: result?.error };
             }}
           />
         </div>

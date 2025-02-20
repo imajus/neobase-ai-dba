@@ -25,7 +25,32 @@ const chatService = {
             throw new Error(error.response?.data?.error || 'Failed to create chat');
         }
     },
+    async editChat(chatId: string, connection: Connection): Promise<Chat> {
+        try {
+            const response = await axios.put<CreateChatResponse>(
+                `${API_URL}/chats/${chatId}`,
+                {
+                    connection: connection
+                },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
 
+            if (!response.data.success) {
+                throw new Error('Failed to edit chat');
+            }
+
+            return response.data.data;
+        } catch (error: any) {
+            console.error('Edit chat error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to edit chat');
+        }
+    },
     async deleteChat(chatId: string): Promise<void> {
         try {
             const response = await axios.delete(`${API_URL}/chats/${chatId}`);
