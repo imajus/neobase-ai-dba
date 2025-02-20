@@ -142,6 +142,22 @@ const chatService = {
             console.error('Rollback query error:', error);
             throw new Error(error.response?.data?.error || 'Failed to rollback query');
         }
+    },
+
+    async refreshSchema(chatId: string): Promise<boolean> {
+        try {
+            const response = await axios.post(`${API_URL}/chats/${chatId}/refresh-schema`, {
+                withCredentials: true,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            return response.data.success;
+        } catch (error: any) {
+            console.error('Refresh schema error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to refresh schema');
+        }
     }
 };
 

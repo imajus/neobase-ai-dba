@@ -854,6 +854,31 @@ func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerTy
 	return nil
 }
 
+func (sm *SchemaManager) RefreshSchema(chatID string) error {
+	// Get current connection
+	db, err := sm.dbManager.GetConnection(chatID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection: %v", err)
+	}
+
+	// Get connection config
+	conn, exists := sm.dbManager.connections[chatID]
+	if !exists {
+		return fmt.Errorf("connection not found for chatID: %s", chatID)
+	}
+	log.Printf("SchemaManager -> TriggerSchemaCheck -> Manual trigger, fetching new schema")
+	schema, err := db.GetSchema(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get current schema: %v", err)
+	}
+
+	// Store the fresh schema immediately
+	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
+		return fmt.Errorf("failed to store schema: %v", err)
+	}
+	return nil
+}
+
 // Add method to TableDiff to check if it's empty
 func (td TableDiff) isEmpty() bool {
 	return len(td.AddedColumns) == 0 &&

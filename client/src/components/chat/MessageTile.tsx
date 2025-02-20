@@ -606,7 +606,7 @@ export default function MessageTile({
                 <ConfirmationModal
                     title="Critical Query"
                     message="This query may affect important data. Are you sure you want to proceed?"
-                    onConfirm={() => {
+                    onConfirm={async () => {
                         setShowCriticalConfirm(false);
                         if (queryToExecute !== null) {
                             executeQuery(queryToExecute);

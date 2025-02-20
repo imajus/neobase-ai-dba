@@ -1,9 +1,9 @@
-import { AlertTriangle, X } from 'lucide-react';
-
+import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { useState } from 'react';
 interface ConfirmationModalProps {
   title: string;
   message: string;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
   onCancel: () => void;
 }
 
@@ -13,6 +13,7 @@ export default function ConfirmationModal({
   onConfirm,
   onCancel,
 }: ConfirmationModalProps) {
+  const [isLoading, setIsLoading] = useState(false);
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-white neo-border rounded-lg w-full max-w-md">
@@ -34,10 +35,21 @@ export default function ConfirmationModal({
 
           <div className="flex gap-4">
             <button
-              onClick={onConfirm}
+              onClick={async () => {
+                setIsLoading(true);
+                await onConfirm();
+                setIsLoading(false);
+              }}
               className="neo-border bg-neo-error text-white px-4 py-2 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1"
             >
-              Confirm
+              {isLoading ? (
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Refreshing...</span>
+                </div>
+              ) : (
+                'Confirm'
+              )}
             </button>
             <button
               onClick={onCancel}

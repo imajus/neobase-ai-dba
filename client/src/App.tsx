@@ -454,6 +454,23 @@ function AppContent() {
     };
   }, [eventSource]);
 
+  // Refresh schema
+  const handleRefreshSchema = async () => {
+    try {
+      console.log('handleRefreshSchema called');
+      const response = await chatService.refreshSchema(selectedConnection?.id || '');
+      console.log('handleRefreshSchema response', response);
+      if (response) {
+        toast.success('Knowledge base refreshed successfully');
+      } else {
+        toast.error('Failed to refresh knowledge base');
+      }
+    } catch (error) {
+      console.error('Failed to refresh schema:', error);
+      toast.error('Failed to refresh schema');
+    }
+  };
+
   const handleCancelStream = async () => {
     if (!selectedConnection?.id || !streamId) return;
     try {
@@ -1013,6 +1030,7 @@ function AppContent() {
           onConnectionStatusChange={handleConnectionStatusChange}
           isConnected={!!connectionStatuses[selectedConnection.id]}
           onCancelStream={handleCancelStream}
+          onRefreshSchema={handleRefreshSchema}
         />
       ) : (
         <div className={`

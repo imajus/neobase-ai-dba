@@ -25,6 +25,7 @@ interface ChatWindowProps {
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
   onCancelStream: () => Promise<void>;
+  onRefreshSchema: () => Promise<void>;
 }
 
 interface QueryState {
@@ -45,12 +46,14 @@ export default function ChatWindow({
   onEditConnection,
   onConnectionStatusChange,
   isConnected,
-  onCancelStream
+  onCancelStream,
+  onRefreshSchema
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editInput, setEditInput] = useState('');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showRefreshSchema, setShowRefreshSchema] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [queryStates, setQueryStates] = useState<Record<string, QueryState>>({});
@@ -349,6 +352,7 @@ export default function ChatWindow({
         onEditConnection={() => setShowEditConnection(true)}
         onShowCloseConfirm={() => setShowCloseConfirm(true)}
         onReconnect={handleReconnect}
+        setShowRefreshSchema={() => setShowRefreshSchema(true)}
       />
 
       <div
@@ -459,11 +463,26 @@ export default function ChatWindow({
         isDisabled={isMessageSending}
       />
 
+      {showRefreshSchema && (
+        <ConfirmationModal
+          title="Refresh Knowledge Base"
+          message="Are you sure you want to refresh the knowledge base? This action will refetch the schema from the database and update the knowledge base."
+          onConfirm={async () => {
+            await onRefreshSchema();
+            setShowRefreshSchema(false);
+          }}
+          onCancel={() => setShowRefreshSchema(false)}
+        />
+      )}
+
       {showClearConfirm && (
         <ConfirmationModal
           title="Clear Chat"
           message="Are you sure you want to clear all chat messages? This action cannot be undone."
-          onConfirm={handleClearConfirm}
+          onConfirm={async () => {
+            await onClearChat();
+            setShowClearConfirm(false);
+          }}
           onCancel={() => setShowClearConfirm(false)}
         />
       )}

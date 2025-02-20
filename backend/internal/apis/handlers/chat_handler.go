@@ -474,6 +474,24 @@ func (h *ChatHandler) GetDBConnectionStatus(c *gin.Context) {
 	})
 }
 
+func (h *ChatHandler) RefreshSchema(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	statusCode, err := h.chatService.RefreshSchema(c.Request.Context(), userID, chatID)
+	if err != nil {
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    "Schema refreshed successfully",
+	})
+}
+
 // Add query execution methods
 func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
 	userID := c.GetString("userID")

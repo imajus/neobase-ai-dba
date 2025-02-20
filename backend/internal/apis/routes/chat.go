@@ -34,6 +34,7 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.POST("/:id/connect", chatHandler.ConnectDB)
 		protected.POST("/:id/disconnect", chatHandler.DisconnectDB)
 		protected.GET("/:id/connection-status", chatHandler.GetDBConnectionStatus)
+		protected.POST("/:id/refresh-schema", chatHandler.RefreshSchema)
 
 		// SSE endpoints for streaming
 		protected.GET("/:id/stream", chatHandler.StreamChat)

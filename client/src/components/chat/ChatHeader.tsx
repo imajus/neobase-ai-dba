@@ -1,4 +1,4 @@
-import { Eraser, Loader, Pencil, PlugZap, RefreshCw } from 'lucide-react';
+import { Eraser, ListRestart, Loader, Pencil, PlugZap, RefreshCw } from 'lucide-react';
 import { useMemo } from 'react';
 import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
@@ -11,6 +11,7 @@ interface ChatHeaderProps {
     onEditConnection: () => void;
     onShowCloseConfirm: () => void;
     onReconnect: () => void;
+    setShowRefreshSchema: (show: boolean) => void;
 }
 
 export default function ChatHeader({
@@ -21,6 +22,7 @@ export default function ChatHeader({
     onEditConnection,
     onShowCloseConfirm,
     onReconnect,
+    setShowRefreshSchema,
 }: ChatHeaderProps) {
     const connectionStatus = useMemo(() => {
         if (isConnecting) {
@@ -50,6 +52,13 @@ export default function ChatHeader({
                 {connectionStatus}
             </div>
             <div className="flex items-center gap-2">
+                <button
+                    onClick={() => setShowRefreshSchema(true)}
+                    className="p-2 hover:bg-neo-gray rounded-lg transition-colors hidden md:block neo-border text-gray-800"
+                    title="Refresh schema"
+                >
+                    <ListRestart className="w-5 h-5" />
+                </button>
                 <button
                     onClick={onClearChat}
                     className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors hidden md:block neo-border"
@@ -82,6 +91,13 @@ export default function ChatHeader({
                     </button>
                 )}
                 {/* Mobile buttons without borders */}
+                <button
+                    onClick={() => setShowRefreshSchema(true)}
+                    className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors md:hidden"
+                    title="Refresh schema"
+                >
+                    <ListRestart className="w-5 h-5" />
+                </button>
                 <button
                     onClick={onClearChat}
                     className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors md:hidden"

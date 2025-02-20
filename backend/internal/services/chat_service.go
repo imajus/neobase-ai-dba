@@ -46,6 +46,7 @@ type ChatService interface {
 	RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	CancelQueryExecution(userID, chatID, messageID, queryID, streamID string)
 	ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error
+	RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error)
 }
 
 type chatService struct {
@@ -1630,4 +1631,12 @@ func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, use
 	}
 
 	return nil
+}
+
+func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
+	log.Println("ChatService -> RefreshSchema")
+	if err := s.dbManager.GetSchemaManager().RefreshSchema(chatID); err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to refresh schema: %v", err)
+	}
+	return http.StatusOK, nil
 }
