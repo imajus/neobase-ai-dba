@@ -16,6 +16,7 @@ interface QueryState {
 interface MessageTileProps {
     chatId: string;
     message: Message;
+    checkSSEConnection: () => Promise<void>;
     onEdit?: (id: string) => void;
     editingMessageId: string | null;
     editInput: string;
@@ -54,6 +55,7 @@ export default function MessageTile({
     queryStates,
     setQueryStates,
     queryTimeouts,
+    checkSSEConnection
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -93,7 +95,10 @@ export default function MessageTile({
 
     const handleCopyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
-        toast.success('Copied to clipboard!', toastStyle);
+        toast('Copied to clipboard!', {
+            ...toastStyle,
+            icon: '📋',
+        });
     };
 
     const handleExecuteQuery = async (queryId: string) => {
@@ -123,6 +128,7 @@ export default function MessageTile({
         }));
 
         try {
+            await checkSSEConnection();
             await chatService.executeQuery(chatId, message.id, query.id, streamId || '');
 
             // Update query state
@@ -151,6 +157,7 @@ export default function MessageTile({
                 [queryId]: { isExecuting: true, isExample: true }
             }));
 
+            await checkSSEConnection();
             await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '');
 
             // Update query state
@@ -220,8 +227,8 @@ export default function MessageTile({
         }
 
         // For SELECT queries with results
-        if (resultToShow.results && Array.isArray(resultToShow.results)) {
-            return renderTableView(resultToShow.results);
+        if (resultToShow.results || Array.isArray(resultToShow)) {
+            return renderTableView(resultToShow.results || resultToShow);
         }
 
         // For INSERT/UPDATE/DELETE queries

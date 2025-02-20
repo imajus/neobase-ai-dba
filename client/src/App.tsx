@@ -395,17 +395,22 @@ function AppContent() {
     try {
       // Close existing SSE connection if any
       if (eventSource) {
+        console.log('Closing existing SSE connection');
         eventSource.close();
         setEventSource(null);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Generate new stream ID only if we don't have one
       let localStreamId = streamId;
-
       if (!localStreamId) {
         localStreamId = generateStreamId();
         setStreamId(localStreamId);
       }
+
+      // Wait for old connection to fully close
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      console.log(`Setting up new SSE connection for chat ${chatId} with stream ${localStreamId}`);
 
       // Create and setup new SSE connection
       const sse = new EventSourcePolyfill(
@@ -419,10 +424,14 @@ function AppContent() {
       );
 
       // Setup SSE event handlers
+      sse.onopen = () => {
+        console.log('SSE connection opened successfully');
+      };
+
       sse.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('SSE message:', data);
+          console.log('SSE message received:', data);
 
           if (data.event === 'db-connected') {
             handleConnectionStatusChange(chatId, true, 'app-sse-connection');
@@ -435,18 +444,23 @@ function AppContent() {
       };
 
       sse.onerror = (e: any) => {
-        console.log('SSE connection error', e);
-        handleConnectionStatusChange(chatId, false, 'sse-close');
-        setEventSource(null);
+        console.error('SSE connection error:', e);
+        handleConnectionStatusChange(chatId, false, 'sse-error');
+        // Don't close the connection on every error
+        if (sse.readyState === EventSource.CLOSED) {
+          setEventSource(null);
+        }
       };
 
       setEventSource(sse);
       return localStreamId;
+
     } catch (error) {
       console.error('Failed to setup SSE connection:', error);
+      toast.error('Failed to setup SSE connection', errorToast);
       throw error;
     }
-  }, [eventSource, generateStreamId, setStreamId, handleConnectionStatusChange]);
+  }, [eventSource, streamId, generateStreamId, handleConnectionStatusChange]);
 
   // Cleanup SSE on unmount or connection change
   useEffect(() => {
@@ -520,6 +534,18 @@ function AppContent() {
         return prev;
       });
     }
+  };
+
+  const checkSSEConnection = async () => {
+    console.log('checkSSEConnection -> eventSource?.readyState', eventSource?.readyState);
+    if (eventSource?.readyState === EventSource.OPEN) {
+      console.log('checkSSEConnection -> EventSource is open');
+    } else {
+      console.log('checkSSEConnection -> EventSource is not open');
+      console.log('checkSSEConnection -> current stream id', streamId);
+      await setupSSEConnection(selectedConnection?.id || '');
+    }
+    console.log('new stream id', streamId);
   };
 
   const handleSendMessage = async (content: string) => {
@@ -1024,6 +1050,7 @@ function AppContent() {
           chat={selectedConnection}
           isExpanded={isSidebarExpanded}
           messages={messages}
+          checkSSEConnection={checkSSEConnection}
           setMessages={setMessages}
           onSendMessage={handleSendMessage}
           onClearChat={handleClearChat}

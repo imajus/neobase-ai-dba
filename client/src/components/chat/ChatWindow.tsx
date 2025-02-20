@@ -26,6 +26,7 @@ interface ChatWindowProps {
   isConnected: boolean;
   onCancelStream: () => Promise<void>;
   onRefreshSchema: () => Promise<void>;
+  checkSSEConnection: () => Promise<void>;
 }
 
 interface QueryState {
@@ -47,7 +48,8 @@ export default function ChatWindow({
   onConnectionStatusChange,
   isConnected,
   onCancelStream,
-  onRefreshSchema
+  onRefreshSchema,
+  checkSSEConnection
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -398,6 +400,7 @@ export default function ChatWindow({
           {[...messages].reverse().map((message) => (
             <MessageTile
               key={message.id}
+              checkSSEConnection={checkSSEConnection}
               chatId={chat.id}
               message={message}
               onEdit={handleEditMessage}
