@@ -573,6 +573,7 @@ func (m *Manager) StartSchemaTracking(chatID string) {
 		time.Sleep(2 * time.Second)
 
 		ticker := time.NewTicker(schemaCheckInterval)
+
 		defer ticker.Stop()
 
 		// Do initial schema check
@@ -608,13 +609,20 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 		return fmt.Errorf("connection not found")
 	}
 
-	diff, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
+	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
 	if err != nil {
 		return fmt.Errorf("schema check failed: %v", err)
 	}
 
 	if diff != nil {
 		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %+v", chatID, diff)
+	}
+
+	if hasChanged {
+		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %t", chatID, hasChanged)
+		if m.streamHandler != nil {
+			m.streamHandler.HandleSchemaChange(dbConn.UserID, chatID, dbConn.StreamID, hasChanged)
+		}
 	}
 
 	return nil

@@ -224,16 +224,16 @@ func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExec
 }
 
 // Update CheckSchemaChanges to include dbType
-func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaDiff, error) {
+func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaDiff, bool, error) {
 	_, exists := sm.dbManager.drivers[dbType]
 	if !exists {
-		return nil, fmt.Errorf("no driver found for type: %s", dbType)
+		return nil, false, fmt.Errorf("no driver found for type: %s", dbType)
 	}
 
 	// Get current schema using driver
 	currentSchema, err := sm.GetSchema(ctx, chatID, db, dbType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get current schema: %v", err)
+		return nil, false, fmt.Errorf("failed to get current schema: %v", err)
 	}
 
 	// Try to get stored schema
@@ -243,7 +243,7 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 
 		// First time - store current schema
 		if err := sm.storeSchema(ctx, chatID, currentSchema, db, dbType); err != nil {
-			return nil, err
+			return nil, true, err
 		}
 
 		// Return special diff for first time with full schema
@@ -251,21 +251,21 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 			FullSchema:  currentSchema, // Add this field to SchemaDiff struct
 			UpdatedAt:   time.Now(),
 			IsFirstTime: true,
-		}, nil
+		}, true, nil
 	}
 
 	// Normal comparison for subsequent changes
 	diff := sm.compareSchemas(storedSchema.FullSchema, currentSchema)
 	if diff == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	// Store updated schema
 	if err := sm.storeSchema(ctx, chatID, currentSchema, db, dbType); err != nil {
-		return nil, err
+		return nil, true, err
 	}
 
-	return diff, nil
+	return diff, true, nil
 }
 
 // Helper method to compare schemas and generate diff
@@ -478,7 +478,7 @@ func (sm *SchemaManager) QuickSchemaCheck(ctx context.Context, chatID string, db
 
 	currentTables, err := sm.fetchTableList(ctx, db)
 	if err != nil {
-		return true, fmt.Errorf("failed to fetch current tables: %v", err)
+		return false, fmt.Errorf("failed to fetch current tables: %v", err)
 	}
 
 	// Quick check: compare table counts and names
@@ -806,19 +806,19 @@ const (
 )
 
 // Update TriggerSchemaCheck to handle different trigger types
-func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerType) error {
+func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerType) (bool, error) {
 	log.Printf("SchemaManager -> TriggerSchemaCheck -> Starting for chatID: %s, triggerType: %s", chatID, triggerType)
 
 	// Get current connection
 	db, err := sm.dbManager.GetConnection(chatID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection: %v", err)
+		return false, fmt.Errorf("failed to get connection: %v", err)
 	}
 
 	// Get connection config
 	conn, exists := sm.dbManager.connections[chatID]
 	if !exists {
-		return fmt.Errorf("connection not found for chatID: %s", chatID)
+		return false, fmt.Errorf("connection not found for chatID: %s", chatID)
 	}
 
 	if triggerType == TriggerTypeManual {
@@ -826,48 +826,51 @@ func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerTy
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> Manual trigger, fetching new schema")
 		schema, err := db.GetSchema(context.Background())
 		if err != nil {
-			return fmt.Errorf("failed to get current schema: %v", err)
+			return false, fmt.Errorf("failed to get current schema: %v", err)
 		}
 
 		// Store the fresh schema immediately
 		if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
-			return fmt.Errorf("failed to store schema: %v", err)
+			return false, fmt.Errorf("failed to store schema: %v", err)
 		}
-		return nil
+		return true, nil
 	}
 
 	// For auto triggers, check for changes first
 	hasChanged, err := sm.QuickSchemaCheck(context.Background(), chatID, db)
+	log.Printf("SchemaManager -> TriggerSchemaCheck -> hasChanged: %t", hasChanged)
+
 	if err != nil {
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error in quick check: %v", err)
+		return false, fmt.Errorf("error in quick check: %v", err)
 	} else if !hasChanged {
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> No schema changes detected in quick check")
-		return nil
+		return false, nil
 	}
 
 	// If changes detected, get fresh schema
 	schema, err := db.GetSchema(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to get current schema: %v", err)
+		return false, fmt.Errorf("failed to get current schema: %v", err)
 	}
 
 	// Store the fresh schema and get detailed changes
 	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
-		return fmt.Errorf("failed to store schema: %v", err)
+		return false, fmt.Errorf("failed to store schema: %v", err)
 	}
 
 	// Get and log detailed changes
-	diff, err := sm.CheckSchemaChanges(context.Background(), chatID, db, conn.Config.Type)
+	diff, hasChanged, err := sm.CheckSchemaChanges(context.Background(), chatID, db, conn.Config.Type)
 	if err != nil {
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error checking changes: %v", err)
-		return err
+		return false, fmt.Errorf("error checking changes: %v", err)
 	}
 
 	if diff != nil && !diff.IsFirstTime {
 		log.Printf("SchemaManager -> TriggerSchemaCheck -> Schema changes detected: %+v", diff)
 	}
 
-	return nil
+	return hasChanged, nil
 }
 
 func (sm *SchemaManager) RefreshSchema(chatID string) error {

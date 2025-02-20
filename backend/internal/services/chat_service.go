@@ -41,12 +41,14 @@ type ChatService interface {
 	ConnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error)
 	DisconnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error)
 	GetDBConnectionStatus(ctx context.Context, userID, chatID string) (*dtos.ConnectionStatusResponse, uint32, error)
-	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 	ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	CancelQueryExecution(userID, chatID, messageID, queryID, streamID string)
 	ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error
 	RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error)
+	// Db Manager Stream Handler
+	HandleSchemaChange(userID, chatID, streamID string, hasChanged bool)
+	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 }
 
 type chatService struct {
@@ -873,9 +875,18 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 // Add method to handle DB status events
 func (s *chatService) HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse) {
 	// Send to stream handler
+	log.Printf("ChatService -> HandleDBEvent -> response: %+v", response)
 	if s.streamHandler != nil {
 		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, response)
 	}
+}
+
+func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, hasChanged bool) {
+	// Send to stream handler
+	log.Printf("ChatService -> HandleSchemaChange -> hasChanged: %t", hasChanged)
+
+	// Need to update the chat LLM messages with the new schema
+
 }
 
 func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error) {
