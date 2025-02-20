@@ -132,7 +132,7 @@ export default function MessageTile({
             }
         } catch (error: any) {
             console.log('error', error.message);
-            toast.error("Query execution failed");
+            toast.error("Query execution failed: " + error);
         } finally {
             setQueryStates(prev => ({
                 ...prev,
@@ -144,7 +144,6 @@ export default function MessageTile({
     const handleRollback = async (queryId: string) => {
         const queryIndex = message.queries?.findIndex(q => q.id === queryId) ?? -1;
         if (queryIndex === -1) return;
-
 
         try {
             setQueryStates(prev => ({
@@ -171,7 +170,10 @@ export default function MessageTile({
     };
 
     const renderTableView = (data: any[]) => {
-        if (!data.length) return null;
+        if (!data || data.length === 0) {
+            return <div className="text-gray-500">No data to display</div>;
+        }
+
         const columns = Object.keys(data[0]);
 
         return (
@@ -211,12 +213,43 @@ export default function MessageTile({
         );
     };
 
+    const renderQueryResult = (resultToShow: any) => {
+        console.log('resultToShow', resultToShow);
+        if (!resultToShow) {
+            return <div className="text-gray-500">No results available</div>;
+        }
+
+        // For SELECT queries with results
+        if (resultToShow.results && Array.isArray(resultToShow.results)) {
+            return renderTableView(resultToShow.results);
+        }
+
+        // For INSERT/UPDATE/DELETE queries
+        if (resultToShow.message || resultToShow.rowsAffected) {
+            return (
+                <div className="text-green-500">
+                    {resultToShow.message || `${resultToShow.rowsAffected} row(s) affected`}
+                </div>
+            );
+        }
+
+        // Fallback for other cases
+        return (
+            <div className="w-full">
+                <pre className="overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(resultToShow, null, 2)}
+                </pre>
+            </div>
+        );
+    };
+
     const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
         const isCurrentlyStreaming = !isMessageStreaming && streamingQueryIndex === index;
 
+        console.log('query.execution_result', query.execution_result);
         const shouldShowRollback = query.can_rollback &&
             query.is_executed &&
             !query.is_rolled_back;
@@ -312,19 +345,20 @@ export default function MessageTile({
                                                 </span>
                                             ) : (
                                                 <span>
-                                                    {shouldShowExampleResult ? 'Example Result:' : 'Result:'}
+                                                    {shouldShowExampleResult ? 'Example Result:' : query.is_rolled_back ? 'Rolled Back Result:' : 'Result:'}
                                                 </span>
                                             )}
-                                            {query.example_execution_time && !query.execution_time && !query.is_executed && (
+                                            {query.example_execution_time && !query.execution_time && !query.is_executed && !query.error && (
                                                 <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
                                                     <Clock className="w-3 h-3" />
                                                     {query.example_execution_time.toLocaleString()}ms
                                                 </span>
                                             )}
-                                            {query.execution_time && (
+
+                                            {query.execution_time! > 0 && (
                                                 <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
                                                     <Clock className="w-3 h-3" />
-                                                    {query.execution_time.toLocaleString()}ms
+                                                    {query.execution_time!.toLocaleString()}ms
                                                 </span>
                                             )}
                                         </div>
@@ -376,7 +410,6 @@ export default function MessageTile({
                                                             setTimeout(() => {
                                                                 window.scrollTo(window.scrollX, window.scrollY);
                                                             }, 0);
-                                                            handleRollback(query.id);
                                                         }}
                                                         className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
                                                         disabled={queryStates[queryId]?.isExecuting}
@@ -405,14 +438,10 @@ export default function MessageTile({
                                         `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
-                                                        {Object.keys(resultToShow || {}).length === 0 ? (
-                                                            <div className="w-full">
-                                                                Query Successful
-                                                            </div>
+                                                        {resultToShow ? (
+                                                            renderQueryResult(resultToShow)
                                                         ) : (
-                                                            <div className="w-full">
-                                                                {renderTableView(resultToShow || [])}
-                                                            </div>
+                                                            <div className="text-gray-500">No data to display</div>
                                                         )}
                                                     </div>
                                                 ) : (

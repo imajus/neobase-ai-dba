@@ -384,7 +384,6 @@ function AppContent() {
         if (eventSource?.readyState === EventSource.OPEN) {
           console.log('eventSource is open');
         }
-        await new Promise(resolve => setTimeout(resolve, 500));
         console.log('Setting up new connection');
         await setupSSEConnection(id);
       }
@@ -400,6 +399,7 @@ function AppContent() {
         setEventSource(null);
       }
 
+      await new Promise(resolve => setTimeout(resolve, 200));
       let localStreamId = streamId;
 
       if (!localStreamId) {
@@ -471,7 +471,7 @@ function AppContent() {
       }
     } catch (error) {
       console.error('Failed to refresh schema:', error);
-      toast.error('Failed to refresh schema');
+      toast.error('Failed to refresh schema ' + error);
     }
   };
 

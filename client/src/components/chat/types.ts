@@ -2,8 +2,8 @@ export interface QueryResult {
     id: string;
     query: string;
     description: string;
-    execution_time?: number;
-    example_execution_time?: number;
+    execution_time?: number | null;
+    example_execution_time?: number | null;
     example_result?: any[] | null;
     execution_result?: any[] | null;
     is_executed?: boolean;

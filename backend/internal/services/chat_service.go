@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
@@ -47,7 +48,7 @@ type ChatService interface {
 	ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error
 	RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error)
 	// Db Manager Stream Handler
-	HandleSchemaChange(userID, chatID, streamID string, hasChanged bool)
+	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 }
 
@@ -881,12 +882,79 @@ func (s *chatService) HandleDBEvent(userID, chatID, streamID string, response dt
 	}
 }
 
-func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, hasChanged bool) {
+func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff) {
 	// Send to stream handler
-	log.Printf("ChatService -> HandleSchemaChange -> hasChanged: %t", hasChanged)
+	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+	if !exists {
+		log.Printf("ChatService -> HandleSchemaChange -> no connection found")
+		return
+	}
+	ctx := context.Background()
 
-	// Need to update the chat LLM messages with the new schema
+	dbConn, err := s.dbManager.GetConnection(chatID)
+	if err != nil {
+		log.Printf("ChatService -> HandleSchemaChange -> error getting connection: %v", err)
+		return
+	}
 
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		log.Printf("ChatService -> HandleSchemaChange -> error getting userID: %v", err)
+		return
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		log.Printf("ChatService -> HandleSchemaChange -> error getting chatID: %v", err)
+		return
+	}
+
+	if diff != nil {
+		log.Printf("ChatService -> HandleSchemaChange -> diff: %+v", diff)
+
+		// Need to update the chat LLM messages with the new schema
+		// Only do full schema comparison if changes detected
+
+		schemaManager := s.dbManager.GetSchemaManager()
+		var schemaMsg string
+		if diff.IsFirstTime {
+			// For first time, format the full schema
+			schemaMsg = fmt.Sprintf("Database Schema:\n%s",
+				schemaManager.FormatSchemaForLLM(diff.FullSchema))
+			log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
+		} else {
+			// For subsequent changes, get current schema and show changes
+			schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type)
+			if err != nil {
+				log.Printf("Error getting schema: %v", err)
+			} else {
+				schemaMsg = fmt.Sprintf("%s\n\nChanges:\n%s",
+					schemaManager.FormatSchemaForLLM(schema),
+					s.formatSchemaDiff(diff))
+			}
+		}
+
+		log.Printf("ChatService -> HandleSchemaChange -> saving schemaMsg as LLM message: %s", schemaMsg)
+
+		log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
+		// Create and save LLM message
+		llmMsg := &models.LLMMessage{
+			Base:   models.NewBase(),
+			UserID: userObjID,
+			ChatID: chatObjID,
+			Role:   string(MessageTypeSystem),
+			Content: map[string]interface{}{
+				"schema_update": schemaMsg,
+			},
+		}
+
+		log.Printf("ChatService -> HandleSchemaChange -> llmMsg: %+v", llmMsg)
+		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+			log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
+		}
+
+		log.Printf("ChatService -> HandleSchemaChange -> saved LLM message: %+v", llmMsg)
+	}
 }
 
 func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error) {
@@ -1021,7 +1089,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								// Compare hex strings of ObjectIDs
 								if queryMap["id"] == query.ID.Hex() {
 									queryMap["isRolledBack"] = false
-									queryMap["executionTime"] = result.ExecutionTime
+									queryMap["executionTime"] = query.ExecutionTime
 									queryMap["error"] = map[string]interface{}{
 										"code":    queryErr.Code,
 										"message": queryErr.Message,
@@ -1041,7 +1109,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 							if queryMap, ok := q.(map[string]interface{}); ok {
 								if queryMap["id"] == query.ID.Hex() {
 									queryMap["isRolledBack"] = false
-									queryMap["executionTime"] = result.ExecutionTime
+									queryMap["executionTime"] = query.ExecutionTime
 									queryMap["error"] = map[string]interface{}{
 										"code":    queryErr.Code,
 										"message": queryErr.Message,
@@ -1068,9 +1136,10 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 			Event: "query-execution-failed",
 			Data: map[string]interface{}{
-				"chat_id":    chatID,
-				"message_id": msg.ID.Hex(),
-				"query_id":   query.ID.Hex(),
+				"chat_id":        chatID,
+				"message_id":     msg.ID.Hex(),
+				"query_id":       query.ID.Hex(),
+				"execution_time": query.ExecutionTime,
 				"error": &dtos.QueryError{
 					Code:    queryErr.Code,
 					Message: queryErr.Message,
@@ -1078,7 +1147,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				},
 			},
 		})
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute query: %v", queryErr.Details)
+		return nil, http.StatusInternalServerError, errors.New(queryErr.Details)
 	}
 
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
@@ -1128,6 +1197,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
 							Code:    result.Error.Code,
@@ -1179,8 +1249,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": "Query executed successfully",
 								}
-								// Not sending executionResult to LLM
-								// queryMap["executionResult"] = formattedResultJSON
 								if result.Error != nil {
 									queryMap["error"] = map[string]interface{}{
 										"code":    result.Error.Code,
@@ -1206,10 +1274,17 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["error"] = map[string]interface{}{
-									"code":    queryErr.Code,
-									"message": queryErr.Message,
-									"details": queryErr.Details,
+								queryMap["executionResult"] = map[string]interface{}{
+									"result": "Query executed successfully",
+								}
+								if result.Error != nil {
+									queryMap["error"] = map[string]interface{}{
+										"code":    result.Error.Code,
+										"message": result.Error.Message,
+										"details": result.Error.Details,
+									}
+								} else {
+									queryMap["error"] = nil
 								}
 								queriesVal[i] = queryMap
 							}
@@ -1600,7 +1675,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 								if qMap, ok := q.(map[string]interface{}); ok {
 									if qMap["id"] == query.ID.Hex() {
 										qMap["isExecuted"] = true
-										qMap["isRolledBack"] = true
+										qMap["isRolledBack"] = false
 										if queryErr.Code != "" {
 											qMap["error"] = &models.QueryError{
 												Code:    queryErr.Code,
@@ -1660,6 +1735,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				(*msg.Queries)[i].IsRolledBack = true
 				(*msg.Queries)[i].IsExecuted = true
 				(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+				(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
 				if result.Error != nil {
 					(*msg.Queries)[i].Error = &models.QueryError{
 						Code:    result.Error.Code,
@@ -1940,8 +2016,37 @@ func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, use
 
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
 	log.Println("ChatService -> RefreshSchema")
-	if err := s.dbManager.GetSchemaManager().RefreshSchema(chatID); err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("failed to refresh schema: %v", err)
+	schema, err := s.dbManager.GetSchemaManager().GetLatestSchema(chatID)
+	if err != nil {
+		return http.StatusInternalServerError, err
 	}
+	go func() {
+		userObjID, err := primitive.ObjectIDFromHex(userID)
+		if err != nil {
+			log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
+			return
+		}
+		chatObjID, err := primitive.ObjectIDFromHex(chatID)
+		if err != nil {
+			log.Printf("ChatService -> RefreshSchema -> Error getting chatID: %v", err)
+			return
+		}
+		schemaMsg := fmt.Sprintf("Database Schema:\n%s",
+			s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema))
+
+		log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
+		llmMsg := &models.LLMMessage{
+			Base:   models.NewBase(),
+			UserID: userObjID,
+			ChatID: chatObjID,
+			Role:   string(MessageTypeSystem),
+			Content: map[string]interface{}{
+				"schema_update": schemaMsg,
+			},
+		}
+		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+			log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
+		}
+	}()
 	return http.StatusOK, nil
 }

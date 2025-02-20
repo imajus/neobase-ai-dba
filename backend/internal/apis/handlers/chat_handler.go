@@ -477,6 +477,7 @@ func (h *ChatHandler) RefreshSchema(c *gin.Context) {
 			Success: false,
 			Error:   utils.ToStringPtr(err.Error()),
 		})
+		return
 	}
 
 	c.JSON(http.StatusOK, dtos.Response{

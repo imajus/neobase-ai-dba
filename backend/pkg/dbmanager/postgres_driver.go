@@ -296,52 +296,139 @@ type PostgresTransaction struct {
 
 func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	startTime := time.Now()
-	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Query: %v", query)
 
 	// Split multiple statements
 	statements := splitStatements(query)
-	var lastResult *sql.Rows
-	var lastError error
-
 	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Statements: %v", statements)
 
-	// Execute each statement in transaction
+	var results []map[string]interface{}
+	var rowsAffected int64
+
 	for _, stmt := range statements {
-		if stmt = strings.TrimSpace(stmt); stmt == "" {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
 			continue
 		}
 
-		lastResult, lastError = t.tx.QueryContext(ctx, stmt)
-		if lastError != nil {
-			log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Failed to execute statement: %v", lastError)
-			return &QueryExecutionResult{
-				ExecutionTime: int(time.Since(startTime).Milliseconds()),
-				Error: &dtos.QueryError{
-					Code:    "QUERY_EXECUTION_FAILED",
-					Message: "Query execution failed",
-					Details: lastError.Error(),
-				},
+		// Handle different query types
+		if strings.HasPrefix(strings.ToUpper(stmt), "SELECT") {
+			// For SELECT queries
+			rows, err := t.tx.QueryContext(ctx, stmt)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Code:    "QUERY_EXECUTION_FAILED",
+						Message: err.Error(),
+						Details: fmt.Sprintf("Failed to execute SELECT: %s", stmt),
+					},
+				}
 			}
-		}
-		if lastResult != nil {
-			defer lastResult.Close()
+			defer rows.Close()
+
+			// Process SELECT results
+			queryResults, err := processSelectResults(rows)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Code:    "RESULT_PROCESSING_FAILED",
+						Message: err.Error(),
+						Details: "Failed to process SELECT results",
+					},
+				}
+			}
+			results = queryResults
+		} else {
+			// For INSERT/UPDATE/DELETE queries
+			result, err := t.tx.ExecContext(ctx, stmt)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Code:    "QUERY_EXECUTION_FAILED",
+						Message: err.Error(),
+						Details: fmt.Sprintf("Failed to execute %s: %s", queryType, stmt),
+					},
+				}
+			}
+
+			affected, _ := result.RowsAffected()
+			rowsAffected += affected
 		}
 	}
 
-	// Process results
-	var result *QueryExecutionResult
-	if lastResult != nil {
-		result = processRows(lastResult, startTime)
-	} else {
-		result = &QueryExecutionResult{
-			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Result: map[string]interface{}{
-				"message": "Query executed successfully",
+	// Prepare result data
+	resultData := map[string]interface{}{
+		"results": results,
+	}
+
+	// Add affected rows for non-SELECT queries
+	if queryType != "SELECT" && rowsAffected > 0 {
+		resultData["rowsAffected"] = rowsAffected
+		resultData["message"] = fmt.Sprintf("%d row(s) affected", rowsAffected)
+	}
+
+	// Convert result to JSON string
+	resultJSON, err := json.Marshal(resultData)
+	if err != nil {
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Code:    "JSON_MARSHAL_FAILED",
+				Message: err.Error(),
+				Details: "Failed to marshal result data",
 			},
 		}
 	}
 
-	return result
+	executionResult := &QueryExecutionResult{
+		ExecutionTime: int(time.Since(startTime).Milliseconds()),
+		Result:        resultData,
+		ResultJSON:    string(resultJSON),
+	}
+
+	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Result: %+v", executionResult)
+	return executionResult
+}
+
+// Helper function to process SELECT results
+func processSelectResults(rows *sql.Rows) ([]map[string]interface{}, error) {
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]map[string]interface{}, 0)
+	values := make([]interface{}, len(columns))
+	scanArgs := make([]interface{}, len(columns))
+
+	for i := range values {
+		scanArgs[i] = &values[i]
+	}
+
+	for rows.Next() {
+		err := rows.Scan(scanArgs...)
+		if err != nil {
+			return nil, err
+		}
+
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			val := values[i]
+			if val == nil {
+				row[col] = nil
+				continue
+			}
+
+			// Handle different types
+			switch v := val.(type) {
+			case []byte:
+				row[col] = string(v)
+			default:
+				row[col] = v
+			}
+		}
+		results = append(results, row)
+	}
+
+	return results, nil
 }
 
 func (t *PostgresTransaction) Commit() error {

@@ -56,7 +56,7 @@ type SSEEvent struct {
 // StreamHandler interface for handling database events
 type StreamHandler interface {
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
-	HandleSchemaChange(userID, chatID, streamID string, hasChanged bool)
+	HandleSchemaChange(userID, chatID, streamID string, diff *SchemaDiff)
 }
 
 // QueryExecutionResult represents the result of a query execution

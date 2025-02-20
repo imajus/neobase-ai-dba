@@ -13,6 +13,7 @@ import (
 	_ "github.com/lib/pq"              // PostgreSQL driver
 
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/constants"
 	"neobase-ai/pkg/redis"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -293,7 +294,7 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 
 	// Return appropriate wrapper based on database type
 	switch conn.Config.Type {
-	case "postgresql":
+	case constants.DatabaseTypePostgreSQL:
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
 	// Add cases for other database types
 	default:
@@ -621,7 +622,7 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 	if hasChanged {
 		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %t", chatID, hasChanged)
 		if m.streamHandler != nil {
-			m.streamHandler.HandleSchemaChange(dbConn.UserID, chatID, dbConn.StreamID, hasChanged)
+			m.streamHandler.HandleSchemaChange(dbConn.UserID, chatID, dbConn.StreamID, diff)
 		}
 	}
 
@@ -844,13 +845,13 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			log.Println("Manager -> ExecuteQuery -> Triggering schema check")
 			time.Sleep(2 * time.Second)
 			switch conn.Config.Type {
-			case "postgresql":
+			case constants.DatabaseTypePostgreSQL:
 				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
 					if conn.OnSchemaChange != nil {
 						conn.OnSchemaChange(conn.ChatID)
 					}
 				}
-			case "mysql":
+			case constants.DatabaseTypeMySQL:
 				// To be done
 			}
 		}()
@@ -862,7 +863,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 // TestConnection tests if the provided credentials are valid without creating a persistent connection
 func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	switch config.Type {
-	case "postgresql":
+	case constants.DatabaseTypePostgreSQL:
 		dsn := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 			config.Host, config.Port, *config.Username, *config.Password, config.Database,

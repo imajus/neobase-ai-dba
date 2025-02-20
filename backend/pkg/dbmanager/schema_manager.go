@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"neobase-ai/internal/constants"
 	"neobase-ai/pkg/redis"
 	"reflect"
 	"sort"
@@ -420,33 +421,41 @@ func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema 
 
 // Get current table checksums without fetching full schema
 func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, dbType string) (map[string]string, error) {
-	checksums := make(map[string]string)
+	switch dbType {
+	case constants.DatabaseTypePostgreSQL:
+		checksums := make(map[string]string)
 
-	// Get schema directly from the database
-	schema, err := db.GetSchema(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get schema: %v", err)
+		// Get schema directly from the database
+		schema, err := db.GetSchema(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema: %v", err)
+		}
+
+		// Calculate checksums for each table
+		for tableName, table := range schema.Tables {
+			// Convert table definition to string for checksum
+			tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
+				tableName,
+				table.Columns,
+				table.Indexes,
+				table.ForeignKeys,
+				table.Constraints,
+			)
+
+			// Calculate checksum using crypto/md5
+			hasher := md5.New()
+			hasher.Write([]byte(tableStr))
+			checksum := hex.EncodeToString(hasher.Sum(nil))
+			checksums[tableName] = checksum
+		}
+		return checksums, nil
+	case constants.DatabaseTypeMySQL:
+		// TODO: Implement MySQL checksum calculation
+		checksums := make(map[string]string)
+		return checksums, nil
 	}
 
-	// Calculate checksums for each table
-	for tableName, table := range schema.Tables {
-		// Convert table definition to string for checksum
-		tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
-			tableName,
-			table.Columns,
-			table.Indexes,
-			table.ForeignKeys,
-			table.Constraints,
-		)
-
-		// Calculate checksum using crypto/md5
-		hasher := md5.New()
-		hasher.Write([]byte(tableStr))
-		checksum := hex.EncodeToString(hasher.Sum(nil))
-		checksums[tableName] = checksum
-	}
-
-	return checksums, nil
+	return nil, fmt.Errorf("unsupported database type: %s", dbType)
 }
 
 // Update fetchTableList to use driver directly
@@ -833,6 +842,7 @@ func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerTy
 		if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
 			return false, fmt.Errorf("failed to store schema: %v", err)
 		}
+
 		return true, nil
 	}
 
@@ -873,29 +883,33 @@ func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerTy
 	return hasChanged, nil
 }
 
-func (sm *SchemaManager) RefreshSchema(chatID string) error {
+// Helper function to get the latest schema
+func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
 	// Get current connection
 	db, err := sm.dbManager.GetConnection(chatID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection: %v", err)
+		return nil, fmt.Errorf("failed to get connection: %v", err)
 	}
 
 	// Get connection config
 	conn, exists := sm.dbManager.connections[chatID]
 	if !exists {
-		return fmt.Errorf("connection not found for chatID: %s", chatID)
+		return nil, fmt.Errorf("connection not found for chatID: %s", chatID)
 	}
-	log.Printf("SchemaManager -> TriggerSchemaCheck -> Manual trigger, fetching new schema")
+
+	// For manual triggers (DDL), directly fetch and store new schema
+	log.Printf("SchemaManager -> RefreshSchema -> Manual trigger, fetching new schema")
 	schema, err := db.GetSchema(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to get current schema: %v", err)
+		return nil, fmt.Errorf("failed to get current schema: %v", err)
 	}
 
 	// Store the fresh schema immediately
 	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
-		return fmt.Errorf("failed to store schema: %v", err)
+		return nil, fmt.Errorf("failed to store schema: %v", err)
 	}
-	return nil
+
+	return schema, nil
 }
 
 // Add method to TableDiff to check if it's empty
@@ -942,9 +956,9 @@ type ConstraintInfo struct {
 func (sm *SchemaManager) createLLMSchema(schema *SchemaInfo, dbType string) *LLMSchemaInfo {
 	var simplifier SchemaSimplifier
 	switch dbType {
-	case "postgresql":
+	case constants.DatabaseTypePostgreSQL:
 		simplifier = &PostgresSimplifier{}
-	case "mysql":
+	case constants.DatabaseTypeMySQL:
 		simplifier = &MySQLSimplifier{}
 	default:
 		simplifier = &PostgresSimplifier{} // Default to PostgreSQL
