@@ -93,7 +93,7 @@ export default function ChatHeader({
                 {/* Mobile buttons without borders */}
                 <button
                     onClick={() => setShowRefreshSchema(true)}
-                    className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors md:hidden"
+                    className="p-2 hover:bg-neo-gray rounded-lg transition-colors md:hidden"
                     title="Refresh schema"
                 >
                     <ListRestart className="w-5 h-5" />
