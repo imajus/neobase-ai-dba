@@ -1051,10 +1051,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		formattedResultJSON = resultMapFormatting
 	}
 
-	// Update query status in message
-	query.IsRolledBack = false
+	log.Printf("ChatService -> ExecuteQuery -> formattedResultJSON: %+v", formattedResultJSON)
+
 	query.IsExecuted = true
+	query.IsRolledBack = false
 	query.ExecutionTime = &result.ExecutionTime
+	query.ExecutionResult = &result.ResultJSON
 	if result.Error != nil {
 		query.Error = &models.QueryError{
 			Code:    result.Error.Code,
@@ -1064,59 +1066,79 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	} else {
 		query.Error = nil
 	}
-	query.ExecutionResult = &result.ResultJSON
+	// Update query status in message
+	// if msg.Queries != nil {
+	// 	for i := range *msg.Queries {
+	// 		if (*msg.Queries)[i].ID == query.ID {
+	// 			(*msg.Queries)[i].IsRolledBack = false
+	// 			(*msg.Queries)[i].IsExecuted = true
+	// 			(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+	// 			if result.Error != nil {
+	// 				(*msg.Queries)[i].Error = &models.QueryError{
+	// 					Code:    result.Error.Code,
+	// 					Message: result.Error.Message,
+	// 					Details: result.Error.Details,
+	// 				}
+	// 			} else {
+	// 				(*msg.Queries)[i].Error = nil
+	// 			}
+	// 			(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
+	// 			break
+	// 		}
+	// 	}
+	// }
 
-	go func() {
-		// Save updated message
-		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
+	log.Printf("ChatService -> ExecuteQuery -> Updating message")
+	// Save updated message
+	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
+		log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message: %v", err)
+	}
+
+	// Update LLM message with query execution results
+	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
+	if err != nil {
+		log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
+	} else if llmMsg != nil {
+		// Get the existing content
+		content := llmMsg.Content
+		if content == nil {
+			content = make(map[string]interface{})
 		}
 
-		// Update LLM message with query execution results
-		llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-		if err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
-		} else if llmMsg != nil {
-			// Get the existing content
-			content := llmMsg.Content
-			if content == nil {
-				content = make(map[string]interface{})
-			}
-
-			// Update the queries in the assistant response
-			if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-				if queries, ok := assistantResponse["queries"].([]interface{}); ok {
-					for i, q := range queries {
-						if queryMap, ok := q.(map[string]interface{}); ok {
-							// Match the query by ID
-							if queryMap["id"] == query.ID.Hex() {
-								// Update execution results
-								queryMap["isExecuted"] = query.IsExecuted
-								queryMap["isRolledBack"] = query.IsRolledBack
-								queryMap["executionTime"] = query.ExecutionTime
-								queryMap["executionResult"] = formattedResultJSON
-								if query.Error != nil {
-									queryMap["error"] = query.Error
-								} else {
-									queryMap["error"] = nil
-								}
-								queries[i] = queryMap
+		// Update the queries in the assistant response
+		if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
+			if queries, ok := assistantResponse["queries"].([]interface{}); ok {
+				for i, q := range queries {
+					if queryMap, ok := q.(map[string]interface{}); ok {
+						// Match the query by ID
+						if queryMap["id"] == query.ID.Hex() {
+							// Update execution results
+							queryMap["isExecuted"] = query.IsExecuted
+							queryMap["isRolledBack"] = query.IsRolledBack
+							queryMap["executionTime"] = query.ExecutionTime
+							queryMap["executionResult"] = formattedResultJSON
+							if query.Error != nil {
+								queryMap["error"] = query.Error
+							} else {
+								queryMap["error"] = nil
 							}
+							queries[i] = queryMap
 						}
 					}
-					assistantResponse["queries"] = queries
-					content["assistant_response"] = assistantResponse
 				}
-			}
-
-			// Save updated LLM message
-			llmMsg.Content = content
-			if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-				log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
+				assistantResponse["queries"] = queries
+				content["assistant_response"] = assistantResponse
 			}
 		}
 
-	}()
+		// Save updated LLM message
+		llmMsg.Content = content
+		if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+			log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
+		}
+	}
+
 	// Send stream event
 	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 		Event: "query-executed",
@@ -1271,6 +1293,16 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		// Update query with rollback query
 		query.RollbackQuery = &rollbackQuery
 
+		// Update query status in message
+		if msg.Queries != nil {
+			for i := range *msg.Queries {
+				if (*msg.Queries)[i].ID == query.ID {
+					(*msg.Queries)[i].RollbackQuery = &rollbackQuery
+					(*msg.Queries)[i].IsRolledBack = false
+					(*msg.Queries)[i].IsExecuted = true
+				}
+			}
+		}
 		// Update message in DB
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message with rollback query: %v", err)
@@ -1367,6 +1399,15 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	}
 	query.ExecutionResult = &result.ResultJSON
 
+	// Update query status in message
+	if msg.Queries != nil {
+		for i := range *msg.Queries {
+			if (*msg.Queries)[i].ID == query.ID {
+				(*msg.Queries)[i].IsRolledBack = true
+				(*msg.Queries)[i].IsExecuted = true
+			}
+		}
+	}
 	// Save updated message
 	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message with rollback results: %v", err)

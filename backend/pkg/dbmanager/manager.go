@@ -835,8 +835,15 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 		go func() {
 			log.Println("Manager -> ExecuteQuery -> Triggering schema check")
 			time.Sleep(2 * time.Second)
-			if conn.OnSchemaChange != nil {
-				conn.OnSchemaChange(conn.ChatID)
+			switch conn.Config.Type {
+			case "postgresql":
+				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
+					if conn.OnSchemaChange != nil {
+						conn.OnSchemaChange(conn.ChatID)
+					}
+				}
+			case "mysql":
+				// To be done
 			}
 		}()
 

@@ -497,6 +497,7 @@ function AppContent() {
 
   const handleSelectConnection = useCallback(async (id: string) => {
     console.log('handleSelectConnection happened in app.tsx', { id });
+    const currentConnection = selectedConnection;
     const connection = chats.find(c => c.id === id);
     if (connection) {
       console.log('connection found', { connection });
@@ -520,12 +521,14 @@ function AppContent() {
         }
       }
 
-      // Check eventsource state
-      console.log('eventSource?.readyState', eventSource?.readyState);
-      if (eventSource?.readyState === EventSource.OPEN) {
-        console.log('eventSource is open');
-      } else {
-        console.log('eventSource is not open, setting up');
+      if (currentConnection?.id != connection?.id) {
+        // Check eventsource state
+        console.log('eventSource?.readyState', eventSource?.readyState);
+        if (eventSource?.readyState === EventSource.OPEN) {
+          console.log('eventSource is open');
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('Setting up new connection');
         await setupSSEConnection(id);
       }
     }
@@ -669,32 +672,32 @@ function AppContent() {
         console.log('EventSource is open');
       } else {
         console.log('EventSource is not open');
-        // Push an error message to the messages array
-        const errorMsg: Message = {
-          id: `error-${Date.now()}`,
-          type: 'assistant',
-          content: '',  // Start empty for animation
-          queries: [],
-          is_loading: false,
-          is_streaming: true
-        };
+        // // Push an error message to the messages array
+        // const errorMsg: Message = {
+        //   id: `error-${Date.now()}`,
+        //   type: 'assistant',
+        //   content: '',  // Start empty for animation
+        //   queries: [],
+        //   is_loading: false,
+        //   is_streaming: true
+        // };
 
-        setMessages(prev => [errorMsg, ...prev]);
+        // setMessages(prev => [errorMsg, ...prev]);
 
-        // Animate error message
-        await animateTyping(
-          '❌ Error: SSE connection is not open. We\'ve automatically reconnected. Please try again.',
-          errorMsg.id
-        );
+        // // Animate error message
+        // await animateTyping(
+        //   '❌ Error: SSE connection is not open. We\'ve automatically reconnected. Please try again.',
+        //   errorMsg.id
+        // );
 
-        // Set final state
-        setMessages(prev => {
-          const [lastMessage, ...rest] = prev;
-          if (lastMessage?.id === errorMsg.id) {
-            return [{ ...lastMessage, is_streaming: false }, ...rest];
-          }
-          return prev;
-        });
+        // // Set final state
+        // setMessages(prev => {
+        //   const [lastMessage, ...rest] = prev;
+        //   if (lastMessage?.id === errorMsg.id) {
+        //     return [{ ...lastMessage, is_streaming: false }, ...rest];
+        //   }
+        //   return prev;
+        // });
 
         await setupSSEConnection(selectedConnection.id);
         return;
