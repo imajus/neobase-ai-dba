@@ -156,9 +156,10 @@ func Initialize() {
 	// Chat Handler
 	if err := DiContainer.Provide(func(
 		chatService services.ChatService,
-		dbManager *dbmanager.Manager,
 	) *handlers.ChatHandler {
-		return handlers.NewChatHandler(chatService, dbManager)
+		handler := handlers.NewChatHandler(chatService)
+		chatService.SetStreamHandler(handler)
+		return handler
 	}); err != nil {
 		log.Fatalf("Failed to provide chat handler: %v", err)
 	}

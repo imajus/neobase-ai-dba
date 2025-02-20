@@ -12,22 +12,18 @@ import (
 	"sync"
 	"time"
 
-	"neobase-ai/pkg/dbmanager"
-
 	"github.com/gin-gonic/gin"
 )
 
 type ChatHandler struct {
 	chatService services.ChatService
-	dbManager   *dbmanager.Manager
 	streamMutex sync.RWMutex
 	streams     map[string]chan dtos.StreamResponse // key: userID:chatID:streamID
 }
 
-func NewChatHandler(chatService services.ChatService, dbManager *dbmanager.Manager) *ChatHandler {
+func NewChatHandler(chatService services.ChatService) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
-		dbManager:   dbManager,
 		streamMutex: sync.RWMutex{},
 		streams:     make(map[string]chan dtos.StreamResponse),
 	}
@@ -308,9 +304,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	ctx := c.Request.Context()
 	heartbeatTicker := time.NewTicker(30 * time.Second)
 	defer heartbeatTicker.Stop()
-
-	// Set the stream handler
-	h.chatService.SetStreamHandler(h)
 
 	// Cleanup on exit
 	defer func() {

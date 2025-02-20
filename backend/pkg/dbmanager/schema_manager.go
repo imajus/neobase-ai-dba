@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,12 +14,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"crypto/md5"
 )
 
 // Add these constants
 const (
 	schemaKeyPrefix = "schema:"
-	schemaTTL       = 72 * time.Hour // Keep schemas for 72 hours
+	schemaTTL       = 7 * 24 * time.Hour // Keep schemas for 7 days
 )
 
 // SchemaInfo represents database schema information
@@ -323,20 +326,21 @@ func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
 		RemovedFKs:      make([]string, 0),
 	}
 
-	// Compare columns
+	// Check for new columns
 	for colName := range new.Columns {
 		if _, exists := old.Columns[colName]; !exists {
 			diff.AddedColumns = append(diff.AddedColumns, colName)
 		}
 	}
 
+	// Check for removed columns
 	for colName := range old.Columns {
 		if _, exists := new.Columns[colName]; !exists {
 			diff.RemovedColumns = append(diff.RemovedColumns, colName)
 		}
 	}
 
-	// Compare modified columns
+	// Check for modified columns (changes in properties)
 	for colName, newCol := range new.Columns {
 		if oldCol, exists := old.Columns[colName]; exists {
 			if !columnsEqual(oldCol, newCol) {
@@ -374,48 +378,75 @@ func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
 	return diff
 }
 
-// Add these methods to SchemaManager
+// Update storeSchema to properly set checksums
 func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema *SchemaInfo, db DBExecutor, dbType string) error {
-	// Format schema for LLM
-	llmFriendlyFormat := sm.FormatSchemaForLLM(schema)
-	log.Printf("SchemaManager -> storeSchema -> LLM friendly format:\n%s", llmFriendlyFormat)
-
-	storage := &SchemaStorage{
-		FullSchema:     schema,
-		LLMSchema:      sm.createLLMSchema(schema, dbType),
-		TableChecksums: make(map[string]string),
-		UpdatedAt:      time.Now(),
+	// Get table checksums first
+	checksums, err := sm.getTableChecksums(ctx, db, dbType)
+	if err != nil {
+		return fmt.Errorf("failed to get table checksums: %v", err)
 	}
 
-	// Calculate table checksums using fetchTableList and calculateTableChecksum
-	tables, err := sm.fetchTableList(ctx, db)
-	if err != nil {
-		log.Printf("SchemaManager -> storeSchema -> Error fetching tables: %v", err)
-	} else {
-		for _, table := range tables {
-			checksum, err := sm.calculateTableChecksum(ctx, db, table)
-			if err != nil {
-				log.Printf("SchemaManager -> storeSchema -> Error calculating checksum for table %s: %v", table, err)
-				continue
-			}
-			storage.TableChecksums[table] = checksum
+	// Set checksums in schema tables
+	for tableName, checksum := range checksums {
+		if table, exists := schema.Tables[tableName]; exists {
+			table.Checksum = checksum
+			// Need to reassign since table is a copy
+			schema.Tables[tableName] = table
 		}
 	}
 
-	log.Printf("SchemaManager -> storeSchema -> Storage: %v", storage)
-	// Compress and store the schema
-	compressedData, err := sm.compressSchema(storage)
-	if err != nil {
-		return fmt.Errorf("failed to compress schema: %v", err)
+	// Update in-memory cache with the updated schema
+	sm.mu.Lock()
+	sm.schemaCache[chatID] = schema
+	sm.mu.Unlock()
+
+	// Create storage object
+	storage := &SchemaStorage{
+		FullSchema:     schema,
+		LLMSchema:      sm.createLLMSchema(schema, dbType),
+		TableChecksums: checksums,
+		UpdatedAt:      time.Now(),
 	}
 
-	return sm.storageService.StoreCompressed(ctx, chatID, compressedData)
+	log.Printf("SchemaManager -> storeSchema -> Storing schema with checksums: %+v", checksums)
+
+	// Store in Redis
+	if err := sm.storageService.Store(ctx, chatID, storage); err != nil {
+		return fmt.Errorf("failed to store schema in Redis: %v", err)
+	}
+
+	return nil
 }
 
-// Add StoreCompressed method to SchemaStorageService
-func (s *SchemaStorageService) StoreCompressed(ctx context.Context, chatID string, compressedData []byte) error {
-	key := fmt.Sprintf("%s%s", schemaKeyPrefix, chatID)
-	return s.redisRepo.Set(key, compressedData, schemaTTL, ctx)
+// Get current table checksums without fetching full schema
+func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, dbType string) (map[string]string, error) {
+	checksums := make(map[string]string)
+
+	// Get schema directly from the database
+	schema, err := db.GetSchema(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema: %v", err)
+	}
+
+	// Calculate checksums for each table
+	for tableName, table := range schema.Tables {
+		// Convert table definition to string for checksum
+		tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
+			tableName,
+			table.Columns,
+			table.Indexes,
+			table.ForeignKeys,
+			table.Constraints,
+		)
+
+		// Calculate checksum using crypto/md5
+		hasher := md5.New()
+		hasher.Write([]byte(tableStr))
+		checksum := hex.EncodeToString(hasher.Sum(nil))
+		checksums[tableName] = checksum
+	}
+
+	return checksums, nil
 }
 
 // Update fetchTableList to use driver directly
@@ -476,38 +507,6 @@ func (sm *SchemaManager) QuickSchemaCheck(ctx context.Context, chatID string, db
 	}
 
 	return false, nil
-}
-
-// Get current table checksums without fetching full schema
-func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, dbType string) (map[string]string, error) {
-	checksums := make(map[string]string)
-
-	driver, exists := sm.dbManager.drivers[dbType]
-	if !exists {
-		return nil, fmt.Errorf("no driver found for type: %s", dbType)
-	}
-
-	fetcher, ok := driver.(SchemaFetcher)
-	if !ok {
-		return nil, fmt.Errorf("driver does not support schema fetching")
-	}
-
-	// Get current schema to get list of tables
-	schema, err := fetcher.GetSchema(ctx, db)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get schema: %v", err)
-	}
-
-	// Calculate checksum for each table
-	for tableName := range schema.Tables {
-		checksum, err := fetcher.GetTableChecksum(ctx, db, tableName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get checksum for table %s: %v", tableName, err)
-		}
-		checksums[tableName] = checksum
-	}
-
-	return checksums, nil
 }
 
 // Update schema retrieval methods
@@ -737,44 +736,61 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 	return result.String()
 }
 
-// Update HasSchemaChanged to get dbType from connection
+// Update HasSchemaChanged to properly compare checksums
 func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db DBExecutor) (bool, error) {
-	// Get connection details to determine database type
+	log.Printf("HasSchemaChanged -> chatID: %s", chatID)
+
 	conn, exists := sm.dbManager.connections[chatID]
 	if !exists {
-		return true, fmt.Errorf("no connection found for chatID: %s", chatID)
+		return true, fmt.Errorf("connection not found")
 	}
 
-	// 1. Try cache first
+	// Get current checksums first
+	currentChecksums, err := sm.getTableChecksums(ctx, db, conn.Config.Type)
+	if err != nil {
+		log.Printf("HasSchemaChanged -> error getting current checksums: %v", err)
+		return true, nil
+	}
+	log.Printf("HasSchemaChanged -> currentChecksums: %+v", currentChecksums)
+
+	// Check in-memory cache
 	sm.mu.RLock()
 	cachedSchema, exists := sm.schemaCache[chatID]
 	sm.mu.RUnlock()
 
-	if exists {
-		// Quick checksum comparison with database
-		currentChecksums, err := sm.getTableChecksums(ctx, db, conn.Config.Type)
-		if err != nil {
-			return true, nil // Assume changed on error
+	if exists && cachedSchema != nil {
+		log.Printf("HasSchemaChanged -> using cached schema")
+
+		// Compare table counts
+		if len(cachedSchema.Tables) != len(currentChecksums) {
+			log.Printf("HasSchemaChanged -> table count mismatch: cached=%d, current=%d",
+				len(cachedSchema.Tables), len(currentChecksums))
+			return true, nil
 		}
 
-		// Compare only checksums
-		for tableName, checksum := range currentChecksums {
-			if cachedSchema.Tables[tableName].Checksum != checksum {
+		// Compare each table's checksum
+		for tableName, currentChecksum := range currentChecksums {
+			table, ok := cachedSchema.Tables[tableName]
+			if !ok {
+				log.Printf("HasSchemaChanged -> table %s not found in cache", tableName)
+				return true, nil
+			}
+
+			log.Printf("HasSchemaChanged -> comparing table %s: cached=%s, current=%s",
+				tableName, table.Checksum, currentChecksum)
+
+			if table.Checksum != currentChecksum {
+				log.Printf("HasSchemaChanged -> checksum mismatch for table %s", tableName)
 				return true, nil
 			}
 		}
 		return false, nil
 	}
 
-	// 2. If not in cache, check Redis
+	// Check Redis if not in memory
 	storage, err := sm.storageService.Retrieve(ctx, chatID)
-	if err != nil {
-		return true, nil // Assume changed if no stored schema
-	}
-
-	// 3. Quick checksum comparison
-	currentChecksums, err := sm.getTableChecksums(ctx, db, conn.Config.Type)
-	if err != nil {
+	if err != nil || storage == nil {
+		log.Printf("HasSchemaChanged -> no valid storage found: %v", err)
 		return true, nil
 	}
 
