@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"neobase-ai/internal/constants"
 	"os"
 	"strconv"
 
@@ -20,6 +21,7 @@ type Environment struct {
 	JWTRefreshExpirationMilliseconds int
 	AdminUser                        string
 	AdminPassword                    string
+	DefaultLLMClient                 string
 
 	// Database configs
 	MongoURI          string
@@ -65,7 +67,7 @@ func LoadEnv() error {
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
 	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
 	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "neobase")
-
+	Env.DefaultLLMClient = getEnvWithDefault("DEFAULT_LLM_CLIENT", constants.OpenAI)
 	return validateConfig()
 }
 

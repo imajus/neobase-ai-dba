@@ -17,6 +17,7 @@ type OpenAIClient struct {
 	model               string
 	maxCompletionTokens int
 	temperature         float32
+	DBConfigs           []LLMDBConfig
 }
 
 func NewOpenAIClient(config Config) (*OpenAIClient, error) {
@@ -35,6 +36,7 @@ func NewOpenAIClient(config Config) (*OpenAIClient, error) {
 		model:               model,
 		maxCompletionTokens: config.MaxCompletionTokens,
 		temperature:         config.Temperature,
+		DBConfigs:           config.DBConfigs,
 	}, nil
 }
 
@@ -42,10 +44,21 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	// Convert messages to OpenAI format
 	openAIMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 
+	systemPrompt := ""
+	responseSchema := ""
+
+	for _, dbConfig := range c.DBConfigs {
+		if dbConfig.DBType == dbType {
+			systemPrompt = dbConfig.SystemPrompt
+			responseSchema = dbConfig.Schema
+			break
+		}
+	}
+
 	// Add system message with database-specific prompt only
 	openAIMessages = append(openAIMessages, openai.ChatCompletionMessage{
 		Role:    "system",
-		Content: constants.GetSystemPrompt(dbType),
+		Content: systemPrompt,
 	})
 
 	log.Printf("GenerateResponse -> messages: %v", messages)
@@ -89,7 +102,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
 				Name:        "neobase-response",
 				Description: "A friendly AI Response/Explanation or clarification question (Must Send this)",
-				Schema:      json.RawMessage(constants.GetLLMResponseSchema(dbType)),
+				Schema:      json.RawMessage(responseSchema),
 				Strict:      false,
 			},
 		},

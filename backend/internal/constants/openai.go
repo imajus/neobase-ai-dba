@@ -1,8 +1,14 @@
 package constants
 
+const (
+	OpenAIModel               = "gpt-4o"
+	OpenAITemperature         = 1
+	OpenAIMaxCompletionTokens = 3072
+)
+
 // Database-specific system prompts for LLM
 const (
-	PostgreSQLPrompt = `You are NeoBase AI, a senior PostgreSQL database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
+	OpenAIPostgreSQLPrompt = `You are NeoBase AI, a senior PostgreSQL database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
 
 ### Rules
 1. Schema Compliance  
@@ -62,19 +68,7 @@ json
 }
    `
 
-	MySQLPrompt = `You are NeoBase AI, a senior MySQL database administrator...` // Similar structure for MySQL
+	OpenAIMySQLPrompt = `You are NeoBase AI, a senior MySQL database administrator...` // Similar structure for MySQL
 
 	// Add other database prompts as needed
 )
-
-// GetSystemPrompt returns the appropriate system prompt based on database type
-func GetSystemPrompt(dbType string) string {
-	switch dbType {
-	case DatabaseTypePostgreSQL:
-		return PostgreSQLPrompt
-	case DatabaseTypeMySQL:
-		return MySQLPrompt
-	default:
-		return PostgreSQLPrompt // Default to PostgreSQL
-	}
-}

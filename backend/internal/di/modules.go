@@ -106,18 +106,35 @@ func Initialize() {
 	if err := DiContainer.Provide(func() *llm.Manager {
 		manager := llm.NewManager()
 
-		// Register default OpenAI client
-		err := manager.RegisterClient("default", llm.Config{
-			Provider:            "openai",
-			Model:               "gpt-4o",
-			APIKey:              os.Getenv("OPENAI_API_KEY"),
-			MaxCompletionTokens: 3072,
-			Temperature:         1,
-		})
-		if err != nil {
-			log.Printf("Warning: Failed to register OpenAI client: %v", err)
-		}
+		switch config.Env.DefaultLLMClient {
+		case constants.OpenAI:
+			// Register default OpenAI client
+			err := manager.RegisterClient(constants.OpenAI, llm.Config{
+				Provider:            constants.OpenAI,
+				Model:               constants.OpenAIModel,
+				APIKey:              os.Getenv("OPENAI_API_KEY"),
+				MaxCompletionTokens: constants.OpenAIMaxCompletionTokens,
+				Temperature:         constants.OpenAITemperature,
+				DBConfigs: []llm.LLMDBConfig{
+					{
+						DBType:       constants.DatabaseTypePostgreSQL,
+						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypePostgreSQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeMySQL,
+						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL),
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to register OpenAI client: %v", err)
+			}
+		case constants.Gemini:
+			// Register default Gemini client
 
+		}
 		return manager
 	}); err != nil {
 		log.Fatalf("Failed to provide LLM manager: %v", err)
@@ -131,7 +148,7 @@ func Initialize() {
 		llmManager *llm.Manager,
 	) services.ChatService {
 		// Get default LLM client
-		llmClient, err := llmManager.GetClient("default")
+		llmClient, err := llmManager.GetClient(config.Env.DefaultLLMClient)
 		if err != nil {
 			log.Printf("Warning: Failed to get default LLM client: %v", err)
 		}
