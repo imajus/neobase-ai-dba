@@ -176,11 +176,14 @@ export default function MessageTile({
             }));
 
             await checkSSEConnection();
-            await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '', abortControllerRef.current[queryId]);
+            const rolledBack = await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '', abortControllerRef.current[queryId]);
+            console.log('rolledBack', rolledBack);
 
-            // Update query state
-            if (message.queries) {
-                message.queries[queryIndex].is_rolled_back = true;
+            if (rolledBack) {
+                // Update query state
+                if (message.queries) {
+                    message.queries[queryIndex].is_rolled_back = true;
+                }
             }
 
         } catch (error: any) {
@@ -191,6 +194,8 @@ export default function MessageTile({
                 [queryId]: { isExecuting: false, isExample: true }
             }));
             setRollbackState({ show: false, queryId: null });
+            // delete abort controller
+            delete abortControllerRef.current[queryId];
         }
     };
 
@@ -485,6 +490,7 @@ export default function MessageTile({
                                                                     delete queryTimeouts.current[queryId];
                                                                 }
 
+                                                                setRollbackState({ show: false, queryId: null });
                                                                 // Update state
                                                                 setQueryStates(prev => ({
                                                                     ...prev,
