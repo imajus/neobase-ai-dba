@@ -252,6 +252,20 @@ export default function MessageTile({
         );
     };
 
+    // Add a helper function to remove duplicate queries
+    const removeDuplicateQueries = (query: string): string => {
+        // Split by semicolon and trim each query
+        const queries = query.split(';')
+            .map(q => q.trim())
+            .filter(q => q.length > 0);
+
+        // Remove duplicates while preserving order
+        const uniqueQueries = Array.from(new Set(queries));
+
+        // Join back with semicolons
+        return uniqueQueries.join(';\n');
+    };
+
     const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
@@ -332,8 +346,8 @@ export default function MessageTile({
                 `}>
                         <code className="whitespace-pre-wrap break-words">
                             {isCurrentlyStreaming && isQueryStreaming
-                                ? currentQuery
-                                : query.query}
+                                ? removeDuplicateQueries(currentQuery)
+                                : removeDuplicateQueries(query.query)}
                         </code>
                     </pre>
                     {(query.execution_result || query.example_result || query.error) && (
@@ -341,7 +355,7 @@ export default function MessageTile({
                             {queryStates[queryId]?.isExecuting ? (
                                 <div className="flex items-center justify-center p-8">
                                     <Loader className="w-8 h-8 animate-spin text-gray-400" />
-                                    <span className="ml-3 text-gray-400">Executing query...</span>
+                                    <span className="ml-3 text-gray-400">Executing  query...</span>
                                 </div>
                             ) : (
                                 <div className="mt-3 px-4 pt-4 w-full">
