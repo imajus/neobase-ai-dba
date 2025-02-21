@@ -290,7 +290,14 @@ export default function ChatWindow({
         setMessages(prev => {
           const combined = [...prev, ...newMessages];
           // Remove duplicates based on message ID
-          return Array.from(new Map(combined.map(m => [m.id, m])).values());
+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+
+          // Scroll to bottom only on first page load
+          if (pageNum === 1) {
+            setTimeout(() => scrollToBottom('initial-load'), 100);
+          }
+
+          return uniqueMessages;
         });
 
         setHasMore(response.data.data.total > pageNum * pageSize);
@@ -326,11 +333,17 @@ export default function ChatWindow({
     fetchMessages(page);
   }, [page, fetchMessages]);
 
-  // Reset pagination when chat changes
+  // Update the chat change effect to scroll to bottom
   useEffect(() => {
+    // Reset pagination and scroll to bottom when chat changes
     setPage(1);
     setHasMore(true);
     setMessages([]);
+
+    // Scroll to bottom after a short delay to ensure DOM is updated
+    setTimeout(() => {
+      scrollToBottom('chat-change');
+    }, 100);
   }, [chat.id, setMessages]);
 
   // Remove handleSendMessage and use the prop instead
