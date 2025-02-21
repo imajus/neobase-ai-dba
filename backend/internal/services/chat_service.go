@@ -919,8 +919,7 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 		var schemaMsg string
 		if diff.IsFirstTime {
 			// For first time, format the full schema
-			schemaMsg = fmt.Sprintf("Database Schema:\n%s",
-				schemaManager.FormatSchemaForLLM(diff.FullSchema))
+			schemaMsg = schemaManager.FormatSchemaForLLM(diff.FullSchema)
 			log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
 		} else {
 			// For subsequent changes, get current schema and show changes
@@ -937,6 +936,12 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 		log.Printf("ChatService -> HandleSchemaChange -> saving schemaMsg as LLM message: %s", schemaMsg)
 
 		log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
+
+		// Clear previous system message from LLM
+		if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
+			log.Printf("ChatService -> HandleSchemaChange -> Error deleting system message: %v", err)
+		}
+
 		// Create and save LLM message
 		llmMsg := &models.LLMMessage{
 			Base:   models.NewBase(),
@@ -2031,8 +2036,13 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 			log.Printf("ChatService -> RefreshSchema -> Error getting chatID: %v", err)
 			return
 		}
-		schemaMsg := fmt.Sprintf("Database Schema:\n%s",
-			s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema))
+
+		// Clear previous system message from LLM
+		if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
+			log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
+		}
+
+		schemaMsg := s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
 
 		log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
 		llmMsg := &models.LLMMessage{
