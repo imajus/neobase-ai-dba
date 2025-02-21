@@ -14,5 +14,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@public': path.resolve(__dirname, './public')
     }
+  },
+  build: {
+    rollupOptions: {
+      external: ['uuid'],
+    }
   }
 });
