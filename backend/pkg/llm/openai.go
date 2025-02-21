@@ -66,7 +66,6 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	for _, msg := range messages {
 		content := ""
 
-		log.Printf("GenerateResponse -> msg: %v", msg)
 		// Handle different message types
 		switch msg.Role {
 		case "user":
@@ -74,9 +73,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 				content = userMsg
 			}
 		case "assistant":
-			if assistantMsg, ok := msg.Content["assistant_response"].(string); ok {
-				content = assistantMsg
-			}
+			content = formatAssistantResponse(msg.Content["assistant_response"].(map[string]interface{}))
 		case "system":
 			if schemaUpdate, ok := msg.Content["schema_update"].(string); ok {
 				content = fmt.Sprintf("Database schema update:\n%s", schemaUpdate)

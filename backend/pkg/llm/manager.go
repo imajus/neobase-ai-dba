@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 )
 
@@ -55,4 +57,15 @@ func (m *Manager) RemoveClient(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.clients, name)
+}
+
+// Add helper function to properly format assistant response
+func formatAssistantResponse(response map[string]interface{}) string {
+	// Convert the response to JSON string
+	jsonBytes, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		log.Printf("Error formatting assistant response: %v", err)
+		return fmt.Sprintf("%v", response)
+	}
+	return string(jsonBytes)
 }

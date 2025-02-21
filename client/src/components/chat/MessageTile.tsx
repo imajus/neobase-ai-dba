@@ -441,7 +441,7 @@ export default function MessageTile({
                                         <div className="w-full">
                                             <div className={`
                                             text-green-400 pb-6 w-full
-                                            ${!query.example_result && !query.error ? 'animate-pulse duration-300' : ''}
+                                            ${!query.example_result && !query.error ? '' : ''}
                                         `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">

@@ -422,9 +422,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		return
 	}
 
-	for _, msg := range messages {
-		log.Printf("processLLMResponse -> messagesToLLM -> msg: %v", msg)
-	}
 	// Generate LLM response
 	response, err := s.llmClient.GenerateResponse(ctx, messages, connInfo.Config.Type)
 	if err != nil {
@@ -522,8 +519,16 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 	}
 
 	log.Printf("processLLMResponse -> queries: %v", queries)
+
+	assistantMessage := ""
+	if jsonResponse["assistantMessage"] != nil {
+		assistantMessage = jsonResponse["assistantMessage"].(string)
+	} else {
+		assistantMessage = ""
+	}
+
 	// Save response and send final message
-	chatResponseMsg := models.NewMessage(userObjID, chatObjID, string(MessageTypeAssistant), jsonResponse["assistantMessage"].(string), &queries)
+	chatResponseMsg := models.NewMessage(userObjID, chatObjID, string(MessageTypeAssistant), assistantMessage, &queries)
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
 		log.Printf("processLLMResponse -> Error saving chat response message: %v", err)
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
@@ -2058,5 +2063,6 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 			log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
 		}
 	}()
+	log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 	return http.StatusOK, nil
 }
