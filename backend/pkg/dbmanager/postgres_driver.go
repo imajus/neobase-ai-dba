@@ -239,7 +239,23 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 	// Process results from the last statement if it returned rows
 	var result *QueryExecutionResult
 	if lastResult != nil {
-		result = processRows(lastResult, startTime)
+		results, err := processRows(lastResult, startTime)
+		if err != nil {
+			return &QueryExecutionResult{
+				ExecutionTime: int(time.Since(startTime).Milliseconds()),
+				Error: &dtos.QueryError{
+					Code:    "RESULT_PROCESSING_FAILED",
+					Message: err.Error(),
+					Details: "Failed to process query results",
+				},
+			}
+		}
+		result = &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Result: map[string]interface{}{
+				"results": results,
+			},
+		}
 	} else {
 		result = &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
@@ -294,15 +310,16 @@ type PostgresTransaction struct {
 	conn *Connection // Add connection reference
 }
 
-func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	startTime := time.Now()
 
-	// Split multiple statements
+	// Split into individual statements
 	statements := splitStatements(query)
 	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Statements: %v", statements)
 
-	var results []map[string]interface{}
-	var rowsAffected int64
+	var lastResult sql.Result
+	var rows *sql.Rows
+	var err error
 
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
@@ -310,10 +327,9 @@ func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			continue
 		}
 
-		// Handle different query types
+		// For SELECT queries
 		if strings.HasPrefix(strings.ToUpper(stmt), "SELECT") {
-			// For SELECT queries
-			rows, err := t.tx.QueryContext(ctx, stmt)
+			rows, err = tx.tx.QueryContext(ctx, stmt)
 			if err != nil {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
@@ -323,23 +339,9 @@ func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					},
 				}
 			}
-			defer rows.Close()
-
-			// Process SELECT results
-			queryResults, err := processSelectResults(rows)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Code:    "RESULT_PROCESSING_FAILED",
-						Message: err.Error(),
-						Details: "Failed to process SELECT results",
-					},
-				}
-			}
-			results = queryResults
 		} else {
-			// For INSERT/UPDATE/DELETE queries
-			result, err := t.tx.ExecContext(ctx, stmt)
+			// For non-SELECT queries
+			lastResult, err = tx.tx.ExecContext(ctx, stmt)
 			if err != nil {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
@@ -350,49 +352,111 @@ func (t *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				}
 			}
 
-			affected, _ := result.RowsAffected()
-			rowsAffected += affected
+			// Check for specific PostgreSQL errors
+			if strings.Contains(strings.ToUpper(stmt), "DROP TABLE") {
+				// Check if table exists before dropping
+				var exists bool
+				checkStmt := `SELECT EXISTS (
+					SELECT FROM information_schema.tables 
+					WHERE table_schema = 'public' 
+					AND table_name = $1
+				)`
+				tableName := extractTableName(stmt)
+				err = tx.tx.QueryRow(checkStmt, tableName).Scan(&exists)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Code:    "TABLE_CHECK_FAILED",
+							Message: err.Error(),
+							Details: fmt.Sprintf("Failed to check table existence: %s", tableName),
+						},
+					}
+				}
+				if !exists {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Code:    "TABLE_NOT_FOUND",
+							Message: fmt.Sprintf("Table '%s' does not exist", tableName),
+							Details: "Cannot drop a table that doesn't exist",
+						},
+					}
+				}
+			}
 		}
 	}
 
-	// Prepare result data
-	resultData := map[string]interface{}{
-		"results": results,
+	// Process results
+	result := &QueryExecutionResult{
+		ExecutionTime: int(time.Since(startTime).Milliseconds()),
 	}
 
-	// Add affected rows for non-SELECT queries
-	if queryType != "SELECT" && rowsAffected > 0 {
-		resultData["rowsAffected"] = rowsAffected
-		resultData["message"] = fmt.Sprintf("%d row(s) affected", rowsAffected)
+	if rows != nil {
+		defer rows.Close()
+		results, err := processRows(rows, startTime)
+		if err != nil {
+			return &QueryExecutionResult{
+				ExecutionTime: int(time.Since(startTime).Milliseconds()),
+				Error: &dtos.QueryError{
+					Code:    "RESULT_PROCESSING_FAILED",
+					Message: err.Error(),
+					Details: "Failed to process query results",
+				},
+			}
+		}
+		result.Result = map[string]interface{}{
+			"results": results,
+		}
+	} else if lastResult != nil {
+		rowsAffected, _ := lastResult.RowsAffected()
+		result.Result = map[string]interface{}{
+			"rowsAffected": rowsAffected,
+			"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
+		}
 	}
 
-	// Convert result to JSON string
-	resultJSON, err := json.Marshal(resultData)
+	resultJSON, err := json.Marshal(result.Result)
 	if err != nil {
 		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
 			Error: &dtos.QueryError{
 				Code:    "JSON_MARSHAL_FAILED",
 				Message: err.Error(),
-				Details: "Failed to marshal result data",
+				Details: "Failed to marshal query results",
 			},
 		}
 	}
+	result.ResultJSON = string(resultJSON)
 
-	executionResult := &QueryExecutionResult{
-		ExecutionTime: int(time.Since(startTime).Milliseconds()),
-		Result:        resultData,
-		ResultJSON:    string(resultJSON),
-	}
-
-	log.Printf("PostgreSQL Transaction -> ExecuteQuery -> Result: %+v", executionResult)
-	return executionResult
+	return result
 }
 
-// Helper function to process SELECT results
-func processSelectResults(rows *sql.Rows) ([]map[string]interface{}, error) {
+// Helper function to extract table name from DROP TABLE statement
+func extractTableName(stmt string) string {
+	stmt = strings.ToUpper(stmt)
+	stmt = strings.TrimSpace(strings.TrimPrefix(stmt, "DROP TABLE IF EXISTS"))
+	stmt = strings.TrimSpace(strings.TrimPrefix(stmt, "DROP TABLE"))
+	parts := strings.Fields(stmt)
+	if len(parts) > 0 {
+		return strings.ToLower(strings.Trim(parts[0], ";"))
+	}
+	return ""
+}
+
+func (t *PostgresTransaction) Commit() error {
+	log.Printf("PostgreSQL Transaction -> Commit -> Committing transaction")
+	return t.tx.Commit()
+}
+
+func (t *PostgresTransaction) Rollback() error {
+	log.Printf("PostgreSQL Transaction -> Rollback -> Rolling back transaction")
+	return t.tx.Rollback()
+}
+
+// Update the processRows function signature to return results and error
+func processRows(rows *sql.Rows, startTime time.Time) ([]map[string]interface{}, error) {
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
 
 	results := make([]map[string]interface{}, 0)
@@ -406,7 +470,7 @@ func processSelectResults(rows *sql.Rows) ([]map[string]interface{}, error) {
 	for rows.Next() {
 		err := rows.Scan(scanArgs...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan row: %v", err)
 		}
 
 		row := make(map[string]interface{})
@@ -428,79 +492,11 @@ func processSelectResults(rows *sql.Rows) ([]map[string]interface{}, error) {
 		results = append(results, row)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %v", err)
+	}
+
 	return results, nil
-}
-
-func (t *PostgresTransaction) Commit() error {
-	log.Printf("PostgreSQL Transaction -> Commit -> Committing transaction")
-	return t.tx.Commit()
-}
-
-func (t *PostgresTransaction) Rollback() error {
-	log.Printf("PostgreSQL Transaction -> Rollback -> Rolling back transaction")
-	return t.tx.Rollback()
-}
-
-// Helper function to process rows (moved from driver to be shared)
-func processRows(rows *sql.Rows, startTime time.Time) *QueryExecutionResult {
-	columns, err := rows.Columns()
-	if err != nil {
-		return &QueryExecutionResult{
-			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Error: &dtos.QueryError{
-				Code:    "FAILED_TO_GET_COLUMNS",
-				Message: "Failed to get columns",
-				Details: err.Error(),
-			},
-		}
-	}
-
-	var results []map[string]interface{}
-	for rows.Next() {
-		result := make(map[string]interface{})
-		values := make([]interface{}, len(columns))
-		pointers := make([]interface{}, len(columns))
-		for i := range values {
-			pointers[i] = &values[i]
-		}
-
-		if err := rows.Scan(pointers...); err != nil {
-			return &QueryExecutionResult{
-				ExecutionTime: int(time.Since(startTime).Milliseconds()),
-				Error: &dtos.QueryError{
-					Code:    "FAILED_TO_SCAN_ROWS",
-					Message: "Failed to scan rows",
-					Details: err.Error(),
-				},
-			}
-		}
-
-		for i, col := range columns {
-			val := values[i]
-			result[col] = val
-		}
-		results = append(results, result)
-	}
-
-	resultJSON, err := json.Marshal(results)
-	if err != nil {
-		return &QueryExecutionResult{
-			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Error: &dtos.QueryError{
-				Code:    "FAILED_TO_MARSHAL_RESULTS",
-				Message: "Failed to marshal results",
-				Details: err.Error(),
-			},
-		}
-	}
-
-	return &QueryExecutionResult{
-		ExecutionTime: int(time.Since(startTime).Milliseconds()),
-		Result: map[string]interface{}{
-			"results": results,
-		},
-		ResultJSON: string(resultJSON),
-	}
 }
 
 // Update GetSchema to include foreign keys
