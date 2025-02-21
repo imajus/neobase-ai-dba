@@ -7,6 +7,12 @@ export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
     exclude: ['lucide-react'],
+    include: ['uuid'],
+  },
+  build: {
+    rollupOptions: {
+      external: ['uuid'],
+    },
   },
   publicDir: 'public',
   resolve: {
