@@ -1,5 +1,5 @@
 import { AlertCircle, ChevronDown, Database, Loader2, X } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Chat, Connection } from '../../types/chat';
 
 interface ConnectionModalProps {
@@ -159,6 +159,58 @@ export default function ConnectionModal({ initialData, onClose, onEdit, onSubmit
     }));
   };
 
+  const parseConnectionString = (text: string): Partial<Connection> => {
+    const result: Partial<Connection> = {};
+    const lines = text.split('\n');
+
+    lines.forEach(line => {
+      const [key, value] = line.split('=').map(s => s.trim());
+      switch (key) {
+        case 'DATABASE_TYPE':
+          if (['postgresql', 'mysql'].includes(value)) {
+            result.type = value as 'postgresql' | 'mysql';
+          }
+          break;
+        case 'DATABASE_HOST':
+          result.host = value;
+          break;
+        case 'DATABASE_PORT':
+          result.port = value;
+          break;
+        case 'DATABASE_NAME':
+          result.database = value;
+          break;
+        case 'DATABASE_USERNAME':
+          result.username = value;
+          break;
+        case 'DATABASE_PASSWORD':
+          result.password = value;
+          break;
+      }
+    });
+    return result;
+  };
+
+  // Add this helper function to format connection details
+  const formatConnectionString = (connection: Connection): string => {
+    return `DATABASE_TYPE=${connection.type}
+DATABASE_HOST=${connection.host}
+DATABASE_PORT=${connection.port}
+DATABASE_NAME=${connection.database}
+DATABASE_USERNAME=${connection.username}
+DATABASE_PASSWORD=`; // Mask password
+  };
+
+  // Add a ref for the textarea
+  const credentialsTextAreaRef = useRef<HTMLTextAreaElement>(null);
+
+  // In the component, add useEffect to populate textarea in edit mode
+  useEffect(() => {
+    if (initialData && credentialsTextAreaRef.current) {
+      credentialsTextAreaRef.current.value = formatConnectionString(initialData.connection);
+    }
+  }, [initialData]);
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
       <div className="bg-white neo-border rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto relative z-[201]">
@@ -185,6 +237,48 @@ export default function ConnectionModal({ initialData, onClose, onEdit, onSubmit
             </div>
           )}
 
+          <div>
+            <label className="block font-bold mb-2 text-lg">Paste Credentials</label>
+            <p className="text-gray-600 text-sm mb-2">
+              Paste your database credentials in the following format:
+            </p>
+            <textarea
+              ref={credentialsTextAreaRef}
+              className="neo-input w-full font-mono text-sm"
+              placeholder={`DATABASE_TYPE=postgresql
+DATABASE_HOST=your-host.example.com
+DATABASE_PORT=5432
+DATABASE_NAME=your_database
+DATABASE_USERNAME=your_username
+DATABASE_PASSWORD=your_password`}
+              rows={6}
+              onChange={(e) => {
+                const parsed = parseConnectionString(e.target.value);
+                setFormData(prev => ({
+                  ...prev,
+                  ...parsed,
+                  // Keep existing password if we're editing and no new password provided
+                  password: parsed.password || (initialData ? formData.password : '')
+                }));
+                // Clear any errors for fields that were filled
+                const newErrors = { ...errors };
+                Object.keys(parsed).forEach(key => {
+                  delete newErrors[key as keyof FormErrors];
+                });
+                setErrors(newErrors);
+                // Mark fields as touched
+                const newTouched = { ...touched };
+                Object.keys(parsed).forEach(key => {
+                  newTouched[key] = true;
+                });
+                setTouched(newTouched);
+              }}
+            />
+            <p className="text-gray-500 text-xs mt-2">
+              All the fields will be automatically filled based on the pasted credentials
+            </p>
+          </div>
+          <div className="my-6 border-t border-gray-200"></div>
           <div>
             <label className="block font-bold mb-2 text-lg">Database Type</label>
             <p className="text-gray-600 text-sm mb-2">Select your database system</p>
