@@ -288,7 +288,7 @@ export default function ChatWindow({
 
         // Prepend messages to existing ones
         setMessages(prev => {
-          const combined = [...newMessages, ...prev];
+          const combined = [...prev, ...newMessages];
           // Remove duplicates based on message ID
           return Array.from(new Map(combined.map(m => [m.id, m])).values());
         });
@@ -397,7 +397,7 @@ export default function ChatWindow({
             }
           `}
         >
-          {[...messages].reverse().map((message) => (
+          {[...messages].reverse().map((message, index) => (
             <MessageTile
               key={message.id}
               checkSSEConnection={checkSSEConnection}
@@ -412,6 +412,7 @@ export default function ChatWindow({
               queryStates={queryStates}
               setQueryStates={setQueryStates}
               queryTimeouts={queryTimeouts}
+              isFirstMessage={index === 0}
             />
           ))}
         </div>

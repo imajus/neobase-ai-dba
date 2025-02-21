@@ -26,6 +26,7 @@ interface MessageTileProps {
     queryStates: Record<string, QueryState>;
     setQueryStates: React.Dispatch<React.SetStateAction<Record<string, QueryState>>>;
     queryTimeouts: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
+    isFirstMessage?: boolean;
 }
 
 const toastStyle = {
@@ -55,7 +56,8 @@ export default function MessageTile({
     queryStates,
     setQueryStates,
     queryTimeouts,
-    checkSSEConnection
+    checkSSEConnection,
+    isFirstMessage
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -471,7 +473,11 @@ export default function MessageTile({
     };
 
     return (
-        <div className="py-4 md:py-6 first:pt-8 w-full">
+        <div className={`
+            py-4 md:py-6
+            ${isFirstMessage ? 'first:pt-0' : ''}
+            w-full
+          `}>
             <div className={`
         group flex items-center relative
         ${message.type === 'user' ? 'justify-end' : 'justify-start'}
