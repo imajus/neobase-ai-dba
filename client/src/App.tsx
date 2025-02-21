@@ -564,26 +564,14 @@ function AppContent() {
         await setupSSEConnection(selectedConnection.id);
       }
       console.log('new stream id', streamId);
-      const response = await axios.post<SendMessageResponse>(
-        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/messages`,
-        {
-          stream_id: streamId,
-          content: content
-        },
-        {
-          withCredentials: true,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
 
-      if (response.data.success) {
+      const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
+
+      if (response.success) {
         const userMessage: Message = {
-          id: response.data.data.id,
+          id: response.data.id,
           type: 'user',
-          content: response.data.data.content,
+          content: response.data.content,
           is_loading: false,
           queries: [],
           is_streaming: false
@@ -1092,7 +1080,9 @@ function AppContent() {
           {/* Features Cards */}
           <div className="w-full max-w-4xl mx-auto grid md:grid-cols-3 gap-6 mb-12">
             <button
-              onClick={() => setSelectedConnection(connections[0])}
+              onClick={() => {
+                toast.success('Talk to your database in plain English. NeoBase translates your questions into database queries automatically.', toastStyle);
+              }}
               className="
                             neo-border 
                             bg-white 
@@ -1148,7 +1138,9 @@ function AppContent() {
             </button>
 
             <button
-              onClick={() => setSelectedConnection(connections[0])}
+              onClick={() => {
+                toast.success('Your data is visualized in tables or JSON format. Execute queries and see results in real-time.', toastStyle);
+              }}
               className="
                             neo-border 
                             bg-white 

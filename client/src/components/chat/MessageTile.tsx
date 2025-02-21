@@ -1,5 +1,5 @@
 import { AlertCircle, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
 import chatService from '../../services/chatService';
@@ -72,6 +72,7 @@ export default function MessageTile({
     const [isQueryStreaming, setIsQueryStreaming] = useState(false);
     const [currentDescription, setCurrentDescription] = useState('');
     const [currentQuery, setCurrentQuery] = useState('');
+    const abortControllerRef = useRef<Record<string, AbortController>>({});
 
     useEffect(() => {
         const streamQueries = async () => {
@@ -119,10 +120,14 @@ export default function MessageTile({
         const query = message.queries?.find(q => q.id === queryId);
         if (!query) return;
 
+        // Clear any existing timeout
         if (queryTimeouts.current[queryId]) {
             clearTimeout(queryTimeouts.current[queryId]);
             delete queryTimeouts.current[queryId];
         }
+
+        // Create new AbortController for this query
+        abortControllerRef.current[queryId] = new AbortController();
 
         setQueryStates(prev => ({
             ...prev,
@@ -131,7 +136,13 @@ export default function MessageTile({
 
         try {
             await checkSSEConnection();
-            await chatService.executeQuery(chatId, message.id, query.id, streamId || '');
+            await chatService.executeQuery(
+                chatId,
+                message.id,
+                query.id,
+                streamId || '',
+                abortControllerRef.current[queryId]
+            );
 
             // Update query state
             if (message.queries) {
@@ -139,13 +150,18 @@ export default function MessageTile({
                 message.queries.find(q => q.id === queryId)!.is_rolled_back = false;
             }
         } catch (error: any) {
-            console.log('error', error.message);
-            toast.error("Query execution failed: " + error);
+            // Only show error if not aborted
+            if (error.name !== 'AbortError') {
+                console.log('error', error.message);
+                toast.error("Query execution failed: " + error);
+            }
         } finally {
             setQueryStates(prev => ({
                 ...prev,
-                [queryId]: { isExecuting: false, isExample: false }
+                [queryId]: { isExecuting: false, isExample: !query.is_executed }
             }));
+            // Clean up abort controller
+            delete abortControllerRef.current[queryId];
         }
     };
 
@@ -160,7 +176,7 @@ export default function MessageTile({
             }));
 
             await checkSSEConnection();
-            await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '');
+            await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '', abortControllerRef.current[queryId]);
 
             // Update query state
             if (message.queries) {
@@ -296,14 +312,25 @@ export default function MessageTile({
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
+
+                                        // Abort the API call if it's in progress
+                                        if (abortControllerRef.current[queryId]) {
+                                            abortControllerRef.current[queryId].abort();
+                                            delete abortControllerRef.current[queryId];
+                                        }
+
+                                        // Clear any timeouts
                                         if (queryTimeouts.current[queryId]) {
                                             clearTimeout(queryTimeouts.current[queryId]);
                                             delete queryTimeouts.current[queryId];
                                         }
-                                        setQueryStates((prev: Record<string, QueryState>) => ({
+
+                                        // Update state
+                                        setQueryStates(prev => ({
                                             ...prev,
-                                            [queryId]: { isExecuting: false, isExample: true }
+                                            [queryId]: { isExecuting: false, isExample: !query.is_executed }
                                         }));
+
                                         setTimeout(() => {
                                             window.scrollTo(window.scrollX, window.scrollY);
                                         }, 0);
@@ -425,20 +452,56 @@ export default function MessageTile({
                                                     <Copy className="w-4 h-4" />
                                                 </button>
                                                 {shouldShowRollback && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            setRollbackState({ show: true, queryId });
-                                                            setTimeout(() => {
-                                                                window.scrollTo(window.scrollX, window.scrollY);
-                                                            }, 0);
-                                                        }}
-                                                        className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
-                                                        disabled={queryStates[queryId]?.isExecuting}
-                                                    >
-                                                        <History className="w-4 h-4" />
-                                                    </button>
+                                                    !queryStates[queryId]?.isExecuting ? (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                setRollbackState({ show: true, queryId });
+                                                                setTimeout(() => {
+                                                                    window.scrollTo(window.scrollX, window.scrollY);
+                                                                }, 0);
+                                                            }}
+                                                            className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
+                                                            disabled={queryStates[queryId]?.isExecuting}
+                                                        >
+                                                            <History className="w-4 h-4" />
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+
+                                                                // Abort the API call if it's in progress
+                                                                if (abortControllerRef.current[queryId]) {
+                                                                    abortControllerRef.current[queryId].abort();
+                                                                    delete abortControllerRef.current[queryId];
+                                                                }
+
+                                                                // Clear any timeouts
+                                                                if (queryTimeouts.current[queryId]) {
+                                                                    clearTimeout(queryTimeouts.current[queryId]);
+                                                                    delete queryTimeouts.current[queryId];
+                                                                }
+
+                                                                // Update state
+                                                                setQueryStates(prev => ({
+                                                                    ...prev,
+                                                                    [queryId]: { isExecuting: false, isExample: !query.is_executed }
+                                                                }));
+
+                                                                setTimeout(() => {
+                                                                    window.scrollTo(window.scrollX, window.scrollY);
+                                                                }, 0);
+                                                                toast.error('Query cancelled', toastStyle);
+                                                            }}
+                                                            className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
+                                                            title="Cancel query"
+                                                        >
+                                                            <XCircle className="w-4 h-4" />
+                                                        </button>
+                                                    )
                                                 )}
                                             </div>
                                         </div>}

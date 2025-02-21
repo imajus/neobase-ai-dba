@@ -1,4 +1,5 @@
 import { Chat, Connection } from '../types/chat';
+import { SendMessageResponse } from '../types/messages';
 import axios from './axiosConfig';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -102,13 +103,15 @@ const chatService = {
         }
     },
 
-    async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string): Promise<void> {
+    async sendMessage(chatId: string, messageId: string, streamId: string, content: string): Promise<SendMessageResponse> {
         try {
-            await axios.post(`${API_URL}/chats/${chatId}/queries/execute`, {
-                message_id: messageId,
-                query_id: queryId,
-                stream_id: streamId
-            },
+            const response = await axios.post<SendMessageResponse>(
+                `${API_URL}/chats/${chatId}/messages`,
+                {
+                    message_id: messageId,
+                    stream_id: streamId,
+                    content: content
+                },
                 {
                     withCredentials: true,
                     headers: {
@@ -117,13 +120,41 @@ const chatService = {
                     }
                 }
             );
+            return response.data
         } catch (error: any) {
+            console.error('Send message error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to send message');
+        }
+    },
+
+    async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<void> {
+        try {
+            await axios.post(
+                `${API_URL}/chats/${chatId}/queries/execute`,
+                {
+                    message_id: messageId,
+                    query_id: queryId,
+                    stream_id: streamId
+                },
+                {
+                    signal: controller.signal,
+                    withCredentials: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+        } catch (error: any) {
+            if (error.name === 'CanceledError' || error.name === 'AbortError') {
+                return;
+            }
             console.error('Execute query error:', error);
             throw new Error(error.response?.data?.error || 'Failed to execute query');
         }
     },
 
-    async rollbackQuery(chatId: string, messageId: string, queryId: string, streamId: string): Promise<void> {
+    async rollbackQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<void> {
         try {
             await axios.post(`${API_URL}/chats/${chatId}/queries/rollback`, {
                 message_id: messageId,
@@ -131,6 +162,7 @@ const chatService = {
                 stream_id: streamId
             },
                 {
+                    signal: controller.signal,
                     withCredentials: true,
                     headers: {
                         'Content-Type': 'application/json',

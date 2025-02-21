@@ -1026,8 +1026,16 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		return nil, http.StatusForbidden, err
 	}
 
-	log.Printf("ChatService -> ExecuteQuery -> msg: %+v", msg)
-	log.Printf("ChatService -> ExecuteQuery -> query: %+v", query)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		return nil, http.StatusRequestTimeout, fmt.Errorf("query execution cancelled or timed out")
+	default:
+		log.Printf("ChatService -> ExecuteQuery -> msg: %+v", msg)
+		log.Printf("ChatService -> ExecuteQuery -> query: %+v", query)
+	}
 
 	// Check connection status and connect if needed
 	if !s.dbManager.IsConnected(chatID) {
@@ -1043,6 +1051,10 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	// Execute query
 	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, *query.QueryType, false)
 	if queryErr != nil {
+		log.Printf("ChatService -> ExecuteQuery -> queryErr: %+v", queryErr)
+		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
+			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
+		}
 		go func() {
 			log.Printf("ChatService -> ExecuteQuery -> Updating message")
 
@@ -1056,7 +1068,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					if msgQueryIDHex == queryIDHex {
 						(*msg.Queries)[i].IsRolledBack = false
 						(*msg.Queries)[i].IsExecuted = true
-						(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+						(*msg.Queries)[i].ExecutionTime = nil
 						(*msg.Queries)[i].Error = &models.QueryError{
 							Code:    queryErr.Code,
 							Message: queryErr.Message,
@@ -1099,7 +1111,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								// Compare hex strings of ObjectIDs
 								if queryMap["id"] == query.ID.Hex() {
 									queryMap["isRolledBack"] = false
-									queryMap["executionTime"] = query.ExecutionTime
+									queryMap["executionTime"] = nil
 									queryMap["error"] = map[string]interface{}{
 										"code":    queryErr.Code,
 										"message": queryErr.Message,
@@ -1348,8 +1360,16 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusForbidden, err
 	}
 
-	log.Printf("ChatService -> RollbackQuery -> msg: %+v", msg)
-	log.Printf("ChatService -> RollbackQuery -> query: %+v", query)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		return nil, http.StatusRequestTimeout, fmt.Errorf("query rollback cancelled or timed out")
+	default:
+		log.Printf("ChatService -> RollbackQuery -> msg: %+v", msg)
+		log.Printf("ChatService -> RollbackQuery -> query: %+v", query)
+	}
 
 	// Validate query state
 	if !query.IsExecuted {
@@ -1381,6 +1401,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		// Execute dependent query
 		dependentResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, "SELECT", false)
 		if queryErr != nil {
+			log.Printf("ChatService -> RollbackQuery -> queryErr: %+v", queryErr)
+			if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
+				return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
+			}
 			// Update query status in message
 			go func() {
 				if msg.Queries != nil {
@@ -1636,6 +1660,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	// Execute rollback query
 	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, "DML", true)
 	if queryErr != nil {
+		log.Printf("ChatService -> RollbackQuery -> queryErr: %+v", queryErr)
+		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
+			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
+		}
 		// Update query status in message
 		go func() {
 			if msg.Queries != nil {
