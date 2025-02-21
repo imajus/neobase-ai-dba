@@ -6,8 +6,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['lucide-react'],
-    include: ['uuid'],
+    exclude: ['lucide-react', 'uuid'],
   },
   publicDir: 'public',
   resolve: {
