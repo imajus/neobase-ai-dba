@@ -1,5 +1,4 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 
 interface StreamContextType {
     streamId: string | null; // 32 bytes strictly
@@ -9,21 +8,27 @@ interface StreamContextType {
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
-export function StreamProvider({ children }: { children: ReactNode }) {
+const generateId = () => {
+    const timestamp = Date.now().toString(36);
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    return `${timestamp}-${randomStr}`;
+};
+
+export const StreamProvider = ({ children }: { children: ReactNode }) => {
     const [streamId, setStreamId] = useState<string | null>(null);
 
-    // Generate a 32-byte stream ID
-    const generateStreamId = () => {
-        // UUID v4 generates a 32-byte hex string
-        return uuidv4().replace(/-/g, '');
-    };
+    const generateStreamId = useCallback(() => {
+        const newStreamId = generateId();
+        setStreamId(newStreamId);
+        return newStreamId;
+    }, []);
 
     // Initialize streamId if not set
     useEffect(() => {
         if (!streamId) {
-            setStreamId(generateStreamId());
+            generateStreamId();
         }
-    }, []);
+    }, [generateStreamId]);
 
     return (
         <StreamContext.Provider value={{ streamId, setStreamId, generateStreamId }}>
