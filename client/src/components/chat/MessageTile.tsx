@@ -362,7 +362,7 @@ export default function MessageTile({
                                                 </span>
                                             )}
 
-                                            {query.execution_time! > 0 && (
+                                            {query.execution_time! > 0 && !query.error && (
                                                 <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
                                                     <Clock className="w-3 h-3" />
                                                     {query.execution_time!.toLocaleString()}ms
