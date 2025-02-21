@@ -9,11 +9,6 @@ export default defineConfig({
     exclude: ['lucide-react'],
     include: ['uuid'],
   },
-  build: {
-    rollupOptions: {
-      external: ['uuid'],
-    },
-  },
   publicDir: 'public',
   resolve: {
     alias: {
