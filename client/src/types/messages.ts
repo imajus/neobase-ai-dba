@@ -46,9 +46,10 @@ export const transformBackendMessage = (msg: BackendMessage): Message => ({
     type: msg.type,
     content: msg.content,
     queries: msg.queries || [],
-    isLoading: false,
-    loadingSteps: [],
-    isStreaming: false
+    is_loading: false,
+    loading_steps: [],
+    is_streaming: false,
+    created_at: msg.created_at
 });
 
 // Add interface for the API response

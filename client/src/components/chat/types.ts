@@ -22,6 +22,7 @@ export interface Message {
     id: string;
     type: 'user' | 'assistant';
     content: string;
+    created_at: string;
     is_loading?: boolean;
     loading_steps?: LoadingStep[];
     queries?: QueryResult[];

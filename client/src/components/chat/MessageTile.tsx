@@ -44,6 +44,15 @@ const toastStyle = {
     duration: 2000,
 };
 
+const formatMessageTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true
+    });
+};
+
 export default function MessageTile({
     chatId,
     message,
@@ -365,7 +374,7 @@ export default function MessageTile({
                             <div className="w-px h-4 bg-gray-700 mx-2" />
                             <button
                                 onClick={() => handleCopyToClipboard(query.query)}
-                                className="p-2 hover:bg-gray-800 rounded transition-colors text-white hover:text-gray-200"
+                                className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
                                 title="Copy query"
                             >
                                 <Copy className="w-4 h-4" />
@@ -630,6 +639,7 @@ export default function MessageTile({
                 <div className={`
     message-bubble
     inline-block
+    relative
     ${message.type === 'user' ? (
                         editingMessageId === message.id
                             ? 'w-[95%] sm:w-[85%] md:w-[75%]'
@@ -715,6 +725,13 @@ export default function MessageTile({
                                     )}
                                 </div>
                             )}
+                        </div>
+
+                        <div className={`
+                          text-[12px] text-gray-500 mt-1
+                          ${message.type === 'user' ? 'text-right' : 'text-left'}
+                        `}>
+                            {formatMessageTime(message.created_at)}
                         </div>
                     </div>
                 </div>

@@ -18,7 +18,9 @@ interface ChatWindowProps {
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: string) => Promise<void>;
-  onEditMessage: (id: string, content: string) => void;
+  onEditMessage
+
+  : (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
   onEditConnection?: (id: string, connection: Connection) => Promise<{ success: boolean, error?: string }>;
@@ -34,6 +36,56 @@ interface QueryState {
   isExample: boolean;
 }
 
+const formatMessageTime = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: true
+  });
+};
+
+const formatDateDivider = (dateString: string) => {
+  const date = new Date(dateString);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (date.toDateString() === today.toDateString()) {
+    return 'Today';
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    return 'Yesterday';
+  }
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
+const groupMessagesByDate = (messages: Message[]) => {
+  const groups: { [key: string]: Message[] } = {};
+
+  // Sort messages by date, oldest first
+  const sortedMessages = [...messages].sort((a, b) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+
+  sortedMessages.forEach(message => {
+    const date = new Date(message.created_at).toDateString();
+    if (!groups[date]) {
+      groups[date] = [];
+    }
+    groups[date].push(message);
+  });
+
+  // Convert to array and sort by date
+  const sortedEntries = Object.entries(groups).sort((a, b) =>
+    new Date(a[0]).getTime() - new Date(b[0]).getTime()
+  );
+
+  return Object.fromEntries(sortedEntries);
+};
 
 export default function ChatWindow({
   chat,
@@ -67,10 +119,13 @@ export default function ChatWindow({
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const pageSize = 20; // Messages per page
+  const pageSize = 40; // Messages per page
   const loadingRef = useRef<HTMLDivElement>(null);
   const [isMessageSending, setIsMessageSending] = useState(false);
   const prevMessageCountRef = useRef(messages.length);
+  const isLoadingOldMessages = useRef(false);
+  const messageUpdateSource = useRef<'api' | 'new' | null>(null);
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
     if (isConnected) {
@@ -79,8 +134,22 @@ export default function ChatWindow({
   }, [isConnected]);
 
   const scrollToBottom = (origin: string) => {
-    console.log("scrollToBottom called from ", origin);
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    console.log("scrollToBottom called from", origin);
+    requestAnimationFrame(() => {
+      if (chatContainerRef.current) {
+        const scrollOptions = {
+          top: chatContainerRef.current.scrollHeight,
+          behavior: origin === 'initial' ? 'auto' : 'smooth'
+        } as ScrollToOptions;
+
+        try {
+          chatContainerRef.current.scrollTo(scrollOptions);
+        } catch (error) {
+          // Fallback for older browsers
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+      }
+    });
   };
 
   useEffect(() => {
@@ -89,13 +158,15 @@ export default function ChatWindow({
 
     const observer = new MutationObserver(() => {
       const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+      setShowScrollButton(!isNearBottom);
 
-      if (messages.length > prevMessageCountRef.current && isNearBottom) {
+      if ((isNearBottom || messages.some(m => m.is_streaming))
+        && !isLoadingOldMessages.current
+        && !isLoadingMessages
+        && messageUpdateSource.current !== 'api') {
         scrollToBottom('mutation-observer');
       }
-
-      prevMessageCountRef.current = messages.length;
     });
 
     observer.observe(chatContainer, {
@@ -105,35 +176,7 @@ export default function ChatWindow({
     });
 
     return () => observer.disconnect();
-  }, [messages.length]);
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      scrollToBottom('initial-load');
-    }
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    if (!chatContainerRef.current) return;
-
-    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setShowScrollButton(!isNearBottom);
-  }, []);
-
-  useEffect(() => {
-    if (messages.length > 0 && prevMessageCountRef.current < messages.length) {
-      scrollToBottom('useEffect=3');
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    const chatContainer = chatContainerRef.current;
-    if (chatContainer) {
-      chatContainer.addEventListener('scroll', handleScroll);
-      return () => chatContainer.removeEventListener('scroll', handleScroll);
-    }
-  }, [handleScroll]);
+  }, [messages, isLoadingMessages]);
 
   const handleClearConfirm = useCallback(() => {
     onClearChat();
@@ -267,17 +310,20 @@ export default function ChatWindow({
     setEditInput('');
   }, [messages, setMessages]);
 
-  const fetchMessages = useCallback(async (pageNum: number) => {
-    if (!chat.id || isLoadingMessages) return;
+  const fetchMessages = useCallback(async (page: number) => {
+    if (!chat?.id || isLoadingMessages) return;
 
     try {
+      console.log('Fetching messages, page:', page);
       setIsLoadingMessages(true);
+      isLoadingOldMessages.current = page > 1;
+      messageUpdateSource.current = 'api';
+
       const response = await axios.get<MessagesResponse>(
-        `${import.meta.env.VITE_API_URL}/chats/${chat.id}/messages?page=${pageNum}&page_size=${pageSize}`,
+        `${import.meta.env.VITE_API_URL}/chats/${chat.id}/messages?page=${page}&page_size=${pageSize}`,
         {
           withCredentials: true,
           headers: {
-            'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         }
@@ -285,40 +331,70 @@ export default function ChatWindow({
 
       if (response.data.success) {
         const newMessages = response.data.data.messages.map(transformBackendMessage);
+        console.log('Received messages:', newMessages.length, 'for page:', page);
 
-        // Prepend messages to existing ones
-        setMessages(prev => {
-          const combined = [...prev, ...newMessages];
-          // Remove duplicates based on message ID
-          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+        if (page === 1) {
+          // For initial load, just set messages and scroll to bottom
+          setMessages(newMessages);
+          requestAnimationFrame(() => {
+            scrollToBottom('initial-load');
+          });
+        } else {
+          // For pagination, preserve scroll position
+          const container = chatContainerRef.current;
+          if (container) {
+            const oldHeight = container.scrollHeight;
+            const oldScroll = container.scrollTop;
 
-          // Scroll to bottom only on first page load
-          if (pageNum === 1) {
-            setTimeout(() => scrollToBottom('initial-load'), 100);
+            setMessages(prev => [...newMessages, ...prev]);
+
+            // After React has updated the DOM
+            requestAnimationFrame(() => {
+              // Calculate how much new content was added
+              const newHeight = container.scrollHeight;
+              const heightDiff = newHeight - oldHeight;
+              // Adjust scroll position to show same content as before
+              container.scrollTop = oldScroll + heightDiff;
+            });
           }
+        }
 
-          return uniqueMessages;
-        });
-
-        setHasMore(response.data.data.total > pageNum * pageSize);
+        setHasMore(newMessages.length === pageSize);
+        if (page === 1) isInitialLoad.current = false;
       }
     } catch (error) {
       console.error('Failed to fetch messages:', error);
       toast.error('Failed to load messages');
     } finally {
-      setIsLoadingMessages(false);
+      setTimeout(() => {
+        messageUpdateSource.current = null;
+        isLoadingOldMessages.current = false;
+        setIsLoadingMessages(false);
+      }, 100);
     }
-  }, [chat.id]);
+  }, [chat?.id, pageSize]);
 
-  // Setup intersection observer for infinite scroll
+  // Update intersection observer effect
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoadingMessages) {
+        // Only fetch more if:
+        // 1. Loading element is visible
+        // 2. We have more messages to load
+        // 3. We're not currently loading
+        if (entries[0].isIntersecting &&
+          hasMore &&
+          !isLoadingMessages) {
+          console.log('Loading more messages, current page:', page);
           setPage(prev => prev + 1);
+          fetchMessages(page + 1);  // Fetch next page immediately
         }
       },
-      { threshold: 0.5 }
+      {
+        root: null,
+        rootMargin: '100px',  // Start loading before element is visible
+        threshold: 0.1
+      }
     );
 
     if (loadingRef.current) {
@@ -326,34 +402,44 @@ export default function ChatWindow({
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoadingMessages]);
+  }, [hasMore, isLoadingMessages, page, fetchMessages]);
 
-  // Fetch messages when page changes
+  // Keep only necessary effects
   useEffect(() => {
-    fetchMessages(page);
-  }, [page, fetchMessages]);
+    if (chat?.id) {
+      console.log('Chat changed, loading initial messages');
+      isInitialLoad.current = true;
+      setPage(1);
+      setHasMore(true);
+      setMessages([]);
+      fetchMessages(1);
+    }
+  }, [chat?.id, fetchMessages]);
 
-  // Update the chat change effect to scroll to bottom
+  // Update the message update effect
   useEffect(() => {
-    // Reset pagination and scroll to bottom when chat changes
-    setPage(1);
-    setHasMore(true);
-    setMessages([]);
+    // Skip effect if source is API or loading old messages
+    if (messageUpdateSource.current === 'api' || isLoadingOldMessages.current) {
+      console.log('Skipping scroll - API/pagination update');
+      return;
+    }
 
-    // Scroll to bottom after a short delay to ensure DOM is updated
-    setTimeout(() => {
-      scrollToBottom('chat-change');
-    }, 100);
-  }, [chat.id, setMessages]);
+    // Only scroll for new messages or streaming
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.is_streaming || lastMessage?.type === 'user') {
+      console.log('Scrolling - new message/streaming');
+      scrollToBottom('new-message');
+    }
+  }, [messages]);
 
-  // Remove handleSendMessage and use the prop instead
+  // Update the handleMessageSubmit function
   const handleMessageSubmit = async (content: string) => {
-    if (isMessageSending) return;
-    setIsMessageSending(true);
     try {
+      messageUpdateSource.current = 'new';
       await onSendMessage(content);
+      scrollToBottom('message-submit');
     } finally {
-      setIsMessageSending(false);
+      messageUpdateSource.current = null;
     }
   };
 
@@ -384,11 +470,14 @@ export default function ChatWindow({
           md:mt-0
         "
       >
-        <div ref={loadingRef} className="w-full py-4 text-center">
+        <div
+          ref={loadingRef}
+          className="h-20 flex items-center justify-center"
+        >
           {isLoadingMessages && (
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm text-gray-600">Loading messages...</span>
+              <span className="text-sm text-gray-600">Loading older messages...</span>
             </div>
           )}
         </div>
@@ -410,23 +499,44 @@ export default function ChatWindow({
             }
           `}
         >
-          {[...messages].reverse().map((message, index) => (
-            <MessageTile
-              key={message.id}
-              checkSSEConnection={checkSSEConnection}
-              chatId={chat.id}
-              message={message}
-              onEdit={handleEditMessage}
-              editingMessageId={editingMessageId}
-              editInput={editInput}
-              setEditInput={setEditInput}
-              onSaveEdit={handleSaveEdit}
-              onCancelEdit={handleCancelEdit}
-              queryStates={queryStates}
-              setQueryStates={setQueryStates}
-              queryTimeouts={queryTimeouts}
-              isFirstMessage={index === 0}
-            />
+          {Object.entries(groupMessagesByDate(messages)).map(([date, dateMessages], index) => (
+            <div key={date}>
+              <div className={`flex items-center justify-center ${index === 0 ? 'mb-4' : 'my-6'}`}>
+                <div className="
+                  px-4 
+                  py-2
+                  bg-white 
+                  text-sm 
+                  font-medium 
+                  text-black
+                  border-2
+                  border-black
+                  shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+                  rounded-full
+                ">
+                  {formatDateDivider(date)}
+                </div>
+              </div>
+
+              {dateMessages.map((message, index) => (
+                <MessageTile
+                  key={message.id}
+                  checkSSEConnection={checkSSEConnection}
+                  chatId={chat.id}
+                  message={message}
+                  onEdit={handleEditMessage}
+                  editingMessageId={editingMessageId}
+                  editInput={editInput}
+                  setEditInput={setEditInput}
+                  onSaveEdit={handleSaveEdit}
+                  onCancelEdit={handleCancelEdit}
+                  queryStates={queryStates}
+                  setQueryStates={setQueryStates}
+                  queryTimeouts={queryTimeouts}
+                  isFirstMessage={index === 0}
+                />
+              ))}
+            </div>
           ))}
         </div>
         <div ref={messagesEndRef} />

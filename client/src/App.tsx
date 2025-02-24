@@ -566,8 +566,10 @@ function AppContent() {
     if (!selectedConnection?.id || !streamId || isMessageSending) return;
 
     try {
+      setIsMessageSending(true);
       console.log('handleSendMessage -> content', content);
       console.log('handleSendMessage -> streamId', streamId);
+
       // Check if the eventSource is open
       console.log('eventSource?.readyState', eventSource?.readyState);
       if (eventSource?.readyState === EventSource.OPEN) {
@@ -588,11 +590,12 @@ function AppContent() {
           content: response.data.content,
           is_loading: false,
           queries: [],
-          is_streaming: false
+          is_streaming: false,
+          created_at: new Date().toISOString()
         };
 
-
-        setMessages(prev => [userMessage, ...prev]);
+        // Add user message to the end
+        setMessages(prev => [...prev, userMessage]);
 
         console.log('ai-response-step -> creating new temp message');
         const tempMsg: Message = {
@@ -602,78 +605,35 @@ function AppContent() {
           queries: [],
           is_loading: true,
           loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
-          is_streaming: true
+          is_streaming: true,
+          created_at: new Date().toISOString()
         };
 
-        // Update messages first to remove any existing streaming messages
-        setMessages(prev => {
-          const withoutTemp = prev.filter(msg => !msg.is_streaming);
-          return [tempMsg, ...withoutTemp];
-        });
-
+        // Add temp message to the end
+        setMessages(prev => [...prev, tempMsg]);
         setTemporaryMessage(tempMsg);
       }
     } catch (error) {
       console.error('Failed to send message:', error);
       toast.error('Failed to send message', errorToast);
+    } finally {
+      setIsMessageSending(false);
     }
   };
 
-  const handleEditMessage = async (id: string, content: string) => {
-    console.log('handleEditMessage -> id', id);
-    console.log('handleEditMessage -> content', content);
-    if (!selectedConnection?.id || !streamId || isMessageSending || content === '') return;
-    try {
-      console.log('handleSendMessage -> content', content);
-      console.log('handleSendMessage -> streamId', streamId);
-      // Check if the eventSource is open
-      console.log('eventSource?.readyState', eventSource?.readyState);
-      if (eventSource?.readyState === EventSource.OPEN) {
-        console.log('EventSource is open');
-      } else {
-        console.log('EventSource is not open');
-        await setupSSEConnection(selectedConnection.id);
-      }
+  const handleStreamResponse = (response: StreamResponse) => {
+    // ... existing response handling logic
 
-      const response = await axios.patch<SendMessageResponse>(
-        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/messages/${id}`,
-        {
-          stream_id: streamId,
-          content: content
-        },
-        {
-          withCredentials: true,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
-
-      if (response.data.success) {
-        console.log('ai-response-step -> creating new temp message');
-        const tempMsg: Message = {
-          id: `temp`,
-          type: 'assistant',
-          content: '',
-          queries: [],
-          is_loading: true,
-          loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
-          is_streaming: true
-        };
-
-        // Update messages first to remove any existing streaming messages
-        setMessages(prev => {
-          const withoutTemp = prev.filter(msg => !msg.is_streaming);
-          return [tempMsg, ...withoutTemp];
-        });
-
-        setTemporaryMessage(tempMsg);
-      }
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      toast.error('Failed to send message', errorToast);
-    }
+    setMessages(prev => {
+      const messages = [...prev];
+      const lastMessage = messages[messages.length - 1];
+      // Update last message
+      messages[messages.length - 1] = {
+        ...lastMessage,
+        // ... updated properties
+      };
+      return messages;
+    });
   };
 
   // Update SSE handling
@@ -718,6 +678,7 @@ function AppContent() {
                 if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && response.data === 'NeoBase is analyzing your request..') {
                   return prev;
                 }
+
                 // Create updated message with new step
                 const updatedMessage = {
                   ...streamingMessage,
@@ -747,7 +708,8 @@ function AppContent() {
                 queries: response.data.queries || [],
                 is_loading: false,
                 loading_steps: [], // Clear loading steps for final message
-                is_streaming: true
+                is_streaming: true,
+                created_at: new Date().toISOString()
               };
 
               setMessages(prev => {
@@ -813,7 +775,8 @@ function AppContent() {
                   return [
                     {
                       ...lastMessage,
-                      is_streaming: false
+                      is_streaming: false,
+                      created_at: new Date().toISOString()
                     },
                     ...rest
                   ];
@@ -835,7 +798,8 @@ function AppContent() {
                 queries: [],
                 is_loading: false,
                 loading_steps: [],
-                is_streaming: false
+                is_streaming: false,
+                created_at: new Date().toISOString()
               }, ...withoutTemp];
             });
             setTemporaryMessage(null);
@@ -856,7 +820,8 @@ function AppContent() {
               queries: [],
               is_loading: false,
               loading_steps: [], // Clear loading steps
-              is_streaming: false // Set to false immediately
+              is_streaming: false, // Set to false immediately
+              created_at: new Date().toISOString()
             };
 
             // Add cancel message
@@ -999,6 +964,59 @@ function AppContent() {
       eventSource.onmessage = null;
     };
   }, [eventSource, temporaryMessage, selectedConnection?.id, streamId]);
+
+  // Update the handleEditMessage function similarly
+  const handleEditMessage = async (id: string, content: string) => {
+    if (!selectedConnection?.id || !streamId || isMessageSending || content === '') return;
+
+    try {
+      console.log('handleEditMessage -> content', content);
+      console.log('handleEditMessage -> streamId', streamId);
+
+      if (eventSource?.readyState === EventSource.OPEN) {
+        console.log('EventSource is open');
+      } else {
+        console.log('EventSource is not open');
+        await setupSSEConnection(selectedConnection.id);
+      }
+
+      const response = await axios.patch<SendMessageResponse>(
+        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/messages/${id}`,
+        {
+          stream_id: streamId,
+          content: content
+        },
+        {
+          withCredentials: true,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        console.log('ai-response-step -> creating new temp message');
+        const tempMsg: Message = {
+          id: `temp`,
+          type: 'assistant',
+          content: '',
+          queries: [],
+          is_loading: true,
+          loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
+          is_streaming: true,
+          created_at: new Date().toISOString()
+        };
+
+        // Add temp message to the end
+        setMessages(prev => [...prev, tempMsg]);
+        setTemporaryMessage(tempMsg);
+      }
+    } catch (error) {
+      console.error('Failed to edit message:', error);
+      toast.error('Failed to edit message', errorToast);
+    }
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center bg-white h-screen">Loading...</div>; // Or a proper loading component
