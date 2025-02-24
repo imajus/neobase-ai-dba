@@ -175,3 +175,21 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		Data:    "Successfully logged out",
 	})
 }
+
+func (h *AuthHandler) GetUser(c *gin.Context) {
+	userID := c.GetString("userID")
+	user, statusCode, err := h.authService.GetUser(userID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    user,
+	})
+}

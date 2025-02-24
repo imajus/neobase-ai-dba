@@ -2,10 +2,12 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -15,6 +17,7 @@ type UserRepository interface {
 	CreateUserSignUpSecret(secret string) (*models.UserSignupSecret, error)
 	ValidateUserSignupSecret(secret string) bool
 	DeleteUserSignupSecret(secret string) error
+	FindByID(userID string) (*models.User, error)
 }
 
 type userRepository struct {
@@ -67,4 +70,21 @@ func (r *userRepository) ValidateUserSignupSecret(secret string) bool {
 func (r *userRepository) DeleteUserSignupSecret(secret string) error {
 	_, err := r.userSignupSecretCollection.DeleteOne(context.Background(), bson.M{"secret": secret})
 	return err
+}
+
+func (r *userRepository) FindByID(userID string) (*models.User, error) {
+	userIDPrimitive, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, err
+	}
+	var user models.User
+	fmt.Println("userID", userID)
+	err = r.userCollection.FindOne(context.Background(), bson.M{"_id": userIDPrimitive}).Decode(&user)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }

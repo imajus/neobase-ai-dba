@@ -1,22 +1,23 @@
-import { LoginFormData, SignupFormData } from '../types/auth';
-import axios, { APIError } from './axiosConfig';
+import { AuthResponse, LoginFormData, SignupFormData, UserResponse } from '../types/auth';
+import axios from './axiosConfig';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-export interface AuthResponse {
-    success: boolean;
-    data: {
-        access_token: string;
-        refresh_token: string;
-        user: {
-            id: string;
-            username: string;
-        };
-    };
-    error?: string;
-}
-
 const authService = {
+    async getUser(): Promise<UserResponse> {
+        try {
+            const response = await axios.get<UserResponse>(`${API_URL}/auth/`, {
+                withCredentials: true,
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            return response.data;
+        } catch (error: any) {
+            console.error('Get user error:', error);
+            throw new Error(error.message || 'Get user failed');
+        }
+    },
     async login(data: LoginFormData): Promise<AuthResponse> {
         try {
             const response = await axios.post(`${API_URL}/auth/login`, {
@@ -56,35 +57,6 @@ const authService = {
             throw new Error(error.message || 'Signup failed');
         }
     },
-
-    async checkAuth(): Promise<boolean> {
-        try {
-            const token = localStorage.getItem('token');
-            if (!token) return false;
-
-            const response = await axios.get(`${API_URL}/chats`, {
-                withCredentials: true,
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                validateStatus: (status) => {
-                    return status === 200 || status === 204;
-                }
-            });
-            console.log("checkAuth response", response);
-            return true;
-        } catch (error: any) {
-            console.error('Auth check error:', error);
-            localStorage.removeItem('token');
-            localStorage.removeItem('refresh_token');
-            if (error.response?.data?.error) {
-                throw new APIError(error.response.data.error);
-            }
-            return false;
-        }
-    },
-
     async refreshToken(): Promise<string | null> {
         try {
             const refreshToken = localStorage.getItem('refresh_token');

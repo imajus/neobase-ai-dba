@@ -19,6 +19,7 @@ type AuthService interface {
 	GenerateUserSignupSecret(req *dtos.UserSignupSecretRequest) (*models.UserSignupSecret, uint, error)
 	RefreshToken(refreshToken string) (*dtos.RefreshTokenResponse, uint32, error)
 	Logout(refreshToken string, accessToken string) (uint32, error)
+	GetUser(userID string) (*models.User, uint, error)
 }
 
 type authService struct {
@@ -239,4 +240,16 @@ func (s *authService) Logout(refreshToken string, accessToken string) (uint32, e
 	}
 
 	return http.StatusOK, nil
+}
+
+func (s *authService) GetUser(userID string) (*models.User, uint, error) {
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return nil, http.StatusNotFound, err
+	}
+	if user == nil {
+		return nil, http.StatusNotFound, errors.New("user not found")
+	}
+
+	return user, http.StatusOK, nil
 }

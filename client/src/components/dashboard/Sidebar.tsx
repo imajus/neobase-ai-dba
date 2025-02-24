@@ -1,8 +1,8 @@
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
+  ArrowRight,
   Boxes,
   Loader2,
-  LogOut,
   PanelLeft,
   PanelLeftClose,
   Plus,
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
+import { useUser } from '../../contexts/UserContext';
 import chatService from '../../services/chatService';
 import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
@@ -20,15 +21,6 @@ export interface Connection {
   id: string;
   name: string;
   type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
-}
-
-interface ConnectionStatus {
-  isConnected: boolean;
-  type: string;
-  host: string;
-  port: number;
-  database: string;
-  username: string;
 }
 
 interface SidebarProps {
@@ -51,6 +43,15 @@ interface SSEEvent {
   data: string;
 }
 
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
 export default function Sidebar({
   isExpanded,
   onToggleExpand,
@@ -68,6 +69,7 @@ export default function Sidebar({
   const [connectionToDelete, setConnectionToDelete] = useState<Chat | null>(null);
   const [currentConnectedChatId, setCurrentConnectedChatId] = useState<string | null>(null);
   const previousConnectionRef = useRef<string | null>(null);
+  const { user } = useUser();
 
   // Watch for selected connection changes
   useEffect(() => {
@@ -111,8 +113,6 @@ export default function Sidebar({
       });
     }
   };
-
-
 
   const handleSelectConnection = useCallback(async (id: string) => {
     try {
@@ -217,48 +217,58 @@ export default function Sidebar({
                 Add Connection
               </span>
             </button>
-            <button
-              onClick={handleLogoutClick}
-              className={`neo-button-secondary flex items-center justify-center ${isExpanded ? 'w-full' : 'w-12 h-12 p-3'}`}
-              title="Logout"
-            >
-              <LogOut className="w-5 h-5" />
-              <span className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100 ml-2' : 'opacity-0 w-0 overflow-hidden'}`}>
-                Logout
-              </span>
-            </button>
+
+            {isExpanded && (
+              <div className="p-3 border-2 border-black rounded-lg bg-white shadow-neo">
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-base">{user?.username}</span>
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                      Joined {formatDate(user?.created_at || '')}
+                    </span>
+                  </div>
+                  <div className="border-t border-gray-200 my-2"></div>
+                  <button
+                    onClick={handleLogoutClick}
+                    className="text-red-500 hover:text-red-600 text-sm font-medium flex items-center gap-2 transition-colors"
+                  >
+                    <span>Logout</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Mobile view - show only when expanded */}
-          <div className={`flex gap-3 md:hidden ${!isExpanded && 'hidden'}`}>
+          <div className={`flex flex-col gap-3 md:hidden ${!isExpanded && 'hidden'}`}>
             <button
               onClick={onAddConnection}
-              className="
-                neo-button 
-                flex-1
-                h-12
-                flex 
-                items-center 
-                justify-center
-              "
+              className="neo-button h-12 flex items-center justify-center"
               title="Add Connection"
             >
               <Plus className="w-5 h-5" />
+              <span className="ml-2">Add Connection</span>
             </button>
-            <button
-              onClick={handleLogoutClick}
-              className="
-                neo-button-secondary 
-                flex-1
-                h-12
-                flex 
-                items-center 
-                justify-center
-              "
-              title="Logout"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
+
+            <div className="p-3 border-2 border-black rounded-lg bg-white shadow-neo">
+              <div className="flex flex-col space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-base">{user?.username}</span>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                    Joined {formatDate(user?.created_at || '')}
+                  </span>
+                </div>
+                <div className="border-t border-gray-200 my-2"></div>
+                <button
+                  onClick={handleLogoutClick}
+                  className="text-red-500 hover:text-red-600 text-sm font-medium flex items-center gap-2 transition-colors"
+                >
+                  <span>Sign out</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -281,7 +291,10 @@ export default function Sidebar({
           <ConfirmationModal
             title="Confirm Logout"
             message="Are you sure you want to logout? Any unsaved changes will be lost."
-            onConfirm={handleLogoutConfirm}
+            onConfirm={async () => {
+              await handleLogoutConfirm();
+              setShowLogoutConfirm(false);
+            }}
             onCancel={() => setShowLogoutConfirm(false)}
           />
         </div>

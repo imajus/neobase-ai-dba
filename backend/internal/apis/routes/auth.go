@@ -25,6 +25,7 @@ func SetupAuthRoutes(router *gin.Engine) {
 	protected := router.Group("/api/auth")
 	protected.Use(middlewares.AuthMiddleware())
 	{
+		protected.GET("/", authHandler.GetUser)
 		protected.POST("/logout", authHandler.Logout)
 		protected.GET("/refresh-token", authHandler.RefreshToken)
 	}

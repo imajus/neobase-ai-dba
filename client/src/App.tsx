@@ -11,6 +11,7 @@ import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
 import ConnectionModal from './components/modals/ConnectionModal';
 import { StreamProvider, useStream } from './contexts/StreamContext';
+import { UserProvider, useUser } from './contexts/UserContext';
 import authService from './services/authService';
 import './services/axiosConfig';
 import chatService from './services/chatService';
@@ -37,6 +38,7 @@ function AppContent() {
   const { streamId, setStreamId, generateStreamId } = useStream();
   const [isMessageSending, setIsMessageSending] = useState(false);
   const [temporaryMessage, setTemporaryMessage] = useState<Message | null>(null);
+  const { user, setUser } = useUser();
 
   // Check auth status on mount
   useEffect(() => {
@@ -74,9 +76,14 @@ function AppContent() {
   const checkAuth = async () => {
     try {
       console.log("Starting auth check...");
-      const isAuth = await authService.checkAuth();
-      console.log("Auth check result:", isAuth);
-      setIsAuthenticated(isAuth);
+      const response = await authService.getUser();
+      console.log("Auth check result:", response);
+      setIsAuthenticated(response.success);
+      setUser({
+        id: response.data.id,
+        username: response.data.username,
+        created_at: response.data.created_at,
+      });
       setAuthError(null);
     } catch (error: any) {
       console.error('Auth check failed:', error);
@@ -133,9 +140,15 @@ function AppContent() {
   const handleLogin = async (data: LoginFormData) => {
     try {
       const response = await authService.login(data);
-      console.log("handleLogin response", response);
-      setIsAuthenticated(true);
-      setSuccessMessage(`Welcome back, ${response.data.user.username}!`);
+      if (response.success) {
+        setUser({
+          id: response.data.user.id,
+          username: response.data.user.username,
+          created_at: response.data.user.created_at
+        });
+        setIsAuthenticated(true);
+        setSuccessMessage(`Welcome back, ${response.data.user.username}!`);
+      }
     } catch (error: any) {
       console.error("Login error:", error);
       throw error;
@@ -171,6 +184,7 @@ function AppContent() {
   const handleLogout = async () => {
     try {
       await authService.logout();
+      setUser(null);
       setSuccessMessage('You\'ve been logged out!');
       setIsAuthenticated(false);
       setSelectedConnection(undefined);
@@ -1230,9 +1244,11 @@ function AppContent() {
 
 function App() {
   return (
-    <StreamProvider>
-      <AppContent />
-    </StreamProvider>
+    <UserProvider>
+      <StreamProvider>
+        <AppContent />
+      </StreamProvider>
+    </UserProvider>
   );
 }
 

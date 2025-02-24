@@ -4,8 +4,9 @@ export interface AuthState {
 }
 
 export interface User {
-  email: string;
   id: string;
+  username: string;
+  created_at: string;
 }
 
 export interface LoginFormData {
@@ -16,4 +17,23 @@ export interface LoginFormData {
 export interface SignupFormData extends LoginFormData {
   confirmPassword: string;
   userSignupSecret: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  data: {
+    access_token: string;
+    refresh_token: string;
+    user: {
+      id: string;
+      username: string;
+      created_at: string;
+    };
+  };
+  error?: string;
+}
+
+export interface UserResponse {
+  success: boolean;
+  data: User;
 }
