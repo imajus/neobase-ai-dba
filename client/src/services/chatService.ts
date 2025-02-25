@@ -1,5 +1,5 @@
 import { Chat, Connection } from '../types/chat';
-import { SendMessageResponse } from '../types/messages';
+import { MessagesResponse, SendMessageResponse } from '../types/messages';
 import axios from './axiosConfig';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -103,6 +103,23 @@ const chatService = {
         }
     },
 
+    async getMessages(chatId: string, page: number, perPage: number): Promise<MessagesResponse> {
+        try {
+            const response = await axios.get<MessagesResponse>(
+                `${import.meta.env.VITE_API_URL}/chats/${chatId}/messages?page=${page}&page_size=${perPage}`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Get messages error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to get messages');
+        }
+    },
     async sendMessage(chatId: string, messageId: string, streamId: string, content: string): Promise<SendMessageResponse> {
         try {
             const response = await axios.post<SendMessageResponse>(

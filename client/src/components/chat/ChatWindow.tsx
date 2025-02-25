@@ -3,8 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
 import axios from '../../services/axiosConfig';
+import chatService from '../../services/chatService';
 import { Chat, Connection } from '../../types/chat';
-import { MessagesResponse, transformBackendMessage } from '../../types/messages';
+import { transformBackendMessage } from '../../types/messages';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import ConnectionModal from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
@@ -158,10 +159,14 @@ export default function ChatWindow({
 
     const observer = new MutationObserver(() => {
       const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
-      setShowScrollButton(!isNearBottom);
+      // Consider a small buffer (e.g., 10px) to account for small rounding differences
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
 
-      if ((isNearBottom || messages.some(m => m.is_streaming))
+      // Only show scroll button if we're not at the bottom
+      setShowScrollButton(!isAtBottom);
+
+      // Auto scroll if we're near bottom or there's a streaming message
+      if ((isAtBottom || messages.some(m => m.is_streaming))
         && !isLoadingOldMessages.current
         && !isLoadingMessages
         && messageUpdateSource.current !== 'api') {
@@ -178,10 +183,20 @@ export default function ChatWindow({
     return () => observer.disconnect();
   }, [messages, isLoadingMessages]);
 
-  const handleClearConfirm = useCallback(() => {
-    onClearChat();
-    setShowClearConfirm(false);
-  }, [onClearChat]);
+  // Add a scroll event listener to handle scroll button visibility
+  useEffect(() => {
+    const chatContainer = chatContainerRef.current;
+    if (!chatContainer) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+      setShowScrollButton(!isAtBottom);
+    };
+
+    chatContainer.addEventListener('scroll', handleScroll);
+    return () => chatContainer.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleCloseConfirm = useCallback(() => {
     setShowCloseConfirm(false);
@@ -319,18 +334,10 @@ export default function ChatWindow({
       isLoadingOldMessages.current = page > 1;
       messageUpdateSource.current = 'api';
 
-      const response = await axios.get<MessagesResponse>(
-        `${import.meta.env.VITE_API_URL}/chats/${chat.id}/messages?page=${page}&page_size=${pageSize}`,
-        {
-          withCredentials: true,
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      const response = await chatService.getMessages(chat.id, page, pageSize);
 
-      if (response.data.success) {
-        const newMessages = response.data.data.messages.map(transformBackendMessage);
+      if (response.success) {
+        const newMessages = response.data.messages.map(transformBackendMessage);
         console.log('Received messages:', newMessages.length, 'for page:', page);
 
         if (page === 1) {
@@ -378,10 +385,6 @@ export default function ChatWindow({
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        // Only fetch more if:
-        // 1. Loading element is visible
-        // 2. We have more messages to load
-        // 3. We're not currently loading
         if (entries[0].isIntersecting &&
           hasMore &&
           !isLoadingMessages) {

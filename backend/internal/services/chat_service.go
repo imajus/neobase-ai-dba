@@ -2090,7 +2090,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
 			log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
 		}
+		log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 	}()
-	log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 	return http.StatusOK, nil
 }
