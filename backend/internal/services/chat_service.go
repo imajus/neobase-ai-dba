@@ -50,6 +50,7 @@ type ChatService interface {
 	// Db Manager Stream Handler
 	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
+	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 }
 
 type chatService struct {
@@ -497,6 +498,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				estimateResponseTime = &defaultVal
 			}
 
+			pagination := &models.Pagination{}
+			if queryMap["pagination"] != nil {
+				pagination.TotalRecordsCount = utils.ToIntPtr(queryMap["pagination"].(map[string]interface{})["totalRecordsCount"].(int))
+				pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
+			}
 			queries = append(queries, models.Query{
 				ID:                     primitive.NewObjectID(),
 				Query:                  queryMap["query"].(string),
@@ -514,6 +520,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
 				RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
 				RollbackDependentQuery: rollbackDependentQuery,
+				Pagination:             pagination,
 			})
 		}
 	}
@@ -1171,7 +1178,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		})
 		return nil, http.StatusInternalServerError, errors.New(queryErr.Details)
 	}
-
+	var totalRecordsCount *int
+	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
+	// Then we need to save capped 50 results in DB and the original records count to pagination.totalRecordsCount...
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
 	log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %+v", result.ResultJSON)
 
@@ -1191,6 +1200,20 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	if len(resultListFormatting) > 0 {
 		formattedResultJSON = resultListFormatting
+		if len(resultListFormatting) > 50 {
+			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting)) // Store actual total count
+			formattedResultJSON = resultListFormatting[:50]               // Cap the result to 50 records
+
+			// Cap the result.ResultJSON to 50 records
+			cappedResults, err := json.Marshal(resultListFormatting[:50])
+			if err != nil {
+				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
+			} else {
+				result.ResultJSON = string(cappedResults)
+			}
+		} else {
+			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting))
+		}
 	} else {
 		formattedResultJSON = resultMapFormatting
 	}
@@ -1219,6 +1242,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+					if totalRecordsCount != nil {
+						(*msg.Queries)[i].Pagination.TotalRecordsCount = totalRecordsCount
+					}
 					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
@@ -1328,7 +1354,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	// Send stream event
 	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
-		Event: "query-executed",
+		Event: "query-results",
 		Data: map[string]interface{}{
 			"chat_id":          chatID,
 			"message_id":       msg.ID.Hex(),
@@ -2093,4 +2119,68 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 		log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 	}()
 	return http.StatusOK, nil
+}
+
+// Fetches paginated results for a query
+func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error) {
+	log.Printf("ChatService -> GetQueryResults -> userID: %s, chatID: %s, messageID: %s, queryID: %s, streamID: %s, offset: %d", userID, chatID, messageID, queryID, streamID, offset)
+	_, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+
+	if query.Pagination == nil {
+		if query.Pagination.PaginatedQuery == nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("query does not have pagination")
+		}
+		return nil, http.StatusBadRequest, fmt.Errorf("query does not have pagination")
+	}
+	offSettPaginatedQuery := strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, userID, chatID, messageID, queryID, streamID, offSettPaginatedQuery, false)
+	if queryErr != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf(queryErr.Message)
+	}
+
+	log.Printf("ChatService -> GetQueryResults -> result: %+v", result)
+	log.Printf("ChatService -> GetQueryResults -> result.ResultJSON: %+v", result.ResultJSON)
+
+	var formattedResultJSON interface{}
+	var resultListFormatting []interface{} = []interface{}{}
+	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
+	if err := json.Unmarshal([]byte(result.ResultJSON), &resultListFormatting); err != nil {
+		if err := json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting); err != nil {
+			log.Printf("ChatService -> GetQueryResults -> Error unmarshalling result JSON: %v", err)
+			// Try to unmarshal as a map
+			err = json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting)
+			if err != nil {
+				log.Printf("ChatService -> GetQueryResults -> Error unmarshalling result JSON: %v", err)
+			}
+		}
+	}
+
+	if len(resultListFormatting) > 0 {
+		formattedResultJSON = resultListFormatting
+	} else {
+		formattedResultJSON = resultMapFormatting
+	}
+
+	log.Printf("ChatService -> GetQueryResults -> formattedResultJSON: %+v", formattedResultJSON)
+
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "query-paginated-results",
+		Data: map[string]interface{}{
+			"chat_id":          chatID,
+			"message_id":       messageID,
+			"query_id":         queryID,
+			"execution_result": formattedResultJSON,
+			"error":            queryErr,
+		},
+	})
+	return &dtos.QueryResultsResponse{
+		ChatID:          chatID,
+		MessageID:       messageID,
+		QueryID:         queryID,
+		ExecutionResult: formattedResultJSON,
+		Error:           queryErr,
+	}, http.StatusOK, nil
 }

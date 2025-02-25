@@ -648,3 +648,27 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 		}
 	}
 }
+
+func (h *ChatHandler) GetQueryResults(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	var req dtos.QueryResultsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+		return
+	}
+
+	response, status, err := h.chatService.GetQueryResults(c.Request.Context(), userID, chatID, req.MessageID, req.QueryID, req.StreamID, req.Offset)
+	if err != nil {
+		c.JSON(int(status), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+		return
+	}
+
+	c.JSON(int(status), response)
+}

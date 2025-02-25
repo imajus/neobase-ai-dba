@@ -28,3 +28,18 @@ type QueryExecutionResponse struct {
 	ExecutionResult interface{} `json:"execution_result"`
 	Error           *QueryError `json:"error,omitempty"`
 }
+
+type QueryResultsRequest struct {
+	MessageID string `json:"message_id" binding:"required"`
+	QueryID   string `json:"query_id" binding:"required"`
+	StreamID  string `json:"stream_id" binding:"required"`
+	Offset    int    `json:"offset" binding:"required"`
+}
+
+type QueryResultsResponse struct {
+	ChatID          string      `json:"chat_id"`
+	MessageID       string      `json:"message_id"`
+	QueryID         string      `json:"query_id"`
+	ExecutionResult interface{} `json:"execution_result"`
+	Error           *QueryError `json:"error,omitempty"`
+}

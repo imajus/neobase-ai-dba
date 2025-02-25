@@ -845,7 +845,7 @@ function AppContent() {
             );
             break;
 
-          case 'query-executed':
+          case 'query-results':
             setMessages(prev => {
               const newMessages = prev.map(msg => {
                 if (msg.id === response.data.message_id) {

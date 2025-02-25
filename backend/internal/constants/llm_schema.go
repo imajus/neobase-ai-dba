@@ -30,6 +30,18 @@ const PostgresLLMResponseSchema = `{
                         "type": "string",
                         "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
                     },
+                       "pagination": {
+                        "type": "object",
+                        "required": [
+                            "paginatedQuery"
+                        ],
+                        "properties": {
+                            "paginatedQuery": {
+                                "type": "string",
+                                "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                            }
+                        },
+                    },
                     "isCritical": {
                         "type": "boolean",
                         "description": "Indicates if the query is critical."
@@ -100,6 +112,7 @@ type QueryInfo struct {
 	Query                  string                   `json:"query"`
 	Tables                 string                   `json:"tables,omitempty"`
 	QueryType              string                   `json:"queryType"`
+	Pagination             *Pagination              `json:"pagination,omitempty"`
 	IsCritical             bool                     `json:"isCritical"`
 	CanRollback            bool                     `json:"canRollback"`
 	Explanation            string                   `json:"explanation"`
@@ -107,4 +120,9 @@ type QueryInfo struct {
 	RollbackQuery          string                   `json:"rollbackQuery,omitempty"`
 	EstimateResponseTime   interface{}              `json:"estimateResponseTime"`
 	RollbackDependentQuery string                   `json:"rollbackDependentQuery,omitempty"`
+}
+
+type Pagination struct {
+	TotalRecordsCount *int    `json:"total_records_count"`
+	PaginatedQuery    *string `json:"paginated_query"`
 }

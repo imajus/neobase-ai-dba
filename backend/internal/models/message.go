@@ -19,7 +19,8 @@ type Query struct {
 	ID                     primitive.ObjectID `bson:"id" json:"id"`
 	Query                  string             `bson:"query" json:"query"`
 	QueryType              *string            `bson:"query_type" json:"query_type"` // SELECT, INSERT, UPDATE, DELETE...
-	Tables                 *string            `bson:"tables" json:"tables"`         // comma separated table names involved in the query
+	Pagination             *Pagination        `bson:"pagination,omitempty" json:"pagination,omitempty"`
+	Tables                 *string            `bson:"tables" json:"tables"` // comma separated table names involved in the query
 	Description            string             `bson:"description" json:"description"`
 	RollbackDependentQuery *string            `bson:"rollback_dependent_query,omitempty" json:"rollback_dependent_query,omitempty"` // ID of the query that this query depends on
 	RollbackQuery          *string            `bson:"rollback_query,omitempty" json:"rollback_query,omitempty"`                     // the query to rollback the query
@@ -38,6 +39,11 @@ type QueryError struct {
 	Code    string `bson:"code" json:"code"`
 	Message string `bson:"message" json:"message"`
 	Details string `bson:"details" json:"details"`
+}
+
+type Pagination struct {
+	TotalRecordsCount *int    `bson:"total_records_count" json:"total_records_count"`
+	PaginatedQuery    *string `bson:"paginated_query" json:"paginated_query"`
 }
 
 func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query) *Message {

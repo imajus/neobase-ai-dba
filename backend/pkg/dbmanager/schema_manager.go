@@ -42,7 +42,8 @@ type TableSchema struct {
 	ForeignKeys map[string]ForeignKey     `json:"foreign_keys"`
 	Constraints map[string]ConstraintInfo `json:"constraints"`
 	Comment     string                    `json:"comment,omitempty"`
-	Checksum    string                    `json:"checksum"` // For individual table changes
+	Checksum    string                    `json:"checksum"`
+	RowCount    int64                     `json:"row_count"`
 }
 
 type ColumnInfo struct {
@@ -114,6 +115,7 @@ type LLMTableInfo struct {
 	Description string          `json:"description"`
 	Columns     []LLMColumnInfo `json:"columns"`
 	PrimaryKey  string          `json:"primary_key,omitempty"`
+	RowCount    int64           `json:"row_count"`
 }
 
 type LLMColumnInfo struct {
@@ -269,10 +271,14 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 	return diff, true, nil
 }
 
-// Helper method to compare schemas and generate diff
+// Update compareSchemas to ignore row counts
 func (sm *SchemaManager) compareSchemas(old, new *SchemaInfo) *SchemaDiff {
-	if old == nil || new == nil {
-		return nil
+	if old == nil {
+		return &SchemaDiff{
+			IsFirstTime: true,
+			FullSchema:  new,
+			UpdatedAt:   time.Now(),
+		}
 	}
 
 	diff := &SchemaDiff{
@@ -283,40 +289,30 @@ func (sm *SchemaManager) compareSchemas(old, new *SchemaInfo) *SchemaDiff {
 	}
 
 	// Compare tables
-	for tableName := range new.Tables {
-		if _, exists := old.Tables[tableName]; !exists {
+	for tableName, newTable := range new.Tables {
+		if oldTable, exists := old.Tables[tableName]; !exists {
 			diff.AddedTables = append(diff.AddedTables, tableName)
+		} else {
+			// Compare table structure (ignoring row count)
+			tableDiff := compareTableSchemas(oldTable, newTable)
+			if !tableDiff.isEmpty() {
+				diff.ModifiedTables[tableName] = tableDiff
+			}
 		}
 	}
 
+	// Check for removed tables
 	for tableName := range old.Tables {
 		if _, exists := new.Tables[tableName]; !exists {
 			diff.RemovedTables = append(diff.RemovedTables, tableName)
 		}
 	}
 
-	// Compare table contents
-	for tableName, newTable := range new.Tables {
-		oldTable, exists := old.Tables[tableName]
-		if !exists {
-			continue
-		}
-
-		tableDiff := sm.compareTableSchemas(oldTable, newTable)
-		if !tableDiff.isEmpty() {
-			diff.ModifiedTables[tableName] = tableDiff
-		}
-	}
-
-	if len(diff.AddedTables) == 0 && len(diff.RemovedTables) == 0 && len(diff.ModifiedTables) == 0 {
-		return nil
-	}
-
 	return diff
 }
 
-// Helper method to compare table schemas
-func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
+// Update compareTableSchemas to ignore row count
+func compareTableSchemas(old, new TableSchema) TableDiff {
 	diff := TableDiff{
 		AddedColumns:    make([]string, 0),
 		RemovedColumns:  make([]string, 0),
@@ -327,10 +323,12 @@ func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
 		RemovedFKs:      make([]string, 0),
 	}
 
-	// Check for new columns
-	for colName := range new.Columns {
-		if _, exists := old.Columns[colName]; !exists {
+	// Compare columns
+	for colName, newCol := range new.Columns {
+		if oldCol, exists := old.Columns[colName]; !exists {
 			diff.AddedColumns = append(diff.AddedColumns, colName)
+		} else if !compareColumns(oldCol, newCol) {
+			diff.ModifiedColumns = append(diff.ModifiedColumns, colName)
 		}
 	}
 
@@ -341,16 +339,7 @@ func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
 		}
 	}
 
-	// Check for modified columns (changes in properties)
-	for colName, newCol := range new.Columns {
-		if oldCol, exists := old.Columns[colName]; exists {
-			if !columnsEqual(oldCol, newCol) {
-				diff.ModifiedColumns = append(diff.ModifiedColumns, colName)
-			}
-		}
-	}
-
-	// Compare indexes
+	// Compare indexes (unchanged)
 	for idxName := range new.Indexes {
 		if _, exists := old.Indexes[idxName]; !exists {
 			diff.AddedIndexes = append(diff.AddedIndexes, idxName)
@@ -363,7 +352,7 @@ func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
 		}
 	}
 
-	// Compare foreign keys
+	// Compare foreign keys (unchanged)
 	for fkName := range new.ForeignKeys {
 		if _, exists := old.ForeignKeys[fkName]; !exists {
 			diff.AddedFKs = append(diff.AddedFKs, fkName)
@@ -377,6 +366,15 @@ func (sm *SchemaManager) compareTableSchemas(old, new TableSchema) TableDiff {
 	}
 
 	return diff
+}
+
+// Helper function to compare columns
+func compareColumns(old, new ColumnInfo) bool {
+	return old.Name == new.Name &&
+		old.Type == new.Type &&
+		old.IsNullable == new.IsNullable &&
+		old.DefaultValue == new.DefaultValue &&
+		old.Comment == new.Comment
 }
 
 // Update storeSchema to properly set checksums
@@ -975,6 +973,7 @@ func (sm *SchemaManager) createLLMSchema(schema *SchemaInfo, dbType string) *LLM
 			Name:        tableName,
 			Description: table.Comment,
 			Columns:     make([]LLMColumnInfo, 0),
+			RowCount:    table.RowCount,
 		}
 
 		// Convert columns with simplified types

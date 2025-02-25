@@ -44,6 +44,7 @@ type PostgresTable struct {
 	Columns     map[string]PostgresColumn
 	PrimaryKey  []string
 	ForeignKeys map[string]PostgresForeignKey
+	RowCount    int64
 }
 
 type PostgresColumn struct {
@@ -499,80 +500,104 @@ func processRows(rows *sql.Rows, startTime time.Time) ([]map[string]interface{},
 	return results, nil
 }
 
-// Update GetSchema to include foreign keys
+// Update GetSchema method to include row counts
 func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaInfo, error) {
 	sqlDB := db.GetDB()
 	if sqlDB == nil {
 		return nil, fmt.Errorf("failed to get SQL DB connection")
 	}
 
-	// Get columns
-	columnsQuery := `
+	// Get table information
+	tablesQuery := `
 		SELECT 
-			c.table_name,
+			t.table_name,
 			c.column_name,
 			c.data_type,
 			c.is_nullable,
 			c.column_default,
-			pd.description
-		FROM information_schema.columns c
-		LEFT JOIN pg_description pd ON 
-			pd.objoid = (quote_ident(c.table_name)::regclass)::oid AND 
-			pd.objsubid = c.ordinal_position
-		WHERE c.table_schema = 'public'
-		ORDER BY c.table_name, c.ordinal_position;
+			col_description((t.table_schema || '.' || t.table_name)::regclass::oid, c.ordinal_position) as column_comment,
+			s.n_live_tup as row_count
+		FROM information_schema.tables t
+		JOIN information_schema.columns c ON t.table_name = c.table_name
+		LEFT JOIN pg_stat_user_tables s ON t.table_name = s.relname
+		WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+		ORDER BY t.table_name, c.ordinal_position;
 	`
 
-	rows, err := sqlDB.QueryContext(ctx, columnsQuery)
+	rows, err := sqlDB.QueryContext(ctx, tablesQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch columns: %v", err)
+		return nil, fmt.Errorf("failed to query tables: %v", err)
 	}
 	defer rows.Close()
 
-	// Build schema
-	schema := &SchemaInfo{
-		Tables: make(map[string]TableSchema),
-	}
-
-	// Process columns
+	tables := make(map[string]PostgresTable)
 	for rows.Next() {
-		var col columnInfo
-		if err := rows.Scan(
-			&col.TableName,
-			&col.ColumnName,
-			&col.DataType,
-			&col.IsNullable,
-			&col.ColumnDefault,
-			&col.Description,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan column: %v", err)
+		var (
+			tableName, columnName, dataType, isNullable string
+			columnDefault, columnComment                sql.NullString
+			rowCount                                    int64
+		)
+
+		if err := rows.Scan(&tableName, &columnName, &dataType, &isNullable, &columnDefault, &columnComment, &rowCount); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		table, exists := schema.Tables[col.TableName]
-		if !exists {
-			table = TableSchema{
-				Name:        col.TableName,
-				Columns:     make(map[string]ColumnInfo),
-				Indexes:     make(map[string]IndexInfo),
-				ForeignKeys: make(map[string]ForeignKey),
-				Constraints: make(map[string]ConstraintInfo),
+		// Initialize table if not exists
+		if _, exists := tables[tableName]; !exists {
+			tables[tableName] = PostgresTable{
+				Name:        tableName,
+				Columns:     make(map[string]PostgresColumn),
+				PrimaryKey:  make([]string, 0),
+				ForeignKeys: make(map[string]PostgresForeignKey),
+				RowCount:    rowCount,
 			}
 		}
 
-		// Add column
-		table.Columns[col.ColumnName] = ColumnInfo{
-			Name:         col.ColumnName,
-			Type:         col.DataType,
-			IsNullable:   col.IsNullable == "YES",
-			DefaultValue: col.ColumnDefault.String,
-			Comment:      col.Description.String,
+		// Add column information
+		table := tables[tableName]
+		table.Columns[columnName] = PostgresColumn{
+			Name:         columnName,
+			Type:         dataType,
+			IsNullable:   isNullable == "YES",
+			DefaultValue: columnDefault.String,
+			Comment:      columnComment.String,
+		}
+		tables[tableName] = table
+	}
+
+	// Get primary keys
+	pkQuery := `
+		SELECT 
+			tc.table_name, 
+			kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu 
+			ON tc.constraint_name = kcu.constraint_name
+		WHERE tc.table_schema = 'public' 
+			AND tc.constraint_type = 'PRIMARY KEY'
+		ORDER BY tc.table_name, kcu.ordinal_position;
+	`
+
+	pkRows, err := sqlDB.QueryContext(ctx, pkQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query primary keys: %v", err)
+	}
+	defer pkRows.Close()
+
+	for pkRows.Next() {
+		var tableName, columnName string
+		if err := pkRows.Scan(&tableName, &columnName); err != nil {
+			return nil, fmt.Errorf("failed to scan primary key row: %v", err)
 		}
 
-		schema.Tables[col.TableName] = table
+		if table, exists := tables[tableName]; exists {
+			table.PrimaryKey = append(table.PrimaryKey, columnName)
+			tables[tableName] = table
+		}
 	}
 
 	// Get essential schema elements
-	tables, err := d.getTables(ctx, sqlDB)
+	tables, err = d.getTables(ctx, sqlDB)
 	if err != nil {
 		return nil, err
 	}
@@ -603,6 +628,73 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 
 	// Convert to generic SchemaInfo
 	return d.convertToSchemaInfo(tables, indexes, views), nil
+}
+
+// Update the function signature to include indexes
+func convertTablesToSchemaFormat(tables map[string]PostgresTable, indexes map[string][]PostgresIndex) map[string]TableSchema {
+	result := make(map[string]TableSchema)
+	for name, table := range tables {
+		schema := TableSchema{
+			Name:        name,
+			Columns:     make(map[string]ColumnInfo),
+			Indexes:     make(map[string]IndexInfo),
+			ForeignKeys: make(map[string]ForeignKey),
+			Constraints: make(map[string]ConstraintInfo),
+			RowCount:    table.RowCount,
+		}
+
+		// Convert columns
+		for colName, col := range table.Columns {
+			schema.Columns[colName] = col.toColumnInfo()
+		}
+
+		// Convert indexes
+		if tableIndexes, ok := indexes[name]; ok {
+			for _, idx := range tableIndexes {
+				schema.Indexes[idx.Name] = IndexInfo{
+					Name:     idx.Name,
+					Columns:  idx.Columns,
+					IsUnique: idx.IsUnique,
+				}
+			}
+		}
+
+		// Convert foreign keys
+		if table.ForeignKeys != nil {
+			for fkName, fk := range table.ForeignKeys {
+				schema.ForeignKeys[fkName] = ForeignKey{
+					Name:       fk.Name,
+					ColumnName: fk.Column,
+					RefTable:   fk.RefTable,
+					RefColumn:  fk.RefColumn,
+					OnDelete:   fk.OnDelete,
+					OnUpdate:   fk.OnUpdate,
+				}
+			}
+		}
+
+		result[name] = schema
+	}
+	return result
+}
+
+// Update the convertToSchemaInfo function to pass indexes
+func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, indexes map[string][]PostgresIndex, views map[string]PostgresView) *SchemaInfo {
+	schema := &SchemaInfo{
+		Tables:    convertTablesToSchemaFormat(tables, indexes),
+		Views:     make(map[string]ViewSchema),
+		UpdatedAt: time.Now(),
+	}
+
+	// Convert views
+	for viewName, view := range views {
+		schema.Views[viewName] = ViewSchema{
+			Name:       viewName,
+			Definition: view.Definition,
+		}
+	}
+
+	return schema
 }
 
 // Update the column fetching query and struct
@@ -785,68 +877,6 @@ func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[st
 	}
 
 	return fks, nil
-}
-
-// Update convertToSchemaInfo to use the conversion method
-func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, indexes map[string][]PostgresIndex, views map[string]PostgresView) *SchemaInfo {
-	schema := &SchemaInfo{
-		Tables:    make(map[string]TableSchema),
-		Views:     make(map[string]ViewSchema),
-		UpdatedAt: time.Now(),
-	}
-
-	// Convert tables and their components
-	for tableName, table := range tables {
-		tableSchema := TableSchema{
-			Name:        tableName,
-			Columns:     make(map[string]ColumnInfo),
-			Indexes:     make(map[string]IndexInfo),
-			ForeignKeys: make(map[string]ForeignKey),
-			Constraints: make(map[string]ConstraintInfo),
-		}
-
-		// Convert columns using the conversion method
-		for colName, col := range table.Columns {
-			tableSchema.Columns[colName] = col.toColumnInfo()
-		}
-
-		// Convert indexes
-		if tableIndexes, ok := indexes[tableName]; ok {
-			for _, idx := range tableIndexes {
-				tableSchema.Indexes[idx.Name] = IndexInfo{
-					Name:     idx.Name,
-					Columns:  idx.Columns,
-					IsUnique: idx.IsUnique,
-				}
-			}
-		}
-
-		// Convert foreign keys
-		if table.ForeignKeys != nil {
-			for fkName, fk := range table.ForeignKeys {
-				tableSchema.ForeignKeys[fkName] = ForeignKey{
-					Name:       fk.Name,
-					ColumnName: fk.Column,
-					RefTable:   fk.RefTable,
-					RefColumn:  fk.RefColumn,
-					OnDelete:   fk.OnDelete,
-					OnUpdate:   fk.OnUpdate,
-				}
-			}
-		}
-
-		schema.Tables[tableName] = tableSchema
-	}
-
-	// Convert views
-	for viewName, view := range views {
-		schema.Views[viewName] = ViewSchema{
-			Name:       viewName,
-			Definition: view.Definition,
-		}
-	}
-
-	return schema
 }
 
 // Add GetTableChecksum method
