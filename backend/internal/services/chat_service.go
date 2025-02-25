@@ -1253,6 +1253,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	query.ExecutionTime = &result.ExecutionTime
 	query.ExecutionResult = &result.ResultJSON
 	if totalRecordsCount != nil {
+		if query.Pagination == nil {
+			query.Pagination = &models.Pagination{}
+		}
 		query.Pagination.TotalRecordsCount = totalRecordsCount
 	}
 	if result.Error != nil {
@@ -1274,6 +1277,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
 					if totalRecordsCount != nil {
+						if (*msg.Queries)[i].Pagination == nil {
+							(*msg.Queries)[i].Pagination = &models.Pagination{}
+						}
 						(*msg.Queries)[i].Pagination.TotalRecordsCount = totalRecordsCount
 					}
 					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON

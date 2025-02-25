@@ -42,6 +42,7 @@ interface MessageTileProps {
     setQueryStates: React.Dispatch<React.SetStateAction<Record<string, QueryState>>>;
     queryTimeouts: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
     isFirstMessage?: boolean;
+    onQueryUpdate: (callback: () => void) => void;
 }
 
 const toastStyle = {
@@ -81,7 +82,8 @@ export default function MessageTile({
     setQueryStates,
     queryTimeouts,
     checkSSEConnection,
-    isFirstMessage
+    isFirstMessage,
+    onQueryUpdate
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -203,10 +205,12 @@ export default function MessageTile({
         // Create new AbortController for this query
         abortControllerRef.current[queryId] = new AbortController();
 
-        setQueryStates(prev => ({
-            ...prev,
-            [queryId]: { isExecuting: true, isExample: false }
-        }));
+        onQueryUpdate(() => {
+            setQueryStates(prev => ({
+                ...prev,
+                [queryId]: { isExecuting: true, isExample: false }
+            }));
+        });
 
         try {
             await checkSSEConnection();
@@ -222,17 +226,19 @@ export default function MessageTile({
             if (message.queries) {
                 const updatedQuery = message.queries.find(q => q.id === queryId);
                 if (updatedQuery) {
-                    setQueryResults(prev => ({
-                        ...prev,
-                        [queryId]: {
-                            data: updatedQuery.execution_result || [],
-                            loading: false,
-                            error: null,
-                            currentPage: 1,
-                            pageSize: 15,
-                            totalRecords: updatedQuery.pagination?.total_records_count || null
-                        }
-                    }));
+                    onQueryUpdate(() => {
+                        setQueryResults(prev => ({
+                            ...prev,
+                            [queryId]: {
+                                data: updatedQuery.execution_result || [],
+                                loading: false,
+                                error: null,
+                                currentPage: 1,
+                                pageSize: 15,
+                                totalRecords: updatedQuery.pagination?.total_records_count || null
+                            }
+                        }));
+                    });
                 }
             }
 
@@ -240,8 +246,10 @@ export default function MessageTile({
             if (message.queries) {
                 const updatedQuery = message.queries.find(q => q.id === queryId);
                 if (updatedQuery) {
-                    updatedQuery.is_executed = true;
-                    updatedQuery.is_rolled_back = false;
+                    onQueryUpdate(() => {
+                        updatedQuery.is_executed = true;
+                        updatedQuery.is_rolled_back = false;
+                    });
                 }
             }
         } catch (error: any) {
@@ -251,10 +259,12 @@ export default function MessageTile({
                 toast.error("Query execution failed: " + error);
             }
         } finally {
-            setQueryStates(prev => ({
-                ...prev,
-                [queryId]: { isExecuting: false, isExample: !query.is_executed }
-            }));
+            onQueryUpdate(() => {
+                setQueryStates(prev => ({
+                    ...prev,
+                    [queryId]: { isExecuting: false, isExample: !query.is_executed }
+                }));
+            });
             // Clean up abort controller
             delete abortControllerRef.current[queryId];
         }
@@ -265,31 +275,34 @@ export default function MessageTile({
         if (queryIndex === -1) return;
 
         try {
-            setQueryStates(prev => ({
-                ...prev,
-                [queryId]: { isExecuting: true, isExample: true }
-            }));
+            onQueryUpdate(() => {
+                setQueryStates(prev => ({
+                    ...prev,
+                    [queryId]: { isExecuting: true, isExample: true }
+                }));
+            });
 
             await checkSSEConnection();
             const rolledBack = await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '', abortControllerRef.current[queryId]);
             console.log('rolledBack', rolledBack);
 
             if (rolledBack) {
-                // Update query state
-                if (message.queries) {
-                    message.queries[queryIndex].is_rolled_back = true;
-                }
+                onQueryUpdate(() => {
+                    if (message.queries) {
+                        message.queries[queryIndex].is_rolled_back = true;
+                    }
+                });
             }
-
         } catch (error: any) {
             toast.error(error.message);
         } finally {
-            setQueryStates(prev => ({
-                ...prev,
-                [queryId]: { isExecuting: false, isExample: true }
-            }));
+            onQueryUpdate(() => {
+                setQueryStates(prev => ({
+                    ...prev,
+                    [queryId]: { isExecuting: false, isExample: true }
+                }));
+            });
             setRollbackState({ show: false, queryId: null });
-            // delete abort controller
             delete abortControllerRef.current[queryId];
         }
     };
@@ -360,7 +373,7 @@ export default function MessageTile({
         return (
             <div className="query-results">
                 {totalRecords > 50 && (
-                    <div className="text-gray-300 mb-2">
+                    <div className="text-gray-300 mb-4">
                         The result contains total <b className="text-yellow-500">{totalRecords}</b> records.
                     </div>
                 )}
@@ -452,6 +465,28 @@ export default function MessageTile({
         return data.slice(startIndex, startIndex + pageSize);
     };
 
+    const preserveScroll = (callback: () => void) => {
+        // Find the closest scrollable container
+        const scrollContainer = document.querySelector('[data-chat-container]');
+        if (!scrollContainer) return callback();
+
+        const oldHeight = scrollContainer.scrollHeight;
+        const oldScroll = scrollContainer.scrollTop;
+        const wasAtBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 10;
+
+        callback();
+
+        requestAnimationFrame(() => {
+            if (wasAtBottom) {
+                scrollContainer.scrollTop = scrollContainer.scrollHeight;
+            } else {
+                const newHeight = scrollContainer.scrollHeight;
+                const heightDiff = newHeight - oldHeight;
+                scrollContainer.scrollTop = oldScroll + heightDiff;
+            }
+        });
+    };
+
     const handlePageChange = useCallback(async (queryId: string, page: number) => {
         const query = message.queries?.find(q => q.id === queryId);
         if (!query) return;
@@ -470,7 +505,7 @@ export default function MessageTile({
         }));
 
         try {
-            // Handle local pagination for first 50 records
+            // Wrap state updates in preserveScroll
             if (newOffset < 50 && query.execution_result) {
                 const resultArray = parseResults(query.execution_result);
                 const totalRecords = query.pagination?.total_records_count || resultArray.length;
@@ -486,34 +521,37 @@ export default function MessageTile({
                     totalRecords
                 };
 
-                setQueryResults(prev => ({
-                    ...prev,
-                    [queryId]: {
-                        ...prev[queryId],
-                        loading: false,
-                        currentPage: page,
-                        data: pageData,
-                        error: null,
-                        totalRecords
-                    }
-                }));
+                onQueryUpdate(() => {
+                    setQueryResults(prev => ({
+                        ...prev,
+                        [queryId]: {
+                            ...prev[queryId],
+                            loading: false,
+                            currentPage: page,
+                            data: pageData,
+                            error: null,
+                            totalRecords
+                        }
+                    }));
+                });
                 return;
             }
 
-            // Check if we've already cached this page
             if (pageDataCacheRef.current[queryId][page]) {
                 const cachedData = pageDataCacheRef.current[queryId][page];
-                setQueryResults(prev => ({
-                    ...prev,
-                    [queryId]: {
-                        ...prev[queryId],
-                        loading: false,
-                        currentPage: page,
-                        data: cachedData.data,
-                        error: null,
-                        totalRecords: cachedData.totalRecords
-                    }
-                }));
+                onQueryUpdate(() => {
+                    setQueryResults(prev => ({
+                        ...prev,
+                        [queryId]: {
+                            ...prev[queryId],
+                            loading: false,
+                            currentPage: page,
+                            data: cachedData.data,
+                            error: null,
+                            totalRecords: cachedData.totalRecords
+                        }
+                    }));
+                });
                 return;
             }
 
@@ -548,18 +586,20 @@ export default function MessageTile({
                 totalRecords
             };
 
-            // Update the data in state with the current page data
-            setQueryResults(prev => ({
-                ...prev,
-                [queryId]: {
-                    ...prev[queryId],
-                    loading: false,
-                    currentPage: page,
-                    data: pageData,
-                    error: null,
-                    totalRecords
-                }
-            }));
+            // Wrap the final state update
+            onQueryUpdate(() => {
+                setQueryResults(prev => ({
+                    ...prev,
+                    [queryId]: {
+                        ...prev[queryId],
+                        loading: false,
+                        currentPage: page,
+                        data: pageData,
+                        error: null,
+                        totalRecords
+                    }
+                }));
+            });
 
         } catch (error: any) {
             console.error('Error fetching results:', error);
@@ -573,7 +613,7 @@ export default function MessageTile({
                 }
             }));
         }
-    }, [message.queries, queryResults, streamId, chatId, message.id]);
+    }, [message.queries, queryResults, streamId, chatId, message.id, onQueryUpdate]);
 
     // Update parseResults to better handle the API response format
     const parseResults = (result: any): any[] => {
@@ -600,7 +640,6 @@ export default function MessageTile({
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
         const isCurrentlyStreaming = !isMessageStreaming && streamingQueryIndex === index;
 
-        console.log('query.execution_result', query.execution_result);
         const shouldShowRollback = query.can_rollback &&
             query.is_executed &&
             !query.is_rolled_back;
@@ -638,10 +677,12 @@ export default function MessageTile({
                                         }
 
                                         // Update state
-                                        setQueryStates(prev => ({
-                                            ...prev,
-                                            [queryId]: { isExecuting: false, isExample: !query.is_executed }
-                                        }));
+                                        onQueryUpdate(() => {
+                                            setQueryStates(prev => ({
+                                                ...prev,
+                                                [queryId]: { isExecuting: false, isExample: !query.is_executed }
+                                            }));
+                                        });
 
                                         setTimeout(() => {
                                             window.scrollTo(window.scrollX, window.scrollY);
@@ -799,10 +840,12 @@ export default function MessageTile({
 
                                                                 setRollbackState({ show: false, queryId: null });
                                                                 // Update state
-                                                                setQueryStates(prev => ({
-                                                                    ...prev,
-                                                                    [queryId]: { isExecuting: false, isExample: !query.is_executed }
-                                                                }));
+                                                                onQueryUpdate(() => {
+                                                                    setQueryStates(prev => ({
+                                                                        ...prev,
+                                                                        [queryId]: { isExecuting: false, isExample: !query.is_executed }
+                                                                    }));
+                                                                });
 
                                                                 setTimeout(() => {
                                                                     window.scrollTo(window.scrollX, window.scrollY);

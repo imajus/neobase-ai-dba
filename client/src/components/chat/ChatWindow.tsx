@@ -37,6 +37,8 @@ interface QueryState {
   isExample: boolean;
 }
 
+type UpdateSource = 'api' | 'new' | 'query' | null;
+
 const formatMessageTime = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleTimeString('en-US', {
@@ -120,12 +122,12 @@ export default function ChatWindow({
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const pageSize = 40; // Messages per page
+  const pageSize = 20; // Messages per page
   const loadingRef = useRef<HTMLDivElement>(null);
   const [isMessageSending, setIsMessageSending] = useState(false);
   const prevMessageCountRef = useRef(messages.length);
   const isLoadingOldMessages = useRef(false);
-  const messageUpdateSource = useRef<'api' | 'new' | null>(null);
+  const messageUpdateSource = useRef<UpdateSource>(null);
   const isInitialLoad = useRef(true);
 
   useEffect(() => {
@@ -153,23 +155,47 @@ export default function ChatWindow({
     });
   };
 
+  const preserveScroll = (chatContainer: HTMLDivElement | null, callback: () => void) => {
+    if (!chatContainer) return;
+
+    // Store current scroll position and height
+    const oldHeight = chatContainer.scrollHeight;
+    const oldScroll = chatContainer.scrollTop;
+    const wasAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 10;
+
+    // Execute the state update
+    callback();
+
+    // After React has updated the DOM
+    requestAnimationFrame(() => {
+      if (wasAtBottom) {
+        // If we were at bottom, keep it at bottom
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      } else {
+        // Otherwise maintain relative scroll position
+        const newHeight = chatContainer.scrollHeight;
+        const heightDiff = newHeight - oldHeight;
+        chatContainer.scrollTop = oldScroll + heightDiff;
+      }
+    });
+  };
+
   useEffect(() => {
     const chatContainer = chatContainerRef.current;
     if (!chatContainer) return;
 
     const observer = new MutationObserver(() => {
       const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-      // Consider a small buffer (e.g., 10px) to account for small rounding differences
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
 
-      // Only show scroll button if we're not at the bottom
+      // Show scroll button if not at bottom
       setShowScrollButton(!isAtBottom);
 
-      // Auto scroll if we're near bottom or there's a streaming message
-      if ((isAtBottom || messages.some(m => m.is_streaming))
-        && !isLoadingOldMessages.current
-        && !isLoadingMessages
-        && messageUpdateSource.current !== 'api') {
+      // Only scroll for new messages or streaming, not for query operations
+      if (!isLoadingOldMessages.current &&
+        !isLoadingMessages &&
+        messageUpdateSource.current === 'new' &&
+        (isAtBottom || messages.some(m => m.is_streaming))) {
         scrollToBottom('mutation-observer');
       }
     });
@@ -341,33 +367,22 @@ export default function ChatWindow({
         console.log('Received messages:', newMessages.length, 'for page:', page);
 
         if (page === 1) {
-          // For initial load, just set messages and scroll to bottom
+          // For initial load, set messages and scroll to bottom
           setMessages(newMessages);
-          requestAnimationFrame(() => {
-            scrollToBottom('initial-load');
-          });
-        } else {
-          // For pagination, preserve scroll position
-          const container = chatContainerRef.current;
-          if (container) {
-            const oldHeight = container.scrollHeight;
-            const oldScroll = container.scrollTop;
-
-            setMessages(prev => [...newMessages, ...prev]);
-
-            // After React has updated the DOM
+          if (isInitialLoad.current) {
             requestAnimationFrame(() => {
-              // Calculate how much new content was added
-              const newHeight = container.scrollHeight;
-              const heightDiff = newHeight - oldHeight;
-              // Adjust scroll position to show same content as before
-              container.scrollTop = oldScroll + heightDiff;
+              scrollToBottom('initial-load');
+              isInitialLoad.current = false;
             });
           }
+        } else {
+          // For pagination, preserve scroll position
+          preserveScroll(chatContainerRef.current, () => {
+            setMessages(prev => [...newMessages, ...prev]);
+          });
         }
 
         setHasMore(newMessages.length === pageSize);
-        if (page === 1) isInitialLoad.current = false;
       }
     } catch (error) {
       console.error('Failed to fetch messages:', error);
@@ -421,29 +436,40 @@ export default function ChatWindow({
 
   // Update the message update effect
   useEffect(() => {
-    // Skip effect if source is API or loading old messages
-    if (messageUpdateSource.current === 'api' || isLoadingOldMessages.current) {
-      console.log('Skipping scroll - API/pagination update');
+    // Skip effect if source is API, query operations, or loading old messages
+    if (messageUpdateSource.current === 'api' ||
+      messageUpdateSource.current === 'query' ||
+      isLoadingOldMessages.current) {
+      console.log('Skipping scroll - API/query/pagination update');
       return;
     }
 
-    // Only scroll for new messages or streaming
+    // Only scroll for new user messages or initial streaming
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.is_streaming || lastMessage?.type === 'user') {
-      console.log('Scrolling - new message/streaming');
+    if ((lastMessage?.type === 'user' && messageUpdateSource.current === 'new') ||
+      (lastMessage?.is_streaming && !lastMessage?.queries?.length)) {
+      console.log('Scrolling - new user message/initial streaming');
       scrollToBottom('new-message');
     }
   }, [messages]);
 
-  // Update the handleMessageSubmit function
+  // Update handleMessageSubmit to be more explicit
   const handleMessageSubmit = async (content: string) => {
     try {
       messageUpdateSource.current = 'new';
       await onSendMessage(content);
-      scrollToBottom('message-submit');
     } finally {
       messageUpdateSource.current = null;
     }
+  };
+
+  // Add this function to handle query-related updates
+  const handleQueryUpdate = (callback: () => void) => {
+    messageUpdateSource.current = 'query';
+    preserveScroll(chatContainerRef.current, callback);
+    setTimeout(() => {
+      messageUpdateSource.current = null;
+    }, 100);
   };
 
   return (
@@ -461,6 +487,7 @@ export default function ChatWindow({
 
       <div
         ref={chatContainerRef}
+        data-chat-container
         className="
           flex-1 
           overflow-y-auto 
@@ -537,6 +564,7 @@ export default function ChatWindow({
                   setQueryStates={setQueryStates}
                   queryTimeouts={queryTimeouts}
                   isFirstMessage={index === 0}
+                  onQueryUpdate={handleQueryUpdate}
                 />
               ))}
             </div>
