@@ -30,7 +30,7 @@ const PostgresLLMResponseSchema = `{
                         "type": "string",
                         "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
                     },
-                       "pagination": {
+                    "pagination": {
                         "type": "object",
                         "required": [
                             "paginatedQuery"
@@ -40,7 +40,7 @@ const PostgresLLMResponseSchema = `{
                                 "type": "string",
                                 "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
                             }
-                        },
+                        }
                     },
                     "isCritical": {
                         "type": "boolean",

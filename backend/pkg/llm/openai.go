@@ -108,6 +108,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	// Call OpenAI API
 	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
+		log.Printf("GenerateResponse -> err: %v", err)
 		return "", fmt.Errorf("OpenAI API error: %v", err)
 	}
 

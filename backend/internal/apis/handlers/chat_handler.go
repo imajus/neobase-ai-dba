@@ -670,5 +670,8 @@ func (h *ChatHandler) GetQueryResults(c *gin.Context) {
 		return
 	}
 
-	c.JSON(int(status), response)
+	c.JSON(int(status), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
 }

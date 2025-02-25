@@ -738,7 +738,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 	m.executionMu.Lock()
 
 	// Create cancellable context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute timeout
+	execCtx, cancel := context.WithTimeout(ctx, 1*time.Minute) // 1 minute timeout
 
 	// Track execution
 	execution := &QueryExecution{

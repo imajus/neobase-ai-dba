@@ -37,6 +37,11 @@ type Query struct {
 	Tables                 *string                `json:"tables,omitempty"`
 	RollbackQuery          *string                `json:"rollback_query,omitempty"`
 	RollbackDependentQuery *string                `json:"rollback_dependent_query,omitempty"`
+	Pagination             *Pagination            `json:"pagination,omitempty"`
+}
+
+type Pagination struct {
+	TotalRecordsCount int `json:"total_records_count"`
 }
 
 type QueryError struct {
@@ -81,6 +86,16 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			}
 		}
 
+		var pagination *Pagination
+		if query.Pagination != nil {
+			totalCount := 0
+			if query.Pagination.TotalRecordsCount != nil {
+				totalCount = *query.Pagination.TotalRecordsCount
+			}
+			pagination = &Pagination{
+				TotalRecordsCount: totalCount,
+			}
+		}
 		log.Printf("ToQueryDto -> final exampleResult: %v", exampleResult)
 		queriesDto[i] = Query{
 			ID:                     query.ID.Hex(),
@@ -99,6 +114,7 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			Tables:                 query.Tables,
 			RollbackQuery:          query.RollbackQuery,
 			RollbackDependentQuery: query.RollbackDependentQuery,
+			Pagination:             pagination,
 		}
 	}
 	return &queriesDto

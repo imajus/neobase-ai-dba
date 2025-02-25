@@ -34,6 +34,10 @@ export interface BackendMessage {
         example_result: any[];
         execution_result: any[];
         query_type: string;
+        pagination?: {
+            total_records_count?: number;
+            paginated_query?: string;
+        };
         tables: string;
         rollback_query: string;
     }[];

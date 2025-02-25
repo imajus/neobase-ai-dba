@@ -1,5 +1,6 @@
-import { AlertCircle, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
 import chatService from '../../services/chatService';
@@ -11,6 +12,20 @@ import { Message, QueryResult } from './types';
 interface QueryState {
     isExecuting: boolean;
     isExample: boolean;
+}
+
+interface QueryResultState {
+    data: any;
+    loading: boolean;
+    error: string | null;
+    currentPage: number;
+    pageSize: number;
+    totalRecords: number | null;
+}
+
+interface PageData {
+    data: any[];
+    totalRecords: number;
 }
 
 interface MessageTileProps {
@@ -82,6 +97,8 @@ export default function MessageTile({
     const [currentDescription, setCurrentDescription] = useState('');
     const [currentQuery, setCurrentQuery] = useState('');
     const abortControllerRef = useRef<Record<string, AbortController>>({});
+    const [queryResults, setQueryResults] = useState<Record<string, QueryResultState>>({});
+    const pageDataCacheRef = useRef<Record<string, Record<number, PageData>>>({});
 
     useEffect(() => {
         const streamQueries = async () => {
@@ -104,6 +121,54 @@ export default function MessageTile({
 
         streamQueries();
     }, [message.queries, message.is_streaming]);
+
+    useEffect(() => {
+        if (message.queries) {
+            const initialStates: Record<string, QueryResultState> = {};
+            message.queries.forEach(query => {
+                if (!queryResults[query.id]) {
+                    const resultArray = parseResults(query.execution_result || []);
+                    const totalRecords = query.pagination?.total_records_count || resultArray.length;
+
+                    // For initial data, always show first page (25 records)
+                    const pageData = resultArray.slice(0, 25);
+
+                    // Cache both pages from initial 50 records if available
+                    if (!pageDataCacheRef.current[query.id]) {
+                        pageDataCacheRef.current[query.id] = {};
+                    }
+
+                    if (resultArray.length > 0) {
+                        // Cache first page (1-25)
+                        pageDataCacheRef.current[query.id][1] = {
+                            data: resultArray.slice(0, 25),
+                            totalRecords
+                        };
+
+                        // Cache second page (26-50) if it exists
+                        if (resultArray.length > 25) {
+                            pageDataCacheRef.current[query.id][2] = {
+                                data: resultArray.slice(25, 50),
+                                totalRecords
+                            };
+                        }
+                    }
+
+                    initialStates[query.id] = {
+                        data: pageData,
+                        loading: false,
+                        error: null,
+                        currentPage: 1,
+                        pageSize: 25,
+                        totalRecords: totalRecords
+                    };
+                }
+            });
+            if (Object.keys(initialStates).length > 0) {
+                setQueryResults(prev => ({ ...prev, ...initialStates }));
+            }
+        }
+    }, [message.queries]);
 
     const handleCopyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -148,15 +213,36 @@ export default function MessageTile({
             await chatService.executeQuery(
                 chatId,
                 message.id,
-                query.id,
+                queryId,
                 streamId || '',
                 abortControllerRef.current[queryId]
             );
 
+            // Initialize query result state with page 1
+            if (message.queries) {
+                const updatedQuery = message.queries.find(q => q.id === queryId);
+                if (updatedQuery) {
+                    setQueryResults(prev => ({
+                        ...prev,
+                        [queryId]: {
+                            data: updatedQuery.execution_result || [],
+                            loading: false,
+                            error: null,
+                            currentPage: 1,
+                            pageSize: 15,
+                            totalRecords: updatedQuery.pagination?.total_records_count || null
+                        }
+                    }));
+                }
+            }
+
             // Update query state
             if (message.queries) {
-                message.queries.find(q => q.id === queryId)!.is_executed = true;
-                message.queries.find(q => q.id === queryId)!.is_rolled_back = false;
+                const updatedQuery = message.queries.find(q => q.id === queryId);
+                if (updatedQuery) {
+                    updatedQuery.is_executed = true;
+                    updatedQuery.is_rolled_back = false;
+                }
             }
         } catch (error: any) {
             // Only show error if not aborted
@@ -252,48 +338,260 @@ export default function MessageTile({
         );
     };
 
-    const renderQueryResult = (resultToShow: any) => {
-        console.log('resultToShow', resultToShow);
-        if (!resultToShow) {
+    const renderQueryResult = (result: any) => {
+        if (!result) {
             return <div className="text-gray-500">No results available</div>;
         }
 
-        // For SELECT queries with results
-        if (resultToShow.results || Array.isArray(resultToShow)) {
-            return renderTableView(resultToShow.results || resultToShow);
-        }
+        const query = message.queries?.find(q => q.execution_result === result);
+        if (!query) return null;
 
-        // For INSERT/UPDATE/DELETE queries
-        if (resultToShow.message || resultToShow.rowsAffected) {
-            return (
-                <div className="text-green-500">
-                    {resultToShow.message || `${resultToShow.rowsAffected} row(s) affected`}
-                </div>
-            );
-        }
+        const state = queryResults[query.id];
+        if (!state) return null;
 
-        // Fallback for other cases
+        // Parse the data - handle both array and object with results property
+        const parsedData = parseResults(state.data);
+        const totalRecords = state.totalRecords || parsedData.length;
+        const showPagination = totalRecords > state.pageSize;
+
+        // Don't slice the data here since we're getting paginated data from API
+        const currentPageData = parsedData;
+
         return (
-            <div className="w-full">
-                <pre className="overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(resultToShow, null, 2)}
-                </pre>
+            <div className="query-results">
+                {totalRecords > 50 && (
+                    <div className="text-gray-300 mb-2">
+                        The result contains total <b className="text-yellow-500">{totalRecords}</b> records.
+                    </div>
+                )}
+
+                {state.loading ? (
+                    <div className="flex justify-center p-4">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                    </div>
+                ) : (
+                    <>
+                        {state.error && (
+                            <div className="text-red-500 py-2 mb-2">
+                                Error in fetching results: {state.error}
+                            </div>
+                        )}
+
+                        {viewMode === 'table' ? (
+                            currentPageData.length > 0 ? (
+                                renderTableView(currentPageData)
+                            ) : (
+                                <div className="text-gray-500">No data to display</div>
+                            )
+                        ) : (
+                            <pre className="overflow-x-auto whitespace-pre-wrap">
+                                {JSON.stringify(currentPageData, null, 2)}
+                            </pre>
+                        )}
+
+                        {showPagination && (
+                            <div className="flex justify-center mt-6">
+                                <div className="flex items-center gap-4 bg-gray-800 rounded-lg p-1.5">
+                                    <button
+                                        onClick={() => handlePageChange(query.id, state.currentPage - 1)}
+                                        disabled={state.currentPage === 1}
+                                        className="
+                                            flex items-center justify-center
+                                            w-8 h-8
+                                            rounded
+                                            transition-colors
+                                            disabled:opacity-40
+                                            disabled:cursor-not-allowed
+                                            enabled:hover:bg-gray-700
+                                            enabled:active:bg-gray-600
+                                        "
+                                        title="Previous page"
+                                    >
+                                        <ArrowLeft className="w-4 h-4" />
+                                    </button>
+
+                                    <div className="flex items-center gap-2 text-sm font-mono">
+                                        <span className="text-gray-400">Page</span>
+                                        <span className="bg-gray-700 rounded px-2 py-1 min-w-[2rem] text-center">
+                                            {state.currentPage}
+                                        </span>
+                                        <span className="text-gray-400">of</span>
+                                        <span className="bg-gray-700 rounded px-2 py-1 min-w-[2rem] text-center">
+                                            {Math.max(1, Math.ceil(totalRecords / state.pageSize))}
+                                        </span>
+                                    </div>
+
+                                    <button
+                                        onClick={() => handlePageChange(query.id, state.currentPage + 1)}
+                                        disabled={state.currentPage >= Math.ceil(totalRecords / state.pageSize)}
+                                        className="
+                                            flex items-center justify-center
+                                            w-8 h-8
+                                            rounded
+                                            transition-colors
+                                            disabled:opacity-40
+                                            disabled:cursor-not-allowed
+                                            enabled:hover:bg-gray-700
+                                            enabled:active:bg-gray-600
+                                        "
+                                        title="Next page"
+                                    >
+                                        <ArrowRight className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         );
     };
 
-    // Add a helper function to remove duplicate queries
-    const removeDuplicateQueries = (query: string): string => {
-        // Split by semicolon and trim each query
-        const queries = query.split(';')
-            .map(q => q.trim())
-            .filter(q => q.length > 0);
+    const sliceIntoPages = (data: any[], pageSize: number, currentPage: number): any[] => {
+        const startIndex = (currentPage % 2 === 1) ? 0 : pageSize;
+        return data.slice(startIndex, startIndex + pageSize);
+    };
 
-        // Remove duplicates while preserving order
-        const uniqueQueries = Array.from(new Set(queries));
+    const handlePageChange = useCallback(async (queryId: string, page: number) => {
+        const query = message.queries?.find(q => q.id === queryId);
+        if (!query) return;
 
-        // Join back with semicolons
-        return uniqueQueries.join(';\n');
+        const state = queryResults[queryId];
+        const newOffset = (page - 1) * state.pageSize;
+
+        // Initialize page data cache for this query if it doesn't exist
+        if (!pageDataCacheRef.current[queryId]) {
+            pageDataCacheRef.current[queryId] = {};
+        }
+
+        setQueryResults(prev => ({
+            ...prev,
+            [queryId]: { ...prev[queryId], loading: true, error: null }
+        }));
+
+        try {
+            // Handle local pagination for first 50 records
+            if (newOffset < 50 && query.execution_result) {
+                const resultArray = parseResults(query.execution_result);
+                const totalRecords = query.pagination?.total_records_count || resultArray.length;
+
+                // Calculate the slice for current page
+                const startIndex = (page - 1) * state.pageSize;
+                const endIndex = Math.min(startIndex + state.pageSize, resultArray.length);
+                const pageData = resultArray.slice(startIndex, endIndex);
+
+                // Cache the page data
+                pageDataCacheRef.current[queryId][page] = {
+                    data: pageData,
+                    totalRecords
+                };
+
+                setQueryResults(prev => ({
+                    ...prev,
+                    [queryId]: {
+                        ...prev[queryId],
+                        loading: false,
+                        currentPage: page,
+                        data: pageData,
+                        error: null,
+                        totalRecords
+                    }
+                }));
+                return;
+            }
+
+            // Check if we've already cached this page
+            if (pageDataCacheRef.current[queryId][page]) {
+                const cachedData = pageDataCacheRef.current[queryId][page];
+                setQueryResults(prev => ({
+                    ...prev,
+                    [queryId]: {
+                        ...prev[queryId],
+                        loading: false,
+                        currentPage: page,
+                        data: cachedData.data,
+                        error: null,
+                        totalRecords: cachedData.totalRecords
+                    }
+                }));
+                return;
+            }
+
+            // For remote pagination - fetch new pages
+            const apiPage = Math.ceil(page / 2); // Convert UI page to API page (each API call gets 50 records)
+            const response = await axios.post(`${import.meta.env.VITE_API_URL}/chats/${chatId}/queries/results`, {
+                message_id: message.id,
+                query_id: queryId,
+                stream_id: streamId,
+                offset: (apiPage - 1) * 50 // Adjust offset to fetch 50 records at a time
+            });
+
+            // Get the results array from the response
+            const responseData = response.data.data;
+            const fullData = parseResults(responseData.execution_result);
+            const totalRecords = responseData.total_records_count;
+
+            // Slice the data into pages of 25
+            const pageData = sliceIntoPages(fullData, state.pageSize, page % 2);
+
+            // Cache both pages from the API response
+            const basePage = Math.floor((page - 1) / 2) * 2 + 1;
+            const firstHalf = sliceIntoPages(fullData, state.pageSize, 1);
+            const secondHalf = sliceIntoPages(fullData, state.pageSize, 2);
+
+            pageDataCacheRef.current[queryId][basePage] = {
+                data: firstHalf,
+                totalRecords
+            };
+            pageDataCacheRef.current[queryId][basePage + 1] = {
+                data: secondHalf,
+                totalRecords
+            };
+
+            // Update the data in state with the current page data
+            setQueryResults(prev => ({
+                ...prev,
+                [queryId]: {
+                    ...prev[queryId],
+                    loading: false,
+                    currentPage: page,
+                    data: pageData,
+                    error: null,
+                    totalRecords
+                }
+            }));
+
+        } catch (error: any) {
+            console.error('Error fetching results:', error);
+            setQueryResults(prev => ({
+                ...prev,
+                [queryId]: {
+                    ...prev[queryId],
+                    loading: false,
+                    error: error.response?.data?.error || 'Failed to fetch results',
+                    data: prev[queryId].data
+                }
+            }));
+        }
+    }, [message.queries, queryResults, streamId, chatId, message.id]);
+
+    // Update parseResults to better handle the API response format
+    const parseResults = (result: any): any[] => {
+        if (!result) return [];
+
+        if (Array.isArray(result)) {
+            return result;
+        }
+
+        if (result && typeof result === 'object') {
+            if ('results' in result) {
+                return result.results;
+            }
+            // If no results property found, try to convert the object itself to array
+            return [result];
+        }
+
+        return [result];
     };
 
     const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
@@ -532,24 +830,42 @@ export default function MessageTile({
                                             )}
                                         </div>
                                     ) : (
-                                        <div className="w-full">
+                                        <div className="px-0">
                                             <div className={`
-                                            text-green-400 pb-6 w-full
-                                            ${!query.example_result && !query.error ? '' : ''}
-                                        `}>
+                                                text-green-400 pb-6 w-full
+                                                ${!query.example_result && !query.error ? '' : ''}
+                                            `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
-                                                        {resultToShow ? (
-                                                            renderQueryResult(resultToShow)
+                                                        {shouldShowExampleResult ? (
+                                                            resultToShow ? renderTableView(resultToShow) : (
+                                                                <div className="text-gray-500">No example data available</div>
+                                                            )
                                                         ) : (
-                                                            <div className="text-gray-500">No data to display</div>
+                                                            resultToShow ? (
+                                                                renderQueryResult(resultToShow)
+                                                            ) : (
+                                                                <div className="text-gray-500">No data to display</div>
+                                                            )
                                                         )}
                                                     </div>
                                                 ) : (
                                                     <div className="w-full">
-                                                        <pre className="overflow-x-auto whitespace-pre-wrap">
-                                                            {JSON.stringify(resultToShow, null, 2)}
-                                                        </pre>
+                                                        {shouldShowExampleResult ? (
+                                                            resultToShow ? (
+                                                                <pre className="overflow-x-auto whitespace-pre-wrap">
+                                                                    {JSON.stringify(resultToShow, null, 2)}
+                                                                </pre>
+                                                            ) : (
+                                                                <div className="text-gray-500">No example data available</div>
+                                                            )
+                                                        ) : (
+                                                            resultToShow ? (
+                                                                renderQueryResult(resultToShow)
+                                                            ) : (
+                                                                <div className="text-gray-500">No data to display</div>
+                                                            )
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -562,6 +878,20 @@ export default function MessageTile({
                 </div>
             </div>
         );
+    };
+
+    // Add a helper function to remove duplicate queries
+    const removeDuplicateQueries = (query: string): string => {
+        // Split by semicolon and trim each query
+        const queries = query.split(';')
+            .map(q => q.trim())
+            .filter(q => q.length > 0);
+
+        // Remove duplicates while preserving order
+        const uniqueQueries = Array.from(new Set(queries));
+
+        // Join back with semicolons
+        return uniqueQueries.join(';\n');
     };
 
     return (

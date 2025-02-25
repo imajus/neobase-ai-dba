@@ -1,6 +1,10 @@
 export interface QueryResult {
     id: string;
     query: string;
+    pagination?: {
+        total_records_count?: number;
+        paginated_query?: string;
+    };
     description: string;
     execution_time?: number | null;
     example_execution_time?: number | null;
