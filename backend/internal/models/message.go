@@ -7,12 +7,13 @@ import (
 )
 
 type Message struct {
-	UserID  primitive.ObjectID `bson:"user_id" json:"user_id"`
-	ChatID  primitive.ObjectID `bson:"chat_id" json:"chat_id"`
-	Type    string             `bson:"type" json:"type"` // 'user' or 'assistant'
-	Content string             `bson:"content" json:"content"`
-	Queries *[]Query           `bson:"queries,omitempty" json:"queries,omitempty"`
-	Base    `bson:",inline"`
+	UserID   primitive.ObjectID `bson:"user_id" json:"user_id"`
+	ChatID   primitive.ObjectID `bson:"chat_id" json:"chat_id"`
+	Type     string             `bson:"type" json:"type"` // 'user' or 'assistant'
+	Content  string             `bson:"content" json:"content"`
+	IsEdited bool               `bson:"is_edited" json:"is_edited"` // if the message content has been edited, only for user messages
+	Queries  *[]Query           `bson:"queries,omitempty" json:"queries,omitempty"`
+	Base     `bson:",inline"`
 }
 
 type Query struct {
@@ -33,6 +34,7 @@ type Query struct {
 	Error                  *QueryError        `bson:"error,omitempty" json:"error,omitempty"`
 	ExampleResult          *string            `bson:"example_result,omitempty" json:"example_result,omitempty"`     // JSON string
 	ExecutionResult        *string            `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
+	IsEdited               bool               `bson:"is_edited" json:"is_edited"`                                   // if the query has been edited
 }
 
 type QueryError struct {
@@ -49,11 +51,12 @@ type Pagination struct {
 func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query) *Message {
 	log.Printf("NewMessage -> queries: %v", queries)
 	return &Message{
-		UserID:  userID,
-		ChatID:  chatID,
-		Type:    msgType,
-		Content: content,
-		Queries: queries,
-		Base:    NewBase(),
+		UserID:   userID,
+		ChatID:   chatID,
+		Type:     msgType,
+		Content:  content,
+		IsEdited: false,
+		Queries:  queries,
+		Base:     NewBase(),
 	}
 }

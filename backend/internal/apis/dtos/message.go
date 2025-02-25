@@ -17,6 +17,7 @@ type MessageResponse struct {
 	Type      string   `json:"type"`
 	Content   string   `json:"content"`
 	Queries   *[]Query `json:"queries,omitempty"`
+	IsEdited  bool     `json:"is_edited"`
 	CreatedAt string   `json:"created_at"`
 }
 
@@ -38,6 +39,7 @@ type Query struct {
 	RollbackQuery          *string                `json:"rollback_query,omitempty"`
 	RollbackDependentQuery *string                `json:"rollback_dependent_query,omitempty"`
 	Pagination             *Pagination            `json:"pagination,omitempty"`
+	IsEdited               bool                   `json:"is_edited"`
 }
 
 type Pagination struct {
@@ -115,6 +117,7 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			RollbackQuery:          query.RollbackQuery,
 			RollbackDependentQuery: query.RollbackDependentQuery,
 			Pagination:             pagination,
+			IsEdited:               query.IsEdited,
 		}
 	}
 	return &queriesDto

@@ -675,3 +675,30 @@ func (h *ChatHandler) GetQueryResults(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+func (h *ChatHandler) EditQuery(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	var req dtos.EditQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+		return
+	}
+
+	response, status, err := h.chatService.EditQuery(c.Request.Context(), userID, chatID, req.MessageID, req.QueryID, req.Query)
+	if err != nil {
+		c.JSON(int(status), dtos.Response{
+			Success: false,
+			Error:   utils.ToStringPtr(err.Error()),
+		})
+		return
+	}
+
+	c.JSON(int(status), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}

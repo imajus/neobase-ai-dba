@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	cleanupInterval     = 5 * time.Minute  // Check every 5 minutes
+	cleanupInterval     = 10 * time.Minute // Check every 10 minutes
 	idleTimeout         = 15 * time.Minute // Close after 15 minutes of inactivity
 	schemaCheckInterval = 24 * time.Hour   // Check every 24 hour
 )

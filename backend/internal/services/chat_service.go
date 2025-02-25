@@ -51,6 +51,7 @@ type ChatService interface {
 	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
+	EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.QueryExecutionResponse, uint32, error)
 }
 
 type chatService struct {
@@ -649,7 +650,7 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 	log.Printf("UpdateMessage -> content: %+v", req.Content)
 	// Update message content, This is a user message
 	message.Content = req.Content
-
+	message.IsEdited = true
 	log.Printf("UpdateMessage -> message: %+v", message)
 	log.Printf("UpdateMessage -> message.Content: %+v", message.Content)
 	err = s.chatRepo.UpdateMessage(message.ID, message)
@@ -2235,4 +2236,84 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		Error:             queryErr,
 		TotalRecordsCount: query.Pagination.TotalRecordsCount,
 	}, http.StatusOK, nil
+}
+
+func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.QueryExecutionResponse, uint32, error) {
+	log.Printf("ChatService -> EditQuery -> userID: %s, chatID: %s, messageID: %s, queryID: %s, query: %s", userID, chatID, messageID, queryID, query)
+
+	message, queryData, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+
+	if message.Type != string(MessageTypeUser) {
+		return nil, http.StatusBadRequest, fmt.Errorf("message is not a user message, cannot edit")
+	}
+
+	if queryData.IsExecuted || queryData.IsRolledBack {
+		return nil, http.StatusBadRequest, fmt.Errorf("query has already been executed, cannot edit")
+	}
+
+	for _, q := range *message.Queries {
+		if q.ID == queryData.ID {
+			q.Query = query
+			q.IsEdited = true
+		}
+	}
+
+	message.IsEdited = true
+	if err := s.chatRepo.UpdateMessage(message.ID, message); err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to update message: %v", err)
+	}
+
+	// Update the query in LLM messages too
+	llmMsg, err := s.llmRepo.FindMessageByID(message.ID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to find LLM message: %v", err)
+	}
+
+	if assistantResponse, ok := llmMsg.Content["assistant_response"].(map[string]interface{}); ok {
+		log.Printf("ChatService -> EditQuery -> assistantResponse: %+v", assistantResponse)
+		log.Printf("ChatService -> EditQuery -> queries type: %T", assistantResponse["queries"])
+
+		llmMsg.IsEdited = true
+		queries := assistantResponse["queries"]
+		// Handle primitive.A (BSON array) type
+		switch queriesVal := queries.(type) {
+		case primitive.A:
+			for i, q := range queriesVal {
+				qMap, ok := q.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if qMap["id"] == queryData.ID {
+					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
+					qMap["is_edited"] = true
+					queriesVal[i] = qMap
+					break
+				}
+			}
+			assistantResponse["queries"] = queriesVal
+		case []interface{}:
+			for i, q := range queriesVal {
+				qMap, ok := q.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if qMap["id"] == queryData.ID {
+					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
+					qMap["is_edited"] = true
+					queriesVal[i] = qMap
+					break
+				}
+			}
+			assistantResponse["queries"] = queriesVal
+		}
+	}
+
+	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to update LLM message: %v", err)
+	}
+
+	return nil, http.StatusOK, nil
 }

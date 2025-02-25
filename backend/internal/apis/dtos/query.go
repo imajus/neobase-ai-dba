@@ -45,3 +45,9 @@ type QueryResultsResponse struct {
 	Error             *QueryError `json:"error,omitempty"`
 	TotalRecordsCount *int        `json:"total_records_count"`
 }
+
+type EditQueryRequest struct {
+	MessageID string `json:"message_id" binding:"required"`
+	QueryID   string `json:"query_id" binding:"required"`
+	Query     string `json:"query" binding:"required"`
+}

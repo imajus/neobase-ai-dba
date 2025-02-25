@@ -9,5 +9,6 @@ type LLMMessage struct {
 	UserID    primitive.ObjectID     `bson:"user_id" json:"user_id"`
 	Role      string                 `bson:"role" json:"role"`
 	Content   map[string]interface{} `bson:"content" json:"content"`
+	IsEdited  bool                   `bson:"is_edited" json:"is_edited"` // if the message content has been edited
 	Base      `bson:",inline"`
 }
