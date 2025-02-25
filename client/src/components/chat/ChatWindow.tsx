@@ -129,6 +129,9 @@ export default function ChatWindow({
   const isLoadingOldMessages = useRef(false);
   const messageUpdateSource = useRef<UpdateSource>(null);
   const isInitialLoad = useRef(true);
+  const scrollPositionRef = useRef<number>(0);
+  const isScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (isConnected) {
@@ -138,45 +141,60 @@ export default function ChatWindow({
 
   const scrollToBottom = (origin: string) => {
     console.log("scrollToBottom called from", origin);
-    requestAnimationFrame(() => {
-      if (chatContainerRef.current) {
-        const scrollOptions = {
-          top: chatContainerRef.current.scrollHeight,
-          behavior: origin === 'initial' ? 'auto' : 'smooth'
-        } as ScrollToOptions;
+    const chatContainer = chatContainerRef.current;
+    if (!chatContainer) return;
 
-        try {
-          chatContainerRef.current.scrollTo(scrollOptions);
-        } catch (error) {
-          // Fallback for older browsers
-          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-        }
-      }
+    isScrollingRef.current = true;
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    requestAnimationFrame(() => {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      scrollPositionRef.current = chatContainer.scrollTop;
+
+      scrollTimeoutRef.current = setTimeout(() => {
+        isScrollingRef.current = false;
+      }, 100);
     });
   };
 
   const preserveScroll = (chatContainer: HTMLDivElement | null, callback: () => void) => {
-    if (!chatContainer) return;
+    if (!chatContainer) return callback();
 
-    // Store current scroll position and height
+    // Store current scroll position
     const oldHeight = chatContainer.scrollHeight;
     const oldScroll = chatContainer.scrollTop;
     const wasAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 10;
 
-    // Execute the state update
+    // Set scrolling flag
+    isScrollingRef.current = true;
+
+    // Clear any pending scroll timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    // Execute state update
     callback();
 
-    // After React has updated the DOM
+    // Use RAF for smooth animation frame
     requestAnimationFrame(() => {
       if (wasAtBottom) {
-        // If we were at bottom, keep it at bottom
         chatContainer.scrollTop = chatContainer.scrollHeight;
       } else {
-        // Otherwise maintain relative scroll position
         const newHeight = chatContainer.scrollHeight;
         const heightDiff = newHeight - oldHeight;
         chatContainer.scrollTop = oldScroll + heightDiff;
       }
+
+      // Store the final position
+      scrollPositionRef.current = chatContainer.scrollTop;
+
+      // Clear scrolling flag after a short delay
+      scrollTimeoutRef.current = setTimeout(() => {
+        isScrollingRef.current = false;
+      }, 100);
     });
   };
 
@@ -184,19 +202,44 @@ export default function ChatWindow({
     const chatContainer = chatContainerRef.current;
     if (!chatContainer) return;
 
-    const observer = new MutationObserver(() => {
+    const handleScroll = () => {
+      if (isScrollingRef.current) return;
+
       const { scrollTop, scrollHeight, clientHeight } = chatContainer;
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
 
-      // Show scroll button if not at bottom
+      scrollPositionRef.current = scrollTop;
+      setShowScrollButton(!isAtBottom);
+    };
+
+    chatContainer.addEventListener('scroll', handleScroll);
+    return () => chatContainer.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const chatContainer = chatContainerRef.current;
+    if (!chatContainer) return;
+
+    const observer = new MutationObserver(() => {
+      if (isScrollingRef.current) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+
       setShowScrollButton(!isAtBottom);
 
-      // Only scroll for new messages or streaming, not for query operations
       if (!isLoadingOldMessages.current &&
         !isLoadingMessages &&
         messageUpdateSource.current === 'new' &&
         (isAtBottom || messages.some(m => m.is_streaming))) {
-        scrollToBottom('mutation-observer');
+        requestAnimationFrame(() => {
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+          scrollPositionRef.current = chatContainer.scrollTop;
+        });
+      } else if (scrollPositionRef.current) {
+        requestAnimationFrame(() => {
+          chatContainer.scrollTop = scrollPositionRef.current;
+        });
       }
     });
 
@@ -208,21 +251,6 @@ export default function ChatWindow({
 
     return () => observer.disconnect();
   }, [messages, isLoadingMessages]);
-
-  // Add a scroll event listener to handle scroll button visibility
-  useEffect(() => {
-    const chatContainer = chatContainerRef.current;
-    if (!chatContainer) return;
-
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
-      setShowScrollButton(!isAtBottom);
-    };
-
-    chatContainer.addEventListener('scroll', handleScroll);
-    return () => chatContainer.removeEventListener('scroll', handleScroll);
-  }, []);
 
   const handleCloseConfirm = useCallback(() => {
     setShowCloseConfirm(false);
@@ -466,7 +494,25 @@ export default function ChatWindow({
   // Add this function to handle query-related updates
   const handleQueryUpdate = (callback: () => void) => {
     messageUpdateSource.current = 'query';
-    preserveScroll(chatContainerRef.current, callback);
+    const chatContainer = chatContainerRef.current;
+
+    if (!chatContainer) return callback();
+
+    const oldHeight = chatContainer.scrollHeight;
+    const oldScroll = chatContainer.scrollTop;
+
+    // Execute the update
+    callback();
+
+    // Preserve scroll position after update
+    requestAnimationFrame(() => {
+      const newHeight = chatContainer.scrollHeight;
+      const heightDiff = newHeight - oldHeight;
+      chatContainer.scrollTop = oldScroll + heightDiff;
+      scrollPositionRef.current = chatContainer.scrollTop;
+    });
+
+    // Reset message source after a delay
     setTimeout(() => {
       messageUpdateSource.current = null;
     }, 100);
