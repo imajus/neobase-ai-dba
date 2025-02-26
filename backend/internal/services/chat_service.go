@@ -2171,10 +2171,10 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	}
 
 	if query.Pagination == nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("query does not have pagination")
+		return nil, http.StatusBadRequest, fmt.Errorf("query does not support pagination")
 	}
 	if query.Pagination.PaginatedQuery == nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("query does not have pagination")
+		return nil, http.StatusBadRequest, fmt.Errorf("query does not support pagination")
 	}
 
 	// Check the connection status and connect if needed
