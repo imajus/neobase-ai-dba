@@ -31,6 +31,7 @@ interface PageData {
 interface MessageTileProps {
     chatId: string;
     message: Message;
+    setMessage: (message: Message) => void;
     checkSSEConnection: () => Promise<void>;
     onEdit?: (id: string) => void;
     editingMessageId: string | null;
@@ -70,9 +71,12 @@ const formatMessageTime = (dateString: string) => {
     });
 };
 
+const DEFAULT_PAGE_SIZE = 25; // Set page size to 25 items per page
+
 export default function MessageTile({
     chatId,
     message,
+    setMessage,
     onEdit,
     editingMessageId,
     editInput,
@@ -216,7 +220,7 @@ export default function MessageTile({
 
         try {
             await checkSSEConnection();
-            await chatService.executeQuery(
+            const response = await chatService.executeQuery(
                 chatId,
                 message.id,
                 queryId,
@@ -224,35 +228,65 @@ export default function MessageTile({
                 abortControllerRef.current[queryId]
             );
 
-            // Initialize query result state with page 1
-            if (message.queries) {
-                const updatedQuery = message.queries.find(q => q.id === queryId);
-                if (updatedQuery) {
-                    onQueryUpdate(() => {
-                        setQueryResults(prev => ({
-                            ...prev,
-                            [queryId]: {
-                                data: updatedQuery.execution_result || [],
-                                loading: false,
-                                error: null,
-                                currentPage: 1,
-                                pageSize: 15,
-                                totalRecords: updatedQuery.pagination?.total_records_count || null
-                            }
-                        }));
-                    });
-                }
-            }
+            console.log('executeQuery response', response?.success);
+            if (response?.success) {
 
-            // Update query state
-            if (message.queries) {
-                const updatedQuery = message.queries.find(q => q.id === queryId);
-                if (updatedQuery) {
-                    onQueryUpdate(() => {
-                        updatedQuery.is_executed = true;
-                        updatedQuery.is_rolled_back = false;
+                const fullData = parseResults(response.data.execution_result);
+                const totalRecords = response.data.total_records_count;
+
+                // Slice the data into pages of 25
+                const pageData = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 1);
+
+                // Cache both pages from the API response
+                const basePage = Math.floor((1 - 1) / 2) * 2 + 1;
+                const firstHalf = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 1);
+                const secondHalf = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 2);
+
+                pageDataCacheRef.current[queryId][basePage] = {
+                    data: firstHalf,
+                    totalRecords
+                };
+                pageDataCacheRef.current[queryId][basePage + 1] = {
+                    data: secondHalf,
+                    totalRecords
+                };
+                onQueryUpdate(() => {
+
+                    setMessage({
+                        ...message,
+                        queries: message.queries?.map(q => q.id === queryId ? {
+                            ...q,
+                            is_executed: response.data.is_executed,
+                            is_rolled_back: response.data.is_rolled_back,
+                            execution_result: response.data.execution_result,
+                            execution_time: response.data.execution_time,
+                            error: response.data.error,
+                            total_records_count: response.data.total_records_count,
+                            pagination: {
+                                ...q.pagination,
+                                total_records_count: response.data.total_records_count,
+                            }
+                        } : q)
                     });
-                }
+
+                    setQueryResults(prev => ({
+                        ...prev,
+                        [queryId]: {
+                            ...prev[queryId],
+                            data: pageData,
+                            loading: false,
+                            error: null,
+                            currentPage: 1,
+                            pageSize: DEFAULT_PAGE_SIZE,
+                            totalRecords: totalRecords
+                        }
+                    }));
+                });
+
+                toast('Query executed!', {
+                    ...toastStyle,
+                    icon: '✅',
+                });
             }
         } catch (error: any) {
             // Only show error if not aborted
@@ -285,10 +319,25 @@ export default function MessageTile({
             });
 
             await checkSSEConnection();
-            const rolledBack = await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '', abortControllerRef.current[queryId]);
-            console.log('rolledBack', rolledBack);
+            const response = await chatService.rollbackQuery(chatId, message.id, queryId, streamId || '', abortControllerRef.current[queryId]);
+            console.log('rolledBack', response);
 
-            if (rolledBack) {
+            if (response?.success) {
+                setMessage({
+                    ...message,
+                    queries: message.queries?.map(q => q.id === queryId ? {
+                        ...q,
+                        is_executed: true,
+                        is_rolled_back: true,
+                        execution_result: response?.data?.execution_result,
+                        execution_time: response?.data?.execution_time,
+                        error: response?.data?.error,
+                    } : q)
+                });
+                toast('Changes reverted', {
+                    ...toastStyle,
+                    icon: '↺',
+                });
                 onQueryUpdate(() => {
                     if (message.queries) {
                         message.queries[queryIndex].is_rolled_back = true;
@@ -301,7 +350,7 @@ export default function MessageTile({
             onQueryUpdate(() => {
                 setQueryStates(prev => ({
                     ...prev,
-                    [queryId]: { isExecuting: false, isExample: true }
+                    [queryId]: { isExecuting: false, isExample: true, isRolledBack: false }
                 }));
             });
             setRollbackState({ show: false, queryId: null });
@@ -668,6 +717,23 @@ export default function MessageTile({
                             )}
                         </div>
                         <div className="flex items-center">
+                            {(
+                                !queryStates[queryId]?.isExecuting && !query.is_executed && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setIsEditingQuery(true);
+                                        }}
+                                        className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300"
+                                        title="Edit query"
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                )
+                            )}
+
+                            <div className="w-px h-4 bg-gray-700 mx-2" />
                             {queryStates[queryId]?.isExecuting ? (
                                 <button
                                     onClick={(e) => {
@@ -705,28 +771,14 @@ export default function MessageTile({
                                     <XCircle className="w-4 h-4" />
                                 </button>
                             ) : (
-                                !queryStates[queryId]?.isExecuting && !query.is_executed && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setIsEditingQuery(true);
-                                        }}
-                                        className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300"
-                                        title="Edit query"
-                                    >
-                                        <Pencil className="w-4 h-4" />
-                                    </button>
-                                )
+                                <button
+                                    onClick={() => handleExecuteQuery(queryId)}
+                                    className="p-2 text-red-500 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
+                                    title="Execute query"
+                                >
+                                    <Play className="w-4 h-4" />
+                                </button>
                             )}
-                            <div className="w-px h-4 bg-gray-700 mx-2" />
-                            <button
-                                onClick={() => handleExecuteQuery(queryId)}
-                                className="p-2 text-red-500 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
-                                title="Execute query"
-                            >
-                                <Play className="w-4 h-4" />
-                            </button>
                             <div className="w-px h-4 bg-gray-700 mx-2" />
                             <button
                                 onClick={() => handleCopyToClipboard(query.query)}
@@ -743,8 +795,8 @@ export default function MessageTile({
                                 value={editedQueryText}
                                 onChange={(e) => setEditedQueryText(e.target.value)}
                                 className="w-full bg-gray-900 text-white p-3 rounded-none 
-                                           border-4 border-gray-600 font-mono text-sm min-h-[120px]
-                                           focus:outline-none focus:border-yellow-500 shadow-[4px_4px_0px_0px_rgba(75,85,99,1)]"
+                                       border-4 border-gray-600 font-mono text-sm min-h-[120px]
+                                       focus:outline-none focus:border-yellow-500 shadow-[4px_4px_0px_0px_rgba(75,85,99,1)]"
                             />
                             <div className="flex justify-end gap-3 mt-4">
                                 <button
@@ -753,8 +805,8 @@ export default function MessageTile({
                                         setEditedQueryText(query.query);
                                     }}
                                     className="px-4 py-2 bg-gray-800 text-white border-2 border-gray-600
-                                              hover:bg-gray-700 transition-colors shadow-[2px_2px_0px_0px_rgba(75,85,99,1)]
-                                              active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(75,85,99,1)]"
+                                                  hover:bg-gray-700 transition-colors shadow-[2px_2px_0px_0px_rgba(75,85,99,1)]
+                                                  active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(75,85,99,1)]"
                                 >
                                     Cancel
                                 </button>
@@ -764,8 +816,8 @@ export default function MessageTile({
                                         onEditQuery(message.id, queryId, editedQueryText);
                                     }}
                                     className="px-4 py-2 bg-yellow-400 text-black border-2 border-black
-                                              hover:bg-yellow-300 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
-                                              active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
+                                                  hover:bg-yellow-300 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+                                                  active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
                                 >
                                     Save Changes
                                 </button>
@@ -773,9 +825,9 @@ export default function MessageTile({
                         </div>
                     ) : (
                         <pre className={`
-                    text-sm overflow-x-auto p-4 border-t border-gray-700
-                    ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
-                `}>
+                        text-sm overflow-x-auto p-4 border-t border-gray-700
+                        ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
+                    `}>
                             <code className="whitespace-pre-wrap break-words">
                                 {isCurrentlyStreaming && isQueryStreaming
                                     ? removeDuplicateQueries(currentQuery)
@@ -928,13 +980,13 @@ export default function MessageTile({
                                     ) : (
                                         <div className="px-0">
                                             <div className={`
-                                            text-green-400 pb-6 w-full
-                                                ${!query.example_result && !query.error ? '' : ''}
-                                        `}>
+                                                text-green-400 pb-6 w-full
+                                                    ${!query.example_result && !query.error ? '' : ''}
+                                            `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
                                                         {shouldShowExampleResult ? (
-                                                            resultToShow ? renderTableView(resultToShow) : (
+                                                            resultToShow ? renderTableView(parseResults(resultToShow)) : (
                                                                 <div className="text-gray-500">No example data available</div>
                                                             )
                                                         ) : (
@@ -950,7 +1002,7 @@ export default function MessageTile({
                                                         {shouldShowExampleResult ? (
                                                             resultToShow ? (
                                                                 <pre className="overflow-x-auto whitespace-pre-wrap">
-                                                                    {JSON.stringify(resultToShow, null, 2)}
+                                                                    {JSON.stringify(parseResults(resultToShow), null, 2)}
                                                                 </pre>
                                                             ) : (
                                                                 <div className="text-gray-500">No example data available</div>
@@ -992,41 +1044,41 @@ export default function MessageTile({
 
     return (
         <div className={`
-            py-4 md:py-6
-            ${isFirstMessage ? 'first:pt-0' : ''}
+                py-4 md:py-6
+                ${isFirstMessage ? 'first:pt-0' : ''}
+                w-full
+              `}>
+            <div className={`
+            group flex items-center relative
+            ${message.type === 'user' ? 'justify-end' : 'justify-start'}
             w-full
           `}>
-            <div className={`
-        group flex items-center relative
-        ${message.type === 'user' ? 'justify-end' : 'justify-start'}
-        w-full
-      `}>
                 {message.type === 'user' && (
                     <div className="
-            absolute 
-            right-0 
-            -bottom-9
-            md:-bottom-10 
-            flex 
-            gap-1
-            z-[5]
+                absolute 
+                right-0 
+                -bottom-9
+                md:-bottom-10 
+                flex 
+                gap-1
+                z-[5]
 
-          ">
+              ">
                         <button
                             onClick={() => handleCopyToClipboard(message.content)}
                             className="
-                -translate-y-1/2
-                p-1.5
-                md:p-2 
-                group-hover:opacity-100 
-                transition-colors
-                hover:bg-neo-gray
-                rounded-lg
-                flex-shrink-0
-                border-0
-                bg-white/80
-                backdrop-blur-sm
-              "
+                    -translate-y-1/2
+                    p-1.5
+                    md:p-2 
+                    group-hover:opacity-100 
+                    transition-colors
+                    hover:bg-neo-gray
+                    rounded-lg
+                    flex-shrink-0
+                    border-0
+                    bg-white/80
+                    backdrop-blur-sm
+                  "
                             title="Copy message"
                         >
                             <Copy className="w-4 h-4 text-gray-800" />
@@ -1042,19 +1094,19 @@ export default function MessageTile({
                                     }, 0);
                                 }}
                                 className="
-                  -translate-y-1/2
-                  p-1.5
-                  md:p-2
-                  group-hover:opacity-100 
-                  hover:bg-neo-gray
-                  transition-colors
-                  rounded-lg
-                  flex-shrink-0
-                  border-0
-                  bg-white/80
-                  backdrop-blur-sm
+                      -translate-y-1/2
+                      p-1.5
+                      md:p-2
+                      group-hover:opacity-100 
+                      hover:bg-neo-gray
+                      transition-colors
+                      rounded-lg
+                      flex-shrink-0
+                      border-0
+                      bg-white/80
+                      backdrop-blur-sm
 
-                "
+                    "
                                 title="Edit message"
                             >
                                 <Pencil className="w-4 h-4 text-gray-800" />
@@ -1063,29 +1115,29 @@ export default function MessageTile({
                     </div>
                 )}
                 <div className={`
-    message-bubble
-    inline-block
-    relative
-    ${message.type === 'user' ? (
+        message-bubble
+        inline-block
+        relative
+        ${message.type === 'user' ? (
                         editingMessageId === message.id
                             ? 'w-[95%] sm:w-[85%] md:w-[75%]'
                             : 'w-fit max-w-[95%] sm:max-w-[85%] md:max-w-[75%]'
                     ) : 'w-fit max-w-[95%] sm:max-w-[85%] md:max-w-[75%]'}
-    ${message.type === 'user'
+        ${message.type === 'user'
                         ? 'message-bubble-user'
                         : 'message-bubble-ai'
                     }
-`}>
-                    <div className={`
-        ${editingMessageId === message.id ? 'w-full min-w-full' : 'w-auto min-w-0'}
-        ${message.queries?.length ? 'min-w-full' : ''}
     `}>
+                    <div className={`
+            ${editingMessageId === message.id ? 'w-full min-w-full' : 'w-auto min-w-0'}
+            ${message.queries?.length ? 'min-w-full' : ''}
+        `}>
                         <div className="relative">
                             {message.content.length === 0 && message.loading_steps && message.loading_steps.length > 0 && (
                                 <div className={`
-                                    ${message.content ? 'animate-fade-up-out absolute w-full' : ''}
-                                    text-gray-700
-                                `}>
+                                        ${message.content ? 'animate-fade-up-out absolute w-full' : ''}
+                                        text-gray-700
+                                    `}>
                                     <LoadingSteps
                                         steps={message.loading_steps.map((step, index) => ({
                                             text: step.text,
@@ -1161,9 +1213,9 @@ export default function MessageTile({
                         </div>
 
                         <div className={`
-                          text-[12px] text-gray-500 mt-1
-                          ${message.type === 'user' ? 'text-right' : 'text-left'}
-                        `}>
+                              text-[12px] text-gray-500 mt-1
+                              ${message.type === 'user' ? 'text-right' : 'text-left'}
+                            `}>
                             {formatMessageTime(message.created_at)}
                         </div>
                     </div>

@@ -70,3 +70,22 @@ export interface SendMessageResponse {
         created_at: string;
     };
 }
+
+export interface ExecuteQueryResponse {
+    success: boolean;
+    data: {
+        chat_id: string;
+        message_id: string;
+        query_id: string;
+        execution_time: number;
+        execution_result: any[];
+        total_records_count: number;
+        is_rolled_back: boolean;
+        is_executed: boolean;
+        error?: {
+            code: string;
+            message: string;
+            details?: string;
+        };
+    };
+}

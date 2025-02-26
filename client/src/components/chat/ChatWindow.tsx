@@ -150,6 +150,11 @@ export default function ChatWindow({
     }
   }, [isConnected]);
 
+  const setMessage = (message: Message) => {
+    console.log('setMessage called with message:', message);
+    setMessages(prev => prev.map(m => m.id === message.id ? message : m));
+  };
+
   const scrollToBottom = (origin: string) => {
     console.log("scrollToBottom called from", origin);
     const chatContainer = chatContainerRef.current;
@@ -662,6 +667,7 @@ export default function ChatWindow({
                   checkSSEConnection={checkSSEConnection}
                   chatId={chat.id}
                   message={message}
+                  setMessage={setMessage}
                   onEdit={handleEditMessage}
                   editingMessageId={editingMessageId}
                   editInput={editInput}

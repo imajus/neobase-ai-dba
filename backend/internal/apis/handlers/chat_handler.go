@@ -512,7 +512,10 @@ func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	c.JSON(int(status), response)
+	c.JSON(int(status), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
 }
 
 func (h *ChatHandler) RollbackQuery(c *gin.Context) {
@@ -538,7 +541,10 @@ func (h *ChatHandler) RollbackQuery(c *gin.Context) {
 		return
 	}
 
-	c.JSON(int(status), response)
+	c.JSON(int(status), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
 }
 
 func (h *ChatHandler) CancelQueryExecution(c *gin.Context) {

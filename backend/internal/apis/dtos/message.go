@@ -72,6 +72,7 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 		var exampleResult []interface{}
 		var executionResult map[string]interface{}
 
+		log.Printf("ToQueryDto -> saved query.ExampleResult: %v", query.ExampleResult)
 		if query.ExampleResult != nil {
 			log.Printf("ToQueryDto -> query.ExampleResult: %v", *query.ExampleResult)
 			err := json.Unmarshal([]byte(*query.ExampleResult), &exampleResult)

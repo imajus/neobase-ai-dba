@@ -1,5 +1,5 @@
 import { Chat, Connection } from '../types/chat';
-import { MessagesResponse, SendMessageResponse } from '../types/messages';
+import { ExecuteQueryResponse, MessagesResponse, SendMessageResponse } from '../types/messages';
 import axios from './axiosConfig';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -144,9 +144,9 @@ const chatService = {
         }
     },
 
-    async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<void> {
+    async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<ExecuteQueryResponse | undefined> {
         try {
-            await axios.post(
+            const response = await axios.post<ExecuteQueryResponse>(
                 `${API_URL}/chats/${chatId}/queries/execute`,
                 {
                     message_id: messageId,
@@ -162,18 +162,20 @@ const chatService = {
                     }
                 }
             );
+            console.log('chatService executeQuery response', response);
+            return response.data;
         } catch (error: any) {
             if (error.name === 'CanceledError' || error.name === 'AbortError') {
-                return;
+                return undefined;
             }
             console.error('Execute query error:', error);
             throw new Error(error.response?.data?.error || 'Failed to execute query');
         }
     },
 
-    async rollbackQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<boolean> {
+    async rollbackQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<ExecuteQueryResponse | undefined> {
         try {
-            const response = await axios.post(`${API_URL}/chats/${chatId}/queries/rollback`, {
+            const response = await axios.post<ExecuteQueryResponse>(`${API_URL}/chats/${chatId}/queries/rollback`, {
                 message_id: messageId,
                 query_id: queryId,
                 stream_id: streamId
@@ -187,8 +189,11 @@ const chatService = {
                     }
                 }
             );
-            return response.data.success;
+            return response.data;
         } catch (error: any) {
+            if (error.name === 'CanceledError' || error.name === 'AbortError') {
+                return undefined;
+            }
             console.error('Rollback query error:', error);
             throw new Error(error.response?.data?.error || 'Failed to rollback query');
         }
