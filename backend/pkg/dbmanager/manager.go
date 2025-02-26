@@ -10,7 +10,7 @@ import (
 
 	// Database drivers
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
-	_ "github.com/lib/pq"              // PostgreSQL driver
+	_ "github.com/lib/pq"              // PostgreSQL/YugabyteDB Driver
 
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
@@ -85,6 +85,10 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 
 	// Register default fetchers
 	m.RegisterFetcher("postgresql", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
+	m.RegisterFetcher("yugabytedb", func(db DBExecutor) SchemaFetcher {
 		return &PostgresDriver{}
 	})
 
@@ -309,7 +313,7 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 
 	// Return appropriate wrapper based on database type
 	switch conn.Config.Type {
-	case constants.DatabaseTypePostgreSQL:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB: // Use same wrapper for both
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
 	// Add cases for other database types
 	default:
@@ -867,7 +871,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			log.Println("Manager -> ExecuteQuery -> Triggering schema check")
 			time.Sleep(2 * time.Second)
 			switch conn.Config.Type {
-			case constants.DatabaseTypePostgreSQL:
+			case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
 					if conn.OnSchemaChange != nil {
 						conn.OnSchemaChange(conn.ChatID)
@@ -885,23 +889,23 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 // TestConnection tests if the provided credentials are valid without creating a persistent connection
 func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	switch config.Type {
-	case constants.DatabaseTypePostgreSQL:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		dsn := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 			config.Host, config.Port, *config.Username, *config.Password, config.Database,
 		)
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
-			return fmt.Errorf("failed to create PostgreSQL connection: %v", err)
+			return fmt.Errorf("failed to create connection: %v", err)
 		}
 		defer db.Close()
 
 		err = db.Ping()
 		if err != nil {
-			return fmt.Errorf("failed to connect to PostgreSQL: %v", err)
+			return fmt.Errorf("failed to conne: %v", err)
 		}
 
-	case "mysql":
+	case constants.DatabaseTypeMySQL:
 		dsn := fmt.Sprintf(
 			"%s:%s@tcp(%s:%s)/%s",
 			*config.Username, *config.Password, config.Host, config.Port, config.Database,
@@ -917,7 +921,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 			return fmt.Errorf("failed to connect to MySQL: %v", err)
 		}
 
-	case "mongodb":
+	case constants.DatabaseTypeMongoDB:
 		uri := fmt.Sprintf(
 			"mongodb://%s:%s@%s:%s/%s",
 			*config.Username, *config.Password, config.Host, config.Port, config.Database,

@@ -1018,7 +1018,7 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 }
 
 func isValidDBType(dbType string) bool {
-	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB} // Add more as supported
+	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB} // Add more as supported
 	for _, t := range validTypes {
 		if t == dbType {
 			return true

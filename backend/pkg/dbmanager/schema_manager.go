@@ -448,7 +448,7 @@ func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema 
 // Get current table checksums without fetching full schema
 func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, dbType string) (map[string]string, error) {
 	switch dbType {
-	case constants.DatabaseTypePostgreSQL:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		checksums := make(map[string]string)
 
 		// Get schema directly from the database
@@ -902,7 +902,7 @@ type ConstraintInfo struct {
 func (sm *SchemaManager) createLLMSchema(schema *SchemaInfo, dbType string) *LLMSchemaInfo {
 	var simplifier SchemaSimplifier
 	switch dbType {
-	case constants.DatabaseTypePostgreSQL:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		simplifier = &PostgresSimplifier{}
 	case constants.DatabaseTypeMySQL:
 		simplifier = &MySQLSimplifier{}

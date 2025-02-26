@@ -80,6 +80,7 @@ func Initialize() {
 		}
 		// Register database drivers
 		manager.RegisterDriver(constants.DatabaseTypePostgreSQL, dbmanager.NewPostgresDriver())
+		manager.RegisterDriver(constants.DatabaseTypeYugabyteDB, dbmanager.NewPostgresDriver()) // Use same driver for both
 		return manager, nil
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)
@@ -120,6 +121,11 @@ func Initialize() {
 						DBType:       constants.DatabaseTypePostgreSQL,
 						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypePostgreSQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypePostgreSQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeYugabyteDB,
+						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
 					},
 					{
 						DBType:       constants.DatabaseTypeMySQL,

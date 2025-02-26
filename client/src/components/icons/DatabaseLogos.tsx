@@ -1,5 +1,5 @@
 interface DatabaseLogoProps {
-  type: 'postgresql' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j';
+  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j';
   size?: number;
   className?: string;
 }
@@ -7,6 +7,7 @@ interface DatabaseLogoProps {
 // Import all logos using Vite's import.meta.env.BASE_URL
 const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
   postgresql: `${import.meta.env.VITE_FRONTEND_BASE_URL}postgresql-logo.png`,
+  yugabytedb: `${import.meta.env.VITE_FRONTEND_BASE_URL}yugabytedb-logo.svg`,
   mysql: `${import.meta.env.VITE_FRONTEND_BASE_URL}mysql-logo.png`,
   mongodb: `${import.meta.env.VITE_FRONTEND_BASE_URL}mongodb-logo.png`,
   redis: `${import.meta.env.VITE_FRONTEND_BASE_URL}redis-logo.svg`,

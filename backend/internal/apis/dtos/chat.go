@@ -1,7 +1,7 @@
 package dtos
 
 type CreateConnectionRequest struct {
-	Type     string `json:"type" binding:"required,oneof=postgresql mysql"`
+	Type     string `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j"`
 	Host     string `json:"host" binding:"required"`
 	Port     string `json:"port" binding:"required"`
 	Username string `json:"username" binding:"required"`

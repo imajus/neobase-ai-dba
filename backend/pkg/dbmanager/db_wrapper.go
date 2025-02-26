@@ -68,7 +68,11 @@ func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
 
 	driver, exists := w.manager.drivers["postgresql"]
 	if !exists {
-		return nil, fmt.Errorf("postgresql driver not found")
+		// Check if yugabytedb driver exists
+		driver, exists = w.manager.drivers["yugabytedb"]
+		if !exists {
+			return nil, fmt.Errorf("driver not found")
+		}
 	}
 
 	if fetcher, ok := driver.(SchemaFetcher); ok {
@@ -85,7 +89,11 @@ func (w *PostgresWrapper) GetTableChecksum(ctx context.Context, table string) (s
 
 	driver, exists := w.manager.drivers["postgresql"]
 	if !exists {
-		return "", fmt.Errorf("postgresql driver not found")
+		// Check if yugabytedb driver exists
+		driver, exists = w.manager.drivers["yugabytedb"]
+		if !exists {
+			return "", fmt.Errorf("driver not found")
+		}
 	}
 
 	if fetcher, ok := driver.(SchemaFetcher); ok {

@@ -114,35 +114,35 @@ func (pc PostgresColumn) toColumnInfo() ColumnInfo {
 }
 
 func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	log.Printf("PostgreSQL Driver -> Connect -> Starting with config: %+v", config)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Starting with config: %+v", config)
 
 	// If username or password is nil, set it to empty string
 	if config.Username == nil {
 		config.Username = utils.ToStringPtr("")
-		log.Printf("PostgreSQL Driver -> Connect -> Set nil username to empty string")
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Set nil username to empty string")
 	}
 	if config.Password == nil {
 		config.Password = utils.ToStringPtr("")
-		log.Printf("PostgreSQL Driver -> Connect -> Set nil password to empty string")
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Set nil password to empty string")
 	}
 
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.Host, config.Port, *config.Username, *config.Password, config.Database)
 
-	log.Printf("PostgreSQL Driver -> Connect -> Attempting connection with DSN: %s", dsn)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Attempting connection with DSN: %s", dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> Connect -> Connection failed: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection failed: %v", err)
 		return nil, fmt.Errorf("failed to connect to PostgreSQL: %v", err)
 	}
 
-	log.Printf("PostgreSQL Driver -> Connect -> GORM connection successful")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> GORM connection successful")
 
 	// Configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> Connect -> Failed to get underlying *sql.DB: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Failed to get underlying *sql.DB: %v", err)
 		return nil, err
 	}
 
@@ -150,15 +150,15 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	sqlDB.SetMaxOpenConns(10)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	log.Printf("PostgreSQL Driver -> Connect -> Connection pool configured")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection pool configured")
 
 	// Test connection with ping
 	if err := sqlDB.Ping(); err != nil {
-		log.Printf("PostgreSQL Driver -> Connect -> Ping failed: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Ping failed: %v", err)
 		return nil, fmt.Errorf("ping failed: %v", err)
 	}
 
-	log.Printf("PostgreSQL Driver -> Connect -> Connection verified with ping")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection verified with ping")
 
 	return &Connection{
 		DB:       db,
@@ -195,10 +195,10 @@ func (d *PostgresDriver) IsAlive(conn *Connection) bool {
 // Modify ExecuteQuery to check for schema changes
 func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	startTime := time.Now()
-	log.Printf("PostgreSQL Driver -> ExecuteQuery -> Query: %v", query)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Query: %v", query)
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> ExecuteQuery -> Failed to get SQL connection: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Failed to get SQL connection: %v", err)
 		return &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
 			Error: &dtos.QueryError{
@@ -214,7 +214,7 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 	var lastResult *sql.Rows
 	var lastError error
 
-	log.Printf("PostgreSQL Driver -> ExecuteQuery -> Statements: %v", statements)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Statements: %v", statements)
 	// Execute each statement
 	for _, stmt := range statements {
 		if stmt = strings.TrimSpace(stmt); stmt == "" {
@@ -223,7 +223,7 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 
 		lastResult, lastError = sqlDB.QueryContext(ctx, stmt)
 		if lastError != nil {
-			log.Printf("PostgreSQL Driver -> ExecuteQuery -> Query execution failed: %v", lastError)
+			log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Query execution failed: %v", lastError)
 			return &QueryExecutionResult{
 				ExecutionTime: int(time.Since(startTime).Milliseconds()),
 				Error: &dtos.QueryError{
@@ -286,16 +286,16 @@ func splitStatements(query string) []string {
 }
 
 func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
-	log.Printf("PostgreSQL Driver -> BeginTx -> Starting transaction")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Starting transaction")
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> BeginTx -> Failed to get SQL connection: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Failed to get SQL connection: %v", err)
 		return nil
 	}
 
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> BeginTx -> Failed to begin transaction: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Failed to begin transaction: %v", err)
 		return nil
 	}
 
