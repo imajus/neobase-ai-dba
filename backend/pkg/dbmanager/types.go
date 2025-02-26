@@ -82,3 +82,6 @@ type Transaction interface {
 	Commit() error
 	Rollback() error
 }
+
+// FetcherFactory is a function that creates a SchemaFetcher for a database
+type FetcherFactory func(db DBExecutor) SchemaFetcher

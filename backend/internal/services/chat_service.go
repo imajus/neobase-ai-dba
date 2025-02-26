@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
@@ -141,6 +140,11 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	}
 	if chat.UserID != userObjID {
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Cannot change the database type
+	if req.Connection.Type != chat.Connection.Type {
+		return nil, http.StatusBadRequest, fmt.Errorf("cannot change the database type")
 	}
 
 	// Test connection without creating a persistent connection
@@ -1173,7 +1177,17 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				},
 			},
 		})
-		return nil, http.StatusInternalServerError, errors.New(queryErr.Details)
+		return &dtos.QueryExecutionResponse{
+			ChatID:            chatID,
+			MessageID:         msg.ID.Hex(),
+			QueryID:           query.ID.Hex(),
+			IsExecuted:        false,
+			IsRolledBack:      false,
+			ExecutionTime:     query.ExecutionTime,
+			ExecutionResult:   nil,
+			Error:             queryErr,
+			TotalRecordsCount: nil,
+		}, http.StatusOK, nil
 	}
 	var totalRecordsCount *int
 	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
@@ -1216,7 +1230,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		} else {
 			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting))
 		}
-	} else if len(resultMapFormatting["results"].([]interface{})) > 0 {
+	} else if resultMapFormatting != nil && resultMapFormatting["results"] != nil && len(resultMapFormatting["results"].([]interface{})) > 0 {
 		log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
 		totalRecordsCount = utils.ToIntPtr(len(resultMapFormatting["results"].([]interface{})))
 		if len(resultMapFormatting["results"].([]interface{})) > 50 {
@@ -1407,7 +1421,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		QueryID:           query.ID.Hex(),
 		IsExecuted:        query.IsExecuted,
 		IsRolledBack:      query.IsRolledBack,
-		ExecutionTime:     *query.ExecutionTime,
+		ExecutionTime:     query.ExecutionTime,
 		ExecutionResult:   formattedResultJSON,
 		Error:             result.Error,
 		TotalRecordsCount: totalRecordsCount,
@@ -1529,7 +1543,17 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					"error":      queryErr,
 				},
 			})
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute dependent query: %v", queryErr)
+			return &dtos.QueryExecutionResponse{
+				ChatID:            chatID,
+				MessageID:         msg.ID.Hex(),
+				QueryID:           query.ID.Hex(),
+				IsExecuted:        true,
+				IsRolledBack:      false,
+				ExecutionTime:     query.ExecutionTime,
+				ExecutionResult:   nil,
+				Error:             queryErr,
+				TotalRecordsCount: nil,
+			}, http.StatusOK, nil
 		}
 
 		// Get LLM context from previous messages
@@ -1808,7 +1832,17 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				"error":      queryErr,
 			},
 		})
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute rollback query: %v", queryErr)
+		return &dtos.QueryExecutionResponse{
+			ChatID:            chatID,
+			MessageID:         msg.ID.Hex(),
+			QueryID:           query.ID.Hex(),
+			IsExecuted:        true,
+			IsRolledBack:      false,
+			ExecutionTime:     query.ExecutionTime,
+			ExecutionResult:   nil,
+			Error:             queryErr,
+			TotalRecordsCount: nil,
+		}, http.StatusOK, nil
 	}
 
 	log.Printf("ChatService -> RollbackQuery -> result: %+v", result)
@@ -1957,7 +1991,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		QueryID:         query.ID.Hex(),
 		IsExecuted:      query.IsExecuted,
 		IsRolledBack:    query.IsRolledBack,
-		ExecutionTime:   *query.ExecutionTime,
+		ExecutionTime:   query.ExecutionTime,
 		ExecutionResult: result.Result,
 		Error:           result.Error,
 	}, http.StatusOK, nil

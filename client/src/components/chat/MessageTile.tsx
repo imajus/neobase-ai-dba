@@ -311,6 +311,8 @@ export default function MessageTile({
         if (queryIndex === -1) return;
 
         try {
+            // Create new AbortController for this query
+            abortControllerRef.current[queryId] = new AbortController();
             onQueryUpdate(() => {
                 setQueryStates(prev => ({
                     ...prev,

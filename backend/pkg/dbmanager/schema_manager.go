@@ -202,42 +202,42 @@ func (sm *SchemaManager) fetchSchema(ctx context.Context, db DBExecutor, dbType 
 
 // Update GetSchema to use fetchSchema and getFetcher
 func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaInfo, error) {
-	// First try to get from cache
-	sm.mu.RLock()
-	cachedSchema, exists := sm.schemaCache[chatID]
-	sm.mu.RUnlock()
-
-	if exists {
-		log.Printf("SchemaManager -> GetSchema -> Using cached schema for chatID: %s", chatID)
-		return cachedSchema, nil
-	}
-
-	// If not in cache, fetch using appropriate fetcher
+	// Always fetch fresh schema from database for schema checks
 	schema, err := sm.fetchSchema(ctx, db, dbType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %v", err)
 	}
 
-	// Cache the schema
-	sm.mu.Lock()
-	sm.schemaCache[chatID] = schema
-	sm.mu.Unlock()
+	// Log all tables found in the database
+	tableNames := make([]string, 0, len(schema.Tables))
+	for tableName := range schema.Tables {
+		tableNames = append(tableNames, tableName)
+	}
+	log.Printf("SchemaManager -> GetSchema -> Fresh schema contains tables: %v", tableNames)
 
 	return schema, nil
 }
 
-// Update CheckSchemaChanges to include dbType
+// Fix the CheckSchemaChanges function to properly call CompareSchemas
 func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaDiff, bool, error) {
 	_, exists := sm.dbManager.drivers[dbType]
 	if !exists {
 		return nil, false, fmt.Errorf("no driver found for type: %s", dbType)
 	}
 
+	log.Printf("SchemaManager -> CheckSchemaChanges -> Getting current schema for chatID: %s", chatID)
 	// Get current schema using driver
 	currentSchema, err := sm.GetSchema(ctx, chatID, db, dbType)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get current schema: %v", err)
 	}
+
+	// Log current tables for debugging
+	currentTables := make([]string, 0, len(currentSchema.Tables))
+	for tableName := range currentSchema.Tables {
+		currentTables = append(currentTables, tableName)
+	}
+	log.Printf("SchemaManager -> CheckSchemaChanges -> Current schema has tables: %v", currentTables)
 
 	// Try to get stored schema
 	storedSchema, err := sm.getStoredSchema(ctx, chatID)
@@ -251,67 +251,55 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 
 		// Return special diff for first time with full schema
 		return &SchemaDiff{
-			FullSchema:  currentSchema, // Add this field to SchemaDiff struct
+			FullSchema:  currentSchema,
 			UpdatedAt:   time.Now(),
 			IsFirstTime: true,
 		}, true, nil
 	}
 
-	// Normal comparison for subsequent changes
-	diff := sm.compareSchemas(storedSchema.FullSchema, currentSchema)
-	if diff == nil {
-		return nil, false, nil
+	// Log stored tables for debugging
+	storedTables := make([]string, 0, len(storedSchema.FullSchema.Tables))
+	for tableName := range storedSchema.FullSchema.Tables {
+		storedTables = append(storedTables, tableName)
+	}
+	log.Printf("SchemaManager -> CheckSchemaChanges -> Stored schema has tables: %v", storedTables)
+
+	// IMPORTANT: Use CompareSchemas (uppercase C) instead of compareSchemas (lowercase c)
+	diff, hasChanges := sm.CompareSchemas(storedSchema.FullSchema, currentSchema)
+
+	// Add detailed logging to see what's happening
+	log.Printf("SchemaManager -> CheckSchemaChanges -> CompareSchemas returned hasChanges=%v, diff=%+v",
+		hasChanges, diff)
+
+	if hasChanges {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> Changes detected: added=%d, removed=%d, modified=%d",
+			len(diff.AddedTables), len(diff.RemovedTables), len(diff.ModifiedTables))
+	} else {
+		log.Printf("SchemaManager -> CheckSchemaChanges -> No changes detected in comparison")
 	}
 
-	// Store updated schema
+	// Store the updated schema AFTER checking for changes
 	if err := sm.storeSchema(ctx, chatID, currentSchema, db, dbType); err != nil {
-		return nil, true, err
+		log.Printf("SchemaManager -> CheckSchemaChanges -> Error storing schema: %v", err)
+		// Continue anyway, don't fail the whole operation
+	}
+
+	if !hasChanges {
+		return nil, false, nil
 	}
 
 	return diff, true, nil
 }
 
-// Update compareSchemas to ignore row counts
+// Mark the old compareSchemas function as deprecated
+// DEPRECATED: Use CompareSchemas instead
 func (sm *SchemaManager) compareSchemas(old, new *SchemaInfo) *SchemaDiff {
-	if old == nil {
-		return &SchemaDiff{
-			IsFirstTime: true,
-			FullSchema:  new,
-			UpdatedAt:   time.Now(),
-		}
-	}
-
-	diff := &SchemaDiff{
-		AddedTables:    make([]string, 0),
-		RemovedTables:  make([]string, 0),
-		ModifiedTables: make(map[string]TableDiff),
-		UpdatedAt:      time.Now(),
-	}
-
-	// Compare tables
-	for tableName, newTable := range new.Tables {
-		if oldTable, exists := old.Tables[tableName]; !exists {
-			diff.AddedTables = append(diff.AddedTables, tableName)
-		} else {
-			// Compare table structure (ignoring row count)
-			tableDiff := compareTableSchemas(oldTable, newTable)
-			if !tableDiff.isEmpty() {
-				diff.ModifiedTables[tableName] = tableDiff
-			}
-		}
-	}
-
-	// Check for removed tables
-	for tableName := range old.Tables {
-		if _, exists := new.Tables[tableName]; !exists {
-			diff.RemovedTables = append(diff.RemovedTables, tableName)
-		}
-	}
-
+	log.Printf("WARNING: Using deprecated compareSchemas function. Use CompareSchemas instead")
+	diff, _ := sm.CompareSchemas(old, new)
 	return diff
 }
 
-// Update compareTableSchemas to ignore row count
+// Update compareTableSchemas to properly compare all table details
 func compareTableSchemas(old, new TableSchema) TableDiff {
 	diff := TableDiff{
 		AddedColumns:    make([]string, 0),
@@ -326,8 +314,12 @@ func compareTableSchemas(old, new TableSchema) TableDiff {
 	// Compare columns
 	for colName, newCol := range new.Columns {
 		if oldCol, exists := old.Columns[colName]; !exists {
+			log.Printf("compareTableSchemas -> Added column detected: %s", colName)
 			diff.AddedColumns = append(diff.AddedColumns, colName)
 		} else if !compareColumns(oldCol, newCol) {
+			log.Printf("compareTableSchemas -> Modified column detected: %s (type: %s->%s, nullable: %v->%v, default: %s->%s)",
+				colName, oldCol.Type, newCol.Type, oldCol.IsNullable, newCol.IsNullable,
+				oldCol.DefaultValue, newCol.DefaultValue)
 			diff.ModifiedColumns = append(diff.ModifiedColumns, colName)
 		}
 	}
@@ -335,32 +327,45 @@ func compareTableSchemas(old, new TableSchema) TableDiff {
 	// Check for removed columns
 	for colName := range old.Columns {
 		if _, exists := new.Columns[colName]; !exists {
+			log.Printf("compareTableSchemas -> Removed column detected: %s", colName)
 			diff.RemovedColumns = append(diff.RemovedColumns, colName)
 		}
 	}
 
-	// Compare indexes (unchanged)
-	for idxName := range new.Indexes {
-		if _, exists := old.Indexes[idxName]; !exists {
+	// Compare indexes
+	for idxName, newIdx := range new.Indexes {
+		if oldIdx, exists := old.Indexes[idxName]; !exists {
+			log.Printf("compareTableSchemas -> Added index detected: %s", idxName)
+			diff.AddedIndexes = append(diff.AddedIndexes, idxName)
+		} else if !reflect.DeepEqual(oldIdx, newIdx) {
+			log.Printf("compareTableSchemas -> Modified index detected: %s", idxName)
+			diff.RemovedIndexes = append(diff.RemovedIndexes, idxName)
 			diff.AddedIndexes = append(diff.AddedIndexes, idxName)
 		}
 	}
 
 	for idxName := range old.Indexes {
 		if _, exists := new.Indexes[idxName]; !exists {
+			log.Printf("compareTableSchemas -> Removed index detected: %s", idxName)
 			diff.RemovedIndexes = append(diff.RemovedIndexes, idxName)
 		}
 	}
 
-	// Compare foreign keys (unchanged)
-	for fkName := range new.ForeignKeys {
-		if _, exists := old.ForeignKeys[fkName]; !exists {
+	// Compare foreign keys
+	for fkName, newFK := range new.ForeignKeys {
+		if oldFK, exists := old.ForeignKeys[fkName]; !exists {
+			log.Printf("compareTableSchemas -> Added foreign key detected: %s", fkName)
+			diff.AddedFKs = append(diff.AddedFKs, fkName)
+		} else if !reflect.DeepEqual(oldFK, newFK) {
+			log.Printf("compareTableSchemas -> Modified foreign key detected: %s", fkName)
+			diff.RemovedFKs = append(diff.RemovedFKs, fkName)
 			diff.AddedFKs = append(diff.AddedFKs, fkName)
 		}
 	}
 
 	for fkName := range old.ForeignKeys {
 		if _, exists := new.ForeignKeys[fkName]; !exists {
+			log.Printf("compareTableSchemas -> Removed foreign key detected: %s", fkName)
 			diff.RemovedFKs = append(diff.RemovedFKs, fkName)
 		}
 	}
@@ -368,13 +373,36 @@ func compareTableSchemas(old, new TableSchema) TableDiff {
 	return diff
 }
 
-// Helper function to compare columns
-func compareColumns(old, new ColumnInfo) bool {
-	return old.Name == new.Name &&
-		old.Type == new.Type &&
-		old.IsNullable == new.IsNullable &&
-		old.DefaultValue == new.DefaultValue &&
-		old.Comment == new.Comment
+// Fix the compareColumns function to be more thorough
+func compareColumns(oldCol, newCol ColumnInfo) bool {
+	// Log detailed comparison
+	log.Printf("compareColumns -> Comparing column: name=%s", oldCol.Name)
+	log.Printf("compareColumns -> Old column: type=%s, nullable=%v, default=%s, comment=%s",
+		oldCol.Type, oldCol.IsNullable, oldCol.DefaultValue, oldCol.Comment)
+	log.Printf("compareColumns -> New column: type=%s, nullable=%v, default=%s, comment=%s",
+		newCol.Type, newCol.IsNullable, newCol.DefaultValue, newCol.Comment)
+
+	// Compare all relevant column properties
+	typeMatch := oldCol.Type == newCol.Type
+	nullableMatch := oldCol.IsNullable == newCol.IsNullable
+	defaultMatch := oldCol.DefaultValue == newCol.DefaultValue
+	commentMatch := oldCol.Comment == newCol.Comment
+
+	log.Printf("compareColumns -> Comparison results: typeMatch=%v, nullableMatch=%v, defaultMatch=%v, commentMatch=%v",
+		typeMatch, nullableMatch, defaultMatch, commentMatch)
+
+	return typeMatch && nullableMatch && defaultMatch && commentMatch
+}
+
+// Add the missing isEmpty method for TableDiff
+func (td TableDiff) isEmpty() bool {
+	return len(td.AddedColumns) == 0 &&
+		len(td.RemovedColumns) == 0 &&
+		len(td.ModifiedColumns) == 0 &&
+		len(td.AddedIndexes) == 0 &&
+		len(td.RemovedIndexes) == 0 &&
+		len(td.AddedFKs) == 0 &&
+		len(td.RemovedFKs) == 0
 }
 
 // Update storeSchema to properly set checksums
@@ -812,75 +840,6 @@ const (
 	TriggerTypeAuto   TriggerType = "auto"   // For interval checks
 )
 
-// Update TriggerSchemaCheck to handle different trigger types
-func (sm *SchemaManager) TriggerSchemaCheck(chatID string, triggerType TriggerType) (bool, error) {
-	log.Printf("SchemaManager -> TriggerSchemaCheck -> Starting for chatID: %s, triggerType: %s", chatID, triggerType)
-
-	// Get current connection
-	db, err := sm.dbManager.GetConnection(chatID)
-	if err != nil {
-		return false, fmt.Errorf("failed to get connection: %v", err)
-	}
-
-	// Get connection config
-	conn, exists := sm.dbManager.connections[chatID]
-	if !exists {
-		return false, fmt.Errorf("connection not found for chatID: %s", chatID)
-	}
-
-	if triggerType == TriggerTypeManual {
-		// For manual triggers (DDL), directly fetch and store new schema
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> Manual trigger, fetching new schema")
-		schema, err := db.GetSchema(context.Background())
-		if err != nil {
-			return false, fmt.Errorf("failed to get current schema: %v", err)
-		}
-
-		// Store the fresh schema immediately
-		if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
-			return false, fmt.Errorf("failed to store schema: %v", err)
-		}
-
-		return true, nil
-	}
-
-	// For auto triggers, check for changes first
-	hasChanged, err := sm.QuickSchemaCheck(context.Background(), chatID, db)
-	log.Printf("SchemaManager -> TriggerSchemaCheck -> hasChanged: %t", hasChanged)
-
-	if err != nil {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error in quick check: %v", err)
-		return false, fmt.Errorf("error in quick check: %v", err)
-	} else if !hasChanged {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> No schema changes detected in quick check")
-		return false, nil
-	}
-
-	// If changes detected, get fresh schema
-	schema, err := db.GetSchema(context.Background())
-	if err != nil {
-		return false, fmt.Errorf("failed to get current schema: %v", err)
-	}
-
-	// Store the fresh schema and get detailed changes
-	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
-		return false, fmt.Errorf("failed to store schema: %v", err)
-	}
-
-	// Get and log detailed changes
-	diff, hasChanged, err := sm.CheckSchemaChanges(context.Background(), chatID, db, conn.Config.Type)
-	if err != nil {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> Error checking changes: %v", err)
-		return false, fmt.Errorf("error checking changes: %v", err)
-	}
-
-	if diff != nil && !diff.IsFirstTime {
-		log.Printf("SchemaManager -> TriggerSchemaCheck -> Schema changes detected: %+v", diff)
-	}
-
-	return hasChanged, nil
-}
-
 // Helper function to get the latest schema
 func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
 	// Get current connection
@@ -908,17 +867,6 @@ func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
 	}
 
 	return schema, nil
-}
-
-// Add method to TableDiff to check if it's empty
-func (td TableDiff) isEmpty() bool {
-	return len(td.AddedColumns) == 0 &&
-		len(td.RemovedColumns) == 0 &&
-		len(td.ModifiedColumns) == 0 &&
-		len(td.AddedIndexes) == 0 &&
-		len(td.RemovedIndexes) == 0 &&
-		len(td.AddedFKs) == 0 &&
-		len(td.RemovedFKs) == 0
 }
 
 // Add new schema types
@@ -1064,4 +1012,326 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 	// sm.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
 	//     return &MySQLDriver{}
 	// })
+}
+
+// Update the CompareSchemasDetailed function to be more precise
+func (sm *SchemaManager) CompareSchemasDetailed(oldSchema, newSchema *SchemaInfo) (*SchemaDiff, bool) {
+	diff := &SchemaDiff{
+		AddedTables:    make([]string, 0),
+		RemovedTables:  make([]string, 0),
+		ModifiedTables: make(map[string]TableDiff),
+		UpdatedAt:      time.Now(),
+	}
+
+	hasChanges := false
+
+	// Check for added/removed tables
+	for tableName := range newSchema.Tables {
+		if _, exists := oldSchema.Tables[tableName]; !exists {
+			diff.AddedTables = append(diff.AddedTables, tableName)
+			hasChanges = true
+		}
+	}
+
+	for tableName := range oldSchema.Tables {
+		if _, exists := newSchema.Tables[tableName]; !exists {
+			diff.RemovedTables = append(diff.RemovedTables, tableName)
+			hasChanges = true
+		}
+	}
+
+	// Check for modified tables
+	for tableName, newTable := range newSchema.Tables {
+		oldTable, exists := oldSchema.Tables[tableName]
+		if !exists {
+			continue // Already handled as added table
+		}
+
+		// Skip if table checksums match exactly
+		if oldTable.Checksum == newTable.Checksum {
+			continue
+		}
+
+		tableDiff := TableDiff{
+			AddedColumns:    make([]string, 0),
+			RemovedColumns:  make([]string, 0),
+			ModifiedColumns: make([]string, 0),
+			AddedIndexes:    make([]string, 0),
+			RemovedIndexes:  make([]string, 0),
+			AddedFKs:        make([]string, 0),
+			RemovedFKs:      make([]string, 0),
+		}
+
+		// Check columns
+		for colName := range newTable.Columns {
+			if _, exists := oldTable.Columns[colName]; !exists {
+				tableDiff.AddedColumns = append(tableDiff.AddedColumns, colName)
+				hasChanges = true
+			}
+		}
+
+		for colName, oldCol := range oldTable.Columns {
+			newCol, exists := newTable.Columns[colName]
+			if !exists {
+				tableDiff.RemovedColumns = append(tableDiff.RemovedColumns, colName)
+				hasChanges = true
+				continue
+			}
+
+			// Check if column definition changed
+			if !reflect.DeepEqual(oldCol, newCol) {
+				tableDiff.ModifiedColumns = append(tableDiff.ModifiedColumns, colName)
+				hasChanges = true
+			}
+		}
+
+		// Check indexes
+		for idxName := range newTable.Indexes {
+			if _, exists := oldTable.Indexes[idxName]; !exists {
+				tableDiff.AddedIndexes = append(tableDiff.AddedIndexes, idxName)
+				hasChanges = true
+			}
+		}
+
+		for idxName, oldIdx := range oldTable.Indexes {
+			newIdx, exists := newTable.Indexes[idxName]
+			if !exists {
+				tableDiff.RemovedIndexes = append(tableDiff.RemovedIndexes, idxName)
+				hasChanges = true
+				continue
+			}
+
+			// Check if index definition changed
+			if !reflect.DeepEqual(oldIdx, newIdx) {
+				// Consider this a removed and added index
+				tableDiff.RemovedIndexes = append(tableDiff.RemovedIndexes, idxName)
+				tableDiff.AddedIndexes = append(tableDiff.AddedIndexes, idxName)
+				hasChanges = true
+			}
+		}
+
+		// Check foreign keys
+		for fkName := range newTable.ForeignKeys {
+			if _, exists := oldTable.ForeignKeys[fkName]; !exists {
+				tableDiff.AddedFKs = append(tableDiff.AddedFKs, fkName)
+				hasChanges = true
+			}
+		}
+
+		for fkName, oldFK := range oldTable.ForeignKeys {
+			newFK, exists := newTable.ForeignKeys[fkName]
+			if !exists {
+				tableDiff.RemovedFKs = append(tableDiff.RemovedFKs, fkName)
+				hasChanges = true
+				continue
+			}
+
+			// Check if FK definition changed
+			if !reflect.DeepEqual(oldFK, newFK) {
+				// Consider this a removed and added FK
+				tableDiff.RemovedFKs = append(tableDiff.RemovedFKs, fkName)
+				tableDiff.AddedFKs = append(tableDiff.AddedFKs, fkName)
+				hasChanges = true
+			}
+		}
+
+		// Only add table diff if there are actual changes
+		if len(tableDiff.AddedColumns) > 0 || len(tableDiff.RemovedColumns) > 0 ||
+			len(tableDiff.ModifiedColumns) > 0 || len(tableDiff.AddedIndexes) > 0 ||
+			len(tableDiff.RemovedIndexes) > 0 || len(tableDiff.AddedFKs) > 0 ||
+			len(tableDiff.RemovedFKs) > 0 {
+			diff.ModifiedTables[tableName] = tableDiff
+		}
+	}
+
+	// If no changes were detected, return nil diff
+	if !hasChanges {
+		return nil, false
+	}
+
+	return diff, true
+}
+
+// Fix the CompareSchemas function to always do detailed comparison
+func (sm *SchemaManager) CompareSchemas(oldSchema, newSchema *SchemaInfo) (*SchemaDiff, bool) {
+	// Skip the checksum comparison and always do detailed comparison
+	log.Printf("SchemaManager -> CompareSchemas -> Performing detailed comparison regardless of checksums")
+
+	diff := &SchemaDiff{
+		AddedTables:    make([]string, 0),
+		RemovedTables:  make([]string, 0),
+		ModifiedTables: make(map[string]TableDiff),
+		UpdatedAt:      time.Now(),
+	}
+
+	hasChanges := false
+
+	// Log table counts for debugging
+	log.Printf("SchemaManager -> CompareSchemas -> Old schema has %d tables, new schema has %d tables",
+		len(oldSchema.Tables), len(newSchema.Tables))
+
+	// Log table names for better debugging
+	oldTableNames := make([]string, 0, len(oldSchema.Tables))
+	for tableName := range oldSchema.Tables {
+		oldTableNames = append(oldTableNames, tableName)
+	}
+
+	newTableNames := make([]string, 0, len(newSchema.Tables))
+	for tableName := range newSchema.Tables {
+		newTableNames = append(newTableNames, tableName)
+	}
+
+	log.Printf("SchemaManager -> CompareSchemas -> Old tables: %v", oldTableNames)
+	log.Printf("SchemaManager -> CompareSchemas -> New tables: %v", newTableNames)
+
+	// Check for added tables
+	for tableName := range newSchema.Tables {
+		_, exists := oldSchema.Tables[tableName]
+		log.Printf("SchemaManager -> CompareSchemas -> Checking if table %s exists in old schema: %v", tableName, exists)
+
+		if !exists {
+			log.Printf("SchemaManager -> CompareSchemas -> Added table detected: %s", tableName)
+			diff.AddedTables = append(diff.AddedTables, tableName)
+			hasChanges = true
+		}
+	}
+
+	// Check for removed tables
+	for tableName := range oldSchema.Tables {
+		_, exists := newSchema.Tables[tableName]
+		log.Printf("SchemaManager -> CompareSchemas -> Checking if table %s exists in new schema: %v", tableName, exists)
+
+		if !exists {
+			log.Printf("SchemaManager -> CompareSchemas -> Removed table detected: %s", tableName)
+			diff.RemovedTables = append(diff.RemovedTables, tableName)
+			hasChanges = true
+		}
+	}
+
+	// Check for modified tables - CRITICAL FIX
+	for tableName, newTable := range newSchema.Tables {
+		oldTable, exists := oldSchema.Tables[tableName]
+		if !exists {
+			continue // Already handled as added table
+		}
+
+		// Always perform detailed comparison using compareTableSchemas
+		tableDiff := compareTableSchemas(oldTable, newTable)
+
+		// Log the detailed comparison results
+		log.Printf("SchemaManager -> CompareSchemas -> Table %s detailed comparison: added cols=%d, removed cols=%d, modified cols=%d, added indexes=%d, removed indexes=%d",
+			tableName, len(tableDiff.AddedColumns), len(tableDiff.RemovedColumns),
+			len(tableDiff.ModifiedColumns), len(tableDiff.AddedIndexes), len(tableDiff.RemovedIndexes))
+
+		// Only add table diff if there are actual changes
+		if !tableDiff.isEmpty() {
+			diff.ModifiedTables[tableName] = tableDiff
+			hasChanges = true
+			log.Printf("SchemaManager -> CompareSchemas -> Table %s has changes", tableName)
+		} else {
+			log.Printf("SchemaManager -> CompareSchemas -> Table %s has no changes", tableName)
+		}
+	}
+
+	// If no changes were detected, return false
+	if !hasChanges {
+		log.Printf("SchemaManager -> CompareSchemas -> No actual changes detected")
+		return nil, false
+	}
+
+	log.Printf("SchemaManager -> CompareSchemas -> Changes detected: added tables=%d, removed tables=%d, modified tables=%d",
+		len(diff.AddedTables), len(diff.RemovedTables), len(diff.ModifiedTables))
+	return diff, true
+}
+
+// Improve the compareTableDetails method to detect all changes
+func (sm *SchemaManager) compareTableDetails(oldTable, newTable *TableSchema) TableDiff {
+	tableDiff := TableDiff{
+		AddedColumns:    make([]string, 0),
+		RemovedColumns:  make([]string, 0),
+		ModifiedColumns: make([]string, 0),
+		AddedIndexes:    make([]string, 0),
+		RemovedIndexes:  make([]string, 0),
+		AddedFKs:        make([]string, 0),
+		RemovedFKs:      make([]string, 0),
+	}
+
+	// Check columns
+	for colName, newCol := range newTable.Columns {
+		if oldCol, exists := oldTable.Columns[colName]; !exists {
+			log.Printf("SchemaManager -> compareTableDetails -> Added column detected: %s", colName)
+			tableDiff.AddedColumns = append(tableDiff.AddedColumns, colName)
+		} else {
+			// Compare column details
+			if newCol.Type != oldCol.Type ||
+				newCol.IsNullable != oldCol.IsNullable ||
+				newCol.DefaultValue != oldCol.DefaultValue {
+				log.Printf("SchemaManager -> compareTableDetails -> Modified column detected: %s (type: %s->%s, nullable: %v->%v, default: %s->%s)",
+					colName, oldCol.Type, newCol.Type, oldCol.IsNullable, newCol.IsNullable,
+					oldCol.DefaultValue, newCol.DefaultValue)
+				tableDiff.ModifiedColumns = append(tableDiff.ModifiedColumns, colName)
+			}
+		}
+	}
+
+	for colName := range oldTable.Columns {
+		if _, exists := newTable.Columns[colName]; !exists {
+			log.Printf("SchemaManager -> compareTableDetails -> Removed column detected: %s", colName)
+			tableDiff.RemovedColumns = append(tableDiff.RemovedColumns, colName)
+		}
+	}
+
+	// Check indexes
+	for idxName, newIdx := range newTable.Indexes {
+		if oldIdx, exists := oldTable.Indexes[idxName]; !exists {
+			log.Printf("SchemaManager -> compareTableDetails -> Added index detected: %s", idxName)
+			tableDiff.AddedIndexes = append(tableDiff.AddedIndexes, idxName)
+		} else {
+			// Compare index details
+			if !reflect.DeepEqual(oldIdx, newIdx) {
+				log.Printf("SchemaManager -> compareTableDetails -> Modified index detected: %s", idxName)
+				tableDiff.RemovedIndexes = append(tableDiff.RemovedIndexes, idxName)
+				tableDiff.AddedIndexes = append(tableDiff.AddedIndexes, idxName)
+			}
+		}
+	}
+
+	for idxName := range oldTable.Indexes {
+		if _, exists := newTable.Indexes[idxName]; !exists {
+			log.Printf("SchemaManager -> compareTableDetails -> Removed index detected: %s", idxName)
+			tableDiff.RemovedIndexes = append(tableDiff.RemovedIndexes, idxName)
+		}
+	}
+
+	// Check foreign keys
+	for fkName, newFK := range newTable.ForeignKeys {
+		if oldFK, exists := oldTable.ForeignKeys[fkName]; !exists {
+			log.Printf("SchemaManager -> compareTableDetails -> Added foreign key detected: %s", fkName)
+			tableDiff.AddedFKs = append(tableDiff.AddedFKs, fkName)
+		} else {
+			// Compare FK details
+			if !reflect.DeepEqual(oldFK, newFK) {
+				log.Printf("SchemaManager -> compareTableDetails -> Modified foreign key detected: %s", fkName)
+				tableDiff.RemovedFKs = append(tableDiff.RemovedFKs, fkName)
+				tableDiff.AddedFKs = append(tableDiff.AddedFKs, fkName)
+			}
+		}
+	}
+
+	for fkName := range oldTable.ForeignKeys {
+		if _, exists := newTable.ForeignKeys[fkName]; !exists {
+			log.Printf("SchemaManager -> compareTableDetails -> Removed foreign key detected: %s", fkName)
+			tableDiff.RemovedFKs = append(tableDiff.RemovedFKs, fkName)
+		}
+	}
+
+	return tableDiff
+}
+
+// Add a method to clear schema cache
+func (sm *SchemaManager) ClearSchemaCache(chatID string) {
+	sm.mu.Lock()
+	delete(sm.schemaCache, chatID)
+	sm.mu.Unlock()
+	log.Printf("SchemaManager -> ClearSchemaCache -> Cleared schema cache for chatID: %s", chatID)
 }

@@ -45,6 +45,8 @@ type Manager struct {
 	activeExecutions map[string]*QueryExecution // key: streamID
 	executionMu      sync.RWMutex
 	cleanupMetrics   cleanupMetrics
+	fetchers         map[string]FetcherFactory
+	fetchersMu       sync.RWMutex
 }
 
 // NewManager creates a new connection manager
@@ -63,6 +65,7 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		schemaManager:    schemaManager,
 		activeExecutions: make(map[string]*QueryExecution),
 		executionMu:      sync.RWMutex{},
+		fetchers:         make(map[string]FetcherFactory),
 	}
 
 	// Set the DBManager in the SchemaManager
@@ -80,6 +83,11 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		m.startCleanupRoutine()
 	}()
 
+	// Register default fetchers
+	m.RegisterFetcher("postgresql", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
 	return m, nil
 }
 
@@ -87,6 +95,13 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 func (m *Manager) RegisterDriver(dbType string, driver DatabaseDriver) {
 	m.drivers[dbType] = driver
 	log.Printf("DBManager -> Registered driver for type: %s", dbType)
+}
+
+// RegisterFetcher registers a schema fetcher for a database type
+func (m *Manager) RegisterFetcher(dbType string, factory FetcherFactory) {
+	m.fetchersMu.Lock()
+	defer m.fetchersMu.Unlock()
+	m.fetchers[dbType] = factory
 }
 
 // Connect creates a new database connection
@@ -185,7 +200,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 	}()
 
 	conn.OnSchemaChange = func(chatID string) {
-		m.schemaManager.TriggerSchemaCheck(chatID, TriggerTypeManual)
+		m.doSchemaCheck(chatID)
 	}
 
 	log.Printf("DBManager -> Connect -> Connection completed successfully for chatID: %s", chatID)
@@ -610,17 +625,24 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 		return fmt.Errorf("connection not found")
 	}
 
-	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
+	// Force clear any cached schema to ensure we get fresh data
+	m.schemaManager.ClearSchemaCache(chatID)
+
+	// Get fresh schema from database
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(ctx, chatID, conn, dbConn.Config.Type)
 	if err != nil {
 		return fmt.Errorf("schema check failed: %v", err)
 	}
 
 	if diff != nil {
-		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %+v", chatID, diff)
+		log.Printf("DBManager -> doSchemaCheck -> Schema diff for chat %s: %+v", chatID, diff)
 	}
 
 	if hasChanged {
-		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %t", chatID, hasChanged)
+		log.Printf("DBManager -> doSchemaCheck -> Schema has changed for chat %s: %t", chatID, hasChanged)
 		if m.streamHandler != nil {
 			m.streamHandler.HandleSchemaChange(dbConn.UserID, chatID, dbConn.StreamID, diff)
 		}

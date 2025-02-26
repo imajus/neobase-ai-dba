@@ -24,7 +24,7 @@ type QueryExecutionResponse struct {
 	QueryID           string      `json:"query_id"`
 	IsExecuted        bool        `json:"is_executed"`
 	IsRolledBack      bool        `json:"is_rolled_back"`
-	ExecutionTime     int         `json:"execution_time"`
+	ExecutionTime     *int        `json:"execution_time"`
 	ExecutionResult   interface{} `json:"execution_result"`
 	Error             *QueryError `json:"error,omitempty"`
 	TotalRecordsCount *int        `json:"total_records_count"`
