@@ -119,17 +119,17 @@ func Initialize() {
 				DBConfigs: []llm.LLMDBConfig{
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
-						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypePostgreSQL),
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypePostgreSQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypePostgreSQL),
 					},
 					{
 						DBType:       constants.DatabaseTypeYugabyteDB,
-						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypeYugabyteDB),
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
 					},
 					{
 						DBType:       constants.DatabaseTypeMySQL,
-						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypeMySQL),
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL),
 					},
 				},
@@ -139,7 +139,28 @@ func Initialize() {
 			}
 		case constants.Gemini:
 			// Register default Gemini client
-
+			err := manager.RegisterClient(constants.Gemini, llm.Config{
+				Provider:            constants.Gemini,
+				Model:               constants.GeminiModel,
+				APIKey:              os.Getenv("GEMINI_API_KEY"),
+				MaxCompletionTokens: constants.GeminiMaxCompletionTokens,
+				Temperature:         constants.GeminiTemperature,
+				DBConfigs: []llm.LLMDBConfig{
+					{
+						DBType:       constants.DatabaseTypePostgreSQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypePostgreSQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeYugabyteDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeYugabyteDB),
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to register Gemini client: %v", err)
+			}
 		}
 		return manager
 	}); err != nil {

@@ -721,21 +721,23 @@ export default function MessageTile({
                         <div className="flex items-center">
                             {(
                                 !queryStates[queryId]?.isExecuting && !query.is_executed && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setIsEditingQuery(true);
-                                        }}
-                                        className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300"
-                                        title="Edit query"
-                                    >
-                                        <Pencil className="w-4 h-4" />
-                                    </button>
+                                    <>
+                                        <button
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                setIsEditingQuery(true);
+                                            }}
+                                            className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300"
+                                            title="Edit query"
+                                        >
+                                            <Pencil className="w-4 h-4" />
+                                        </button>
+                                        <div className="w-px h-4 bg-gray-700 mx-2" />
+                                    </>
                                 )
                             )}
 
-                            <div className="w-px h-4 bg-gray-700 mx-2" />
                             {queryStates[queryId]?.isExecuting ? (
                                 <button
                                     onClick={(e) => {
@@ -827,7 +829,7 @@ export default function MessageTile({
                         </div>
                     ) : (
                         <pre className={`
-                        text-sm overflow-x-auto p-4 border-t border-gray-700
+                    text-sm overflow-x-auto p-4 border-t border-gray-700
                         ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
                     `}>
                             <code className="whitespace-pre-wrap break-words">
@@ -982,9 +984,9 @@ export default function MessageTile({
                                     ) : (
                                         <div className="px-0">
                                             <div className={`
-                                                text-green-400 pb-6 w-full
+                                            text-green-400 pb-6 w-full
                                                     ${!query.example_result && !query.error ? '' : ''}
-                                            `}>
+                                        `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
                                                         {shouldShowExampleResult ? (
@@ -1051,36 +1053,36 @@ export default function MessageTile({
                 w-full
               `}>
             <div className={`
-            group flex items-center relative
-            ${message.type === 'user' ? 'justify-end' : 'justify-start'}
-            w-full
-          `}>
+        group flex items-center relative
+        ${message.type === 'user' ? 'justify-end' : 'justify-start'}
+        w-full
+      `}>
                 {message.type === 'user' && (
                     <div className="
-                absolute 
-                right-0 
-                -bottom-9
-                md:-bottom-10 
-                flex 
-                gap-1
-                z-[5]
+            absolute 
+            right-0 
+            -bottom-9
+            md:-bottom-10 
+            flex 
+            gap-1
+            z-[5]
 
-              ">
+          ">
                         <button
                             onClick={() => handleCopyToClipboard(message.content)}
                             className="
-                    -translate-y-1/2
-                    p-1.5
-                    md:p-2 
-                    group-hover:opacity-100 
-                    transition-colors
-                    hover:bg-neo-gray
-                    rounded-lg
-                    flex-shrink-0
-                    border-0
-                    bg-white/80
-                    backdrop-blur-sm
-                  "
+                -translate-y-1/2
+                p-1.5
+                md:p-2 
+                group-hover:opacity-100 
+                transition-colors
+                hover:bg-neo-gray
+                rounded-lg
+                flex-shrink-0
+                border-0
+                bg-white/80
+                backdrop-blur-sm
+              "
                             title="Copy message"
                         >
                             <Copy className="w-4 h-4 text-gray-800" />
@@ -1096,19 +1098,19 @@ export default function MessageTile({
                                     }, 0);
                                 }}
                                 className="
-                      -translate-y-1/2
-                      p-1.5
-                      md:p-2
-                      group-hover:opacity-100 
-                      hover:bg-neo-gray
-                      transition-colors
-                      rounded-lg
-                      flex-shrink-0
-                      border-0
-                      bg-white/80
-                      backdrop-blur-sm
+                  -translate-y-1/2
+                  p-1.5
+                  md:p-2
+                  group-hover:opacity-100 
+                  hover:bg-neo-gray
+                  transition-colors
+                  rounded-lg
+                  flex-shrink-0
+                  border-0
+                  bg-white/80
+                  backdrop-blur-sm
 
-                    "
+                "
                                 title="Edit message"
                             >
                                 <Pencil className="w-4 h-4 text-gray-800" />
@@ -1117,27 +1119,27 @@ export default function MessageTile({
                     </div>
                 )}
                 <div className={`
-        message-bubble
-        inline-block
+    message-bubble
+    inline-block
         relative
-        ${message.type === 'user' ? (
+    ${message.type === 'user' ? (
                         editingMessageId === message.id
                             ? 'w-[95%] sm:w-[85%] md:w-[75%]'
                             : 'w-fit max-w-[95%] sm:max-w-[85%] md:max-w-[75%]'
                     ) : 'w-fit max-w-[95%] sm:max-w-[85%] md:max-w-[75%]'}
-        ${message.type === 'user'
+    ${message.type === 'user'
                         ? 'message-bubble-user'
                         : 'message-bubble-ai'
                     }
-    `}>
+`}>
                     <div className={`
-            ${editingMessageId === message.id ? 'w-full min-w-full' : 'w-auto min-w-0'}
-            ${message.queries?.length ? 'min-w-full' : ''}
-        `}>
+        ${editingMessageId === message.id ? 'w-full min-w-full' : 'w-auto min-w-0'}
+        ${message.queries?.length ? 'min-w-full' : ''}
+    `}>
                         <div className="relative">
                             {message.content.length === 0 && message.loading_steps && message.loading_steps.length > 0 && (
                                 <div className={`
-                                        ${message.content ? 'animate-fade-up-out absolute w-full' : ''}
+                                    ${message.content ? 'animate-fade-up-out absolute w-full' : ''}
                                         text-gray-700
                                     `}>
                                     <LoadingSteps

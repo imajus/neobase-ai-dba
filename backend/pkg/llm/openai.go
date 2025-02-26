@@ -7,7 +7,6 @@ import (
 	"log"
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
-	"strings"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -16,7 +15,7 @@ type OpenAIClient struct {
 	client              *openai.Client
 	model               string
 	maxCompletionTokens int
-	temperature         float32
+	temperature         float64
 	DBConfigs           []LLMDBConfig
 }
 
@@ -50,7 +49,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	for _, dbConfig := range c.DBConfigs {
 		if dbConfig.DBType == dbType {
 			systemPrompt = dbConfig.SystemPrompt
-			responseSchema = dbConfig.Schema
+			responseSchema = dbConfig.Schema.(string)
 			break
 		}
 	}
@@ -93,7 +92,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		Model:               c.model,
 		Messages:            openAIMessages,
 		MaxCompletionTokens: c.maxCompletionTokens,
-		Temperature:         c.temperature,
+		Temperature:         float32(c.temperature),
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
 			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
@@ -131,33 +130,5 @@ func (c *OpenAIClient) GetModelInfo() ModelInfo {
 		Name:                c.model,
 		Provider:            "openai",
 		MaxCompletionTokens: c.maxCompletionTokens,
-		ContextLimit:        getModelContextLimit(c.model),
-	}
-}
-
-// Helper functions
-func mapRole(role string) string {
-	switch strings.ToLower(role) {
-	case "user":
-		return "user"
-	case "assistant":
-		return "assistant"
-	case "system":
-		return "system"
-	default:
-		return "user"
-	}
-}
-
-func getModelContextLimit(model string) int {
-	switch model {
-	case openai.GPT4TurboPreview:
-		return 128000 // 128k tokens
-	case openai.GPT4:
-		return 8192 // 8k tokens
-	case openai.GPT3Dot5Turbo:
-		return 4096 // 4k tokens
-	default:
-		return 4096
 	}
 }

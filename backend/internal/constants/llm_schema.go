@@ -1,195 +1,5 @@
 package constants
 
-// LLM response schema for structured query generation
-const PostgresLLMResponseSchema = `{
-    "type": "object",
-    "required": ["assistantMessage"],
-    "properties": {
-        "queries": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": [
-                    "query",
-                    "queryType",
-                    "explanation",
-                    "isCritical",
-                    "canRollback",
-                    "estimateResponseTime"
-                ],
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "SQL query to fetch order details."
-                    },
-                    "tables": {
-                        "type": "string",
-                        "description": "Tables being used in the query(comma separated)"
-                    },
-                    "queryType": {
-                        "type": "string",
-                        "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
-                    },
-                    "pagination": {
-                        "type": "object",
-                        "required": [
-                            "paginatedQuery"
-                        ],
-                        "properties": {
-                            "paginatedQuery": {
-                                "type": "string",
-                                "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
-                            }
-                        }
-                    },
-                    "isCritical": {
-                        "type": "boolean",
-                        "description": "Indicates if the query is critical."
-                    },
-                    "canRollback": {
-                        "type": "boolean",
-                        "description": "Indicates if the operation can be rolled back."
-                    },
-                    "explanation": {
-                        "type": "string",
-                        "description": "Description of what the query does."
-                    },
-                    "exampleResult": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "description": "Key-value pairs representing column names and example values.",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        },
-                        "description": "An example array of results that the query might return."
-                    },
-                    "rollbackQuery": {
-                        "type": "string",
-                        "description": "Query to undo this operation (if canRollback=true), default empty"
-                    },
-                    "estimateResponseTime": {
-                        "type": "number",
-                        "description": "Estimated time (in milliseconds) to fetch the response."
-                    },
-                    "rollbackDependentQuery": {
-                        "type": "string",
-                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
-                    }
-                },
-                "additionalProperties": false
-            },
-            "description": "List of queries related to orders."
-        },
-        "assistantMessage": {
-            "type": "string",
-            "description": "Message from the assistant providing context about the orders."
-        }
-    },
-    "additionalProperties": false
-}`
-
-const YugabyteDBLLMResponseSchema = `{
-    "type": "object",
-    "required": ["assistantMessage"],
-    "properties": {
-        "queries": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": [
-                    "query",
-                    "queryType",
-                    "explanation",
-                    "isCritical",
-                    "canRollback",
-                    "estimateResponseTime"
-                ],
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "SQL query to fetch order details."
-                    },
-                    "tables": {
-                        "type": "string",
-                        "description": "Tables being used in the query(comma separated)"
-                    },
-                    "queryType": {
-                        "type": "string",
-                        "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
-                    },
-                    "pagination": {
-                        "type": "object",
-                        "required": [
-                            "paginatedQuery"
-                        ],
-                        "properties": {
-                            "paginatedQuery": {
-                                "type": "string",
-                                "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
-                            }
-                        }
-                    },
-                    "isCritical": {
-                        "type": "boolean",
-                        "description": "Indicates if the query is critical."
-                    },
-                    "canRollback": {
-                        "type": "boolean",
-                        "description": "Indicates if the operation can be rolled back."
-                    },
-                    "explanation": {
-                        "type": "string",
-                        "description": "Description of what the query does."
-                    },
-                    "exampleResult": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "description": "Key-value pairs representing column names and example values.",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        },
-                        "description": "An example array of results that the query might return."
-                    },
-                    "rollbackQuery": {
-                        "type": "string",
-                        "description": "Query to undo this operation (if canRollback=true), default empty"
-                    },
-                    "estimateResponseTime": {
-                        "type": "number",
-                        "description": "Estimated time (in milliseconds) to fetch the response."
-                    },
-                    "rollbackDependentQuery": {
-                        "type": "string",
-                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
-                    }
-                },
-                "additionalProperties": false
-            },
-            "description": "List of queries related to orders."
-        },
-        "assistantMessage": {
-            "type": "string",
-            "description": "Message from the assistant providing context about the orders."
-        }
-    },
-    "additionalProperties": false
-}`
-
-func GetLLMResponseSchema(dbType string) string {
-	switch dbType {
-	case DatabaseTypePostgreSQL:
-		return PostgresLLMResponseSchema
-	case DatabaseTypeYugabyteDB:
-		return YugabyteDBLLMResponseSchema
-	default:
-		return PostgresLLMResponseSchema
-	}
-}
-
 // LLMResponse represents the structured response from LLM
 type LLMResponse struct {
 	Queries          []QueryInfo `json:"queries,omitempty"`
@@ -198,17 +8,17 @@ type LLMResponse struct {
 
 // QueryInfo represents a single query in the LLM response
 type QueryInfo struct {
-	Query                  string                   `json:"query"`
-	Tables                 string                   `json:"tables,omitempty"`
-	QueryType              string                   `json:"queryType"`
-	Pagination             *Pagination              `json:"pagination,omitempty"`
-	IsCritical             bool                     `json:"isCritical"`
-	CanRollback            bool                     `json:"canRollback"`
-	Explanation            string                   `json:"explanation"`
-	ExampleResult          []map[string]interface{} `json:"exampleResult,omitempty"`
-	RollbackQuery          string                   `json:"rollbackQuery,omitempty"`
-	EstimateResponseTime   interface{}              `json:"estimateResponseTime"`
-	RollbackDependentQuery string                   `json:"rollbackDependentQuery,omitempty"`
+	Query                  string                    `json:"query"`
+	Tables                 string                    `json:"tables,omitempty"`
+	QueryType              string                    `json:"queryType"`
+	Pagination             *Pagination               `json:"pagination,omitempty"`
+	IsCritical             bool                      `json:"isCritical"`
+	CanRollback            bool                      `json:"canRollback"`
+	Explanation            string                    `json:"explanation"`
+	ExampleResult          *[]map[string]interface{} `json:"exampleResult,omitempty"`
+	RollbackQuery          string                    `json:"rollbackQuery,omitempty"`
+	EstimateResponseTime   interface{}               `json:"estimateResponseTime"`
+	RollbackDependentQuery string                    `json:"rollbackDependentQuery,omitempty"`
 }
 
 type Pagination struct {
