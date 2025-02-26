@@ -509,6 +509,19 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
 				log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
 			}
+			var tables *string
+			if queryMap["tables"] != nil {
+				tables = utils.ToStringPtr(queryMap["tables"].(string))
+			}
+			var queryType *string
+			if queryMap["queryType"] != nil {
+				queryType = utils.ToStringPtr(queryMap["queryType"].(string))
+			}
+
+			var rollbackQuery *string
+			if queryMap["rollbackQuery"] != nil {
+				rollbackQuery = utils.ToStringPtr(queryMap["rollbackQuery"].(string))
+			}
 			queries = append(queries, models.Query{
 				ID:                     primitive.NewObjectID(),
 				Query:                  queryMap["query"].(string),
@@ -522,9 +535,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				ExampleResult:          exampleResult,
 				ExecutionResult:        nil,
 				Error:                  nil,
-				QueryType:              utils.ToStringPtr(queryMap["queryType"].(string)),
-				Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
-				RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
+				QueryType:              queryType,
+				Tables:                 tables,
+				RollbackQuery:          rollbackQuery,
 				RollbackDependentQuery: rollbackDependentQuery,
 				Pagination:             pagination,
 			})

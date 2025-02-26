@@ -60,7 +60,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		Content: systemPrompt,
 	})
 
-	log.Printf("GenerateResponse -> messages: %v", messages)
+	log.Printf("OPENAI -> GenerateResponse -> messages: %v", messages)
 
 	for _, msg := range messages {
 		content := ""
@@ -115,7 +115,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		return "", fmt.Errorf("no response from OpenAI")
 	}
 
-	log.Printf("GenerateResponse -> resp: %v", resp)
+	log.Printf("OPENAI -> GenerateResponse -> resp: %v", resp)
 	// Validate response against schema
 	var llmResponse constants.LLMResponse
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &llmResponse); err != nil {

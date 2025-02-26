@@ -580,6 +580,8 @@ function AppContent() {
       }
       console.log('new stream id', streamId);
 
+      // Wait for 100 ms for the eventSource to be open
+      await new Promise(resolve => setTimeout(resolve, 100));
       const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
 
       if (response.success) {

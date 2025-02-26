@@ -404,9 +404,15 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 		}
 	} else if lastResult != nil {
 		rowsAffected, _ := lastResult.RowsAffected()
-		result.Result = map[string]interface{}{
-			"rowsAffected": rowsAffected,
-			"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
+		if rowsAffected > 0 {
+			result.Result = map[string]interface{}{
+				"rowsAffected": rowsAffected,
+				"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
+			}
+		} else {
+			result.Result = map[string]interface{}{
+				"message": "Query performed successfully",
+			}
 		}
 	}
 

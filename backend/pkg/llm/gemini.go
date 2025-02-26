@@ -91,6 +91,10 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 			})
 		}
 	}
+
+	for _, msg := range geminiMessages {
+		log.Printf("GEMINI -> GenerateResponse -> msg: %v", msg)
+	}
 	// Build the request with a single content bundle.
 	// Call Gemini's content generation API.
 	model := c.client.GenerativeModel(c.model)
@@ -104,12 +108,13 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 
 	session := model.StartChat()
 	session.History = geminiMessages
-	result, err := session.SendMessage(ctx, genai.Text("answer the request"))
+	result, err := session.SendMessage(ctx, genai.Text(""))
 	if err != nil {
 		log.Printf("gemini API error: %v", err)
 		return "", fmt.Errorf("gemini API error: %v", err)
 	}
 
+	log.Printf("GEMINI -> GenerateResponse -> result: %v", result)
 	responseText := strings.ReplaceAll(fmt.Sprintf("%v", result.Candidates[0].Content.Parts[0]), "```json", "")
 	responseText = strings.ReplaceAll(responseText, "```", "")
 	var llmResponse constants.LLMResponse
