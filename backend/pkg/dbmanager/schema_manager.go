@@ -1008,6 +1008,10 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 		return &PostgresDriver{}
 	})
 
+	sm.RegisterFetcher("yugabytedb", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
 	// Register MySQL fetcher when implemented
 	// sm.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
 	//     return &MySQLDriver{}
