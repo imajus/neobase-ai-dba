@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
@@ -50,6 +49,8 @@ type ChatService interface {
 	// Db Manager Stream Handler
 	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
+	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
+	EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error)
 }
 
 type chatService struct {
@@ -139,6 +140,11 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	}
 	if chat.UserID != userObjID {
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Cannot change the database type
+	if req.Connection.Type != chat.Connection.Type {
+		return nil, http.StatusBadRequest, fmt.Errorf("cannot change the database type")
 	}
 
 	// Test connection without creating a persistent connection
@@ -497,6 +503,12 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				estimateResponseTime = &defaultVal
 			}
 
+			log.Printf("processLLMResponse -> queryMap[\"pagination\"]: %v", queryMap["pagination"])
+			pagination := &models.Pagination{}
+			if queryMap["pagination"] != nil {
+				pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
+				log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
+			}
 			queries = append(queries, models.Query{
 				ID:                     primitive.NewObjectID(),
 				Query:                  queryMap["query"].(string),
@@ -514,6 +526,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
 				RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
 				RollbackDependentQuery: rollbackDependentQuery,
+				Pagination:             pagination,
 			})
 		}
 	}
@@ -641,7 +654,7 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 	log.Printf("UpdateMessage -> content: %+v", req.Content)
 	// Update message content, This is a user message
 	message.Content = req.Content
-
+	message.IsEdited = true
 	log.Printf("UpdateMessage -> message: %+v", message)
 	log.Printf("UpdateMessage -> message.Content: %+v", message.Content)
 	err = s.chatRepo.UpdateMessage(message.ID, message)
@@ -769,6 +782,7 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		ChatID:    msg.ChatID.Hex(),
 		Type:      msg.Type,
 		Content:   msg.Content,
+		IsEdited:  msg.IsEdited,
 		Queries:   dtos.ToQueryDto(msg.Queries),
 		CreatedAt: msg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -925,7 +939,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 		if diff.IsFirstTime {
 			// For first time, format the full schema
 			schemaMsg = schemaManager.FormatSchemaForLLM(diff.FullSchema)
-			log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
 		} else {
 			// For subsequent changes, get current schema and show changes
 			schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type)
@@ -937,10 +950,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 					s.formatSchemaDiff(diff))
 			}
 		}
-
-		log.Printf("ChatService -> HandleSchemaChange -> saving schemaMsg as LLM message: %s", schemaMsg)
-
-		log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
 
 		// Clear previous system message from LLM
 		if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
@@ -958,7 +967,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 			},
 		}
 
-		log.Printf("ChatService -> HandleSchemaChange -> llmMsg: %+v", llmMsg)
 		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
 			log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
 		}
@@ -1010,7 +1018,7 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 }
 
 func isValidDBType(dbType string) bool {
-	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB} // Add more as supported
+	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB} // Add more as supported
 	for _, t := range validTypes {
 		if t == dbType {
 			return true
@@ -1169,9 +1177,21 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				},
 			},
 		})
-		return nil, http.StatusInternalServerError, errors.New(queryErr.Details)
+		return &dtos.QueryExecutionResponse{
+			ChatID:            chatID,
+			MessageID:         msg.ID.Hex(),
+			QueryID:           query.ID.Hex(),
+			IsExecuted:        false,
+			IsRolledBack:      false,
+			ExecutionTime:     query.ExecutionTime,
+			ExecutionResult:   nil,
+			Error:             queryErr,
+			TotalRecordsCount: nil,
+		}, http.StatusOK, nil
 	}
-
+	var totalRecordsCount *int
+	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
+	// Then we need to save capped 50 results in DB and the original records count to pagination.totalRecordsCount...
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
 	log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %+v", result.ResultJSON)
 
@@ -1179,6 +1199,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
 	if err := json.Unmarshal([]byte(result.ResultJSON), &resultListFormatting); err != nil {
+		log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
 		if err := json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting); err != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
 			// Try to unmarshal as a map
@@ -1189,18 +1210,64 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		}
 	}
 
+	log.Printf("ChatService -> ExecuteQuery -> resultListFormatting: %+v", resultListFormatting)
+	log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
 	if len(resultListFormatting) > 0 {
+		log.Printf("ChatService -> ExecuteQuery -> resultListFormatting: %+v", resultListFormatting)
 		formattedResultJSON = resultListFormatting
+		if len(resultListFormatting) > 50 {
+			log.Printf("ChatService -> ExecuteQuery -> resultListFormatting length > 50")
+			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting)) // Store actual total count
+			formattedResultJSON = resultListFormatting[:50]               // Cap the result to 50 records
+
+			// Cap the result.ResultJSON to 50 records
+			cappedResults, err := json.Marshal(resultListFormatting[:50])
+			if err != nil {
+				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
+			} else {
+				result.ResultJSON = string(cappedResults)
+			}
+		} else {
+			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting))
+		}
+	} else if resultMapFormatting != nil && resultMapFormatting["results"] != nil && len(resultMapFormatting["results"].([]interface{})) > 0 {
+		log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
+		totalRecordsCount = utils.ToIntPtr(len(resultMapFormatting["results"].([]interface{})))
+		if len(resultMapFormatting["results"].([]interface{})) > 50 {
+			formattedResultJSON = map[string]interface{}{
+				"results": resultMapFormatting["results"].([]interface{})[:50],
+			}
+			cappedResults := map[string]interface{}{
+				"results": resultMapFormatting["results"].([]interface{})[:50],
+			}
+			cappedResultsJSON, err := json.Marshal(cappedResults)
+			if err != nil {
+				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
+			} else {
+				result.ResultJSON = string(cappedResultsJSON)
+			}
+		} else {
+			formattedResultJSON = map[string]interface{}{
+				"results": resultMapFormatting["results"].([]interface{}),
+			}
+		}
 	} else {
 		formattedResultJSON = resultMapFormatting
 	}
 
+	log.Printf("ChatService -> ExecuteQuery -> totalRecordsCount: %+v", totalRecordsCount)
 	log.Printf("ChatService -> ExecuteQuery -> formattedResultJSON: %+v", formattedResultJSON)
 
 	query.IsExecuted = true
 	query.IsRolledBack = false
 	query.ExecutionTime = &result.ExecutionTime
 	query.ExecutionResult = &result.ResultJSON
+	if totalRecordsCount != nil {
+		if query.Pagination == nil {
+			query.Pagination = &models.Pagination{}
+		}
+		query.Pagination.TotalRecordsCount = totalRecordsCount
+	}
 	if result.Error != nil {
 		query.Error = &models.QueryError{
 			Code:    result.Error.Code,
@@ -1219,6 +1286,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+					if totalRecordsCount != nil {
+						if (*msg.Queries)[i].Pagination == nil {
+							(*msg.Queries)[i].Pagination = &models.Pagination{}
+						}
+						(*msg.Queries)[i].Pagination.TotalRecordsCount = totalRecordsCount
+					}
 					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
@@ -1328,28 +1401,30 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	// Send stream event
 	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
-		Event: "query-executed",
+		Event: "query-results",
 		Data: map[string]interface{}{
-			"chat_id":          chatID,
-			"message_id":       msg.ID.Hex(),
-			"query_id":         query.ID.Hex(),
-			"is_executed":      query.IsExecuted,
-			"is_rolled_back":   query.IsRolledBack,
-			"execution_time":   *query.ExecutionTime,
-			"execution_result": formattedResultJSON,
-			"error":            query.Error,
+			"chat_id":             chatID,
+			"message_id":          msg.ID.Hex(),
+			"query_id":            query.ID.Hex(),
+			"is_executed":         query.IsExecuted,
+			"is_rolled_back":      query.IsRolledBack,
+			"execution_time":      *query.ExecutionTime,
+			"execution_result":    formattedResultJSON,
+			"total_records_count": totalRecordsCount,
+			"error":               query.Error,
 		},
 	})
 
 	return &dtos.QueryExecutionResponse{
-		ChatID:          chatID,
-		MessageID:       msg.ID.Hex(),
-		QueryID:         query.ID.Hex(),
-		IsExecuted:      query.IsExecuted,
-		IsRolledBack:    query.IsRolledBack,
-		ExecutionTime:   *query.ExecutionTime,
-		ExecutionResult: formattedResultJSON,
-		Error:           result.Error,
+		ChatID:            chatID,
+		MessageID:         msg.ID.Hex(),
+		QueryID:           query.ID.Hex(),
+		IsExecuted:        query.IsExecuted,
+		IsRolledBack:      query.IsRolledBack,
+		ExecutionTime:     query.ExecutionTime,
+		ExecutionResult:   formattedResultJSON,
+		Error:             result.Error,
+		TotalRecordsCount: totalRecordsCount,
 	}, http.StatusOK, nil
 }
 
@@ -1468,7 +1543,17 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					"error":      queryErr,
 				},
 			})
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute dependent query: %v", queryErr)
+			return &dtos.QueryExecutionResponse{
+				ChatID:            chatID,
+				MessageID:         msg.ID.Hex(),
+				QueryID:           query.ID.Hex(),
+				IsExecuted:        true,
+				IsRolledBack:      false,
+				ExecutionTime:     query.ExecutionTime,
+				ExecutionResult:   nil,
+				Error:             queryErr,
+				TotalRecordsCount: nil,
+			}, http.StatusOK, nil
 		}
 
 		// Get LLM context from previous messages
@@ -1747,7 +1832,17 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				"error":      queryErr,
 			},
 		})
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute rollback query: %v", queryErr)
+		return &dtos.QueryExecutionResponse{
+			ChatID:            chatID,
+			MessageID:         msg.ID.Hex(),
+			QueryID:           query.ID.Hex(),
+			IsExecuted:        true,
+			IsRolledBack:      false,
+			ExecutionTime:     query.ExecutionTime,
+			ExecutionResult:   nil,
+			Error:             queryErr,
+			TotalRecordsCount: nil,
+		}, http.StatusOK, nil
 	}
 
 	log.Printf("ChatService -> RollbackQuery -> result: %+v", result)
@@ -1802,13 +1897,13 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		}
 
 		if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-			log.Printf("ChatService -> ExecuteQuery -> assistantResponse: %+v", assistantResponse)
-			log.Printf("ChatService -> ExecuteQuery -> queries type: %T", assistantResponse["queries"])
+			log.Printf("ChatService -> RollbackQuery -> assistantResponse: %+v", assistantResponse)
+			log.Printf("ChatService -> RollbackQuery -> queries type: %T", assistantResponse["queries"])
 
 			// Handle primitive.A (BSON array) type
 			switch queriesVal := assistantResponse["queries"].(type) {
 			case primitive.A:
-				log.Printf("ChatService -> ExecuteQuery -> queries is primitive.A")
+				log.Printf("ChatService -> RollbackQuery -> queries is primitive.A")
 				// Convert primitive.A to []interface{}
 				queries := make([]interface{}, len(queriesVal))
 				for i, q := range queriesVal {
@@ -1839,7 +1934,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				assistantResponse["queries"] = queries
 
 			case []interface{}:
-				log.Printf("ChatService -> ExecuteQuery -> queries is []interface{}")
+				log.Printf("ChatService -> RollbackQuery -> queries is []interface{}")
 				for i, q := range queriesVal {
 					if queryMap, ok := q.(map[string]interface{}); ok {
 						if queryMap["id"] == query.ID.Hex() {
@@ -1896,7 +1991,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		QueryID:         query.ID.Hex(),
 		IsExecuted:      query.IsExecuted,
 		IsRolledBack:    query.IsRolledBack,
-		ExecutionTime:   *query.ExecutionTime,
+		ExecutionTime:   query.ExecutionTime,
 		ExecutionResult: result.Result,
 		Error:           result.Error,
 	}, http.StatusOK, nil
@@ -2093,4 +2188,178 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 		log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 	}()
 	return http.StatusOK, nil
+}
+
+// Fetches paginated results for a query
+func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error) {
+	log.Printf("ChatService -> GetQueryResults -> userID: %s, chatID: %s, messageID: %s, queryID: %s, streamID: %s, offset: %d", userID, chatID, messageID, queryID, streamID, offset)
+	_, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+
+	if query.Pagination == nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("query does not support pagination")
+	}
+	if query.Pagination.PaginatedQuery == nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("query does not support pagination")
+	}
+
+	// Check the connection status and connect if needed
+	if !s.dbManager.IsConnected(chatID) {
+		status, err := s.ConnectDB(ctx, userID, chatID, streamID)
+		if err != nil {
+			return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+		}
+	}
+	log.Printf("ChatService -> GetQueryResults -> query.Pagination.PaginatedQuery: %+v", query.Pagination.PaginatedQuery)
+	offSettPaginatedQuery := strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
+	log.Printf("ChatService -> GetQueryResults -> offSettPaginatedQuery: %+v", offSettPaginatedQuery)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, offSettPaginatedQuery, *query.QueryType, false)
+	if queryErr != nil {
+		log.Printf("ChatService -> GetQueryResults -> queryErr: %+v", queryErr)
+		return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
+	}
+
+	log.Printf("ChatService -> GetQueryResults -> result: %+v", result)
+	log.Printf("ChatService -> GetQueryResults -> result.ResultJSON: %+v", result.ResultJSON)
+
+	var formattedResultJSON interface{}
+	var resultListFormatting []interface{} = []interface{}{}
+	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
+	if err := json.Unmarshal([]byte(result.ResultJSON), &resultListFormatting); err != nil {
+		if err := json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting); err != nil {
+			log.Printf("ChatService -> GetQueryResults -> Error unmarshalling result JSON: %v", err)
+			// Try to unmarshal as a map
+			err = json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting)
+			if err != nil {
+				log.Printf("ChatService -> GetQueryResults -> Error unmarshalling result JSON: %v", err)
+			}
+		}
+	}
+
+	if len(resultListFormatting) > 0 {
+		formattedResultJSON = resultListFormatting
+	} else {
+		formattedResultJSON = resultMapFormatting
+	}
+
+	log.Printf("ChatService -> GetQueryResults -> formattedResultJSON: %+v", formattedResultJSON)
+
+	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+		Event: "query-paginated-results",
+		Data: map[string]interface{}{
+			"chat_id":             chatID,
+			"message_id":          messageID,
+			"query_id":            queryID,
+			"execution_result":    formattedResultJSON,
+			"error":               queryErr,
+			"total_records_count": query.Pagination.TotalRecordsCount,
+		},
+	})
+	return &dtos.QueryResultsResponse{
+		ChatID:            chatID,
+		MessageID:         messageID,
+		QueryID:           queryID,
+		ExecutionResult:   formattedResultJSON,
+		Error:             queryErr,
+		TotalRecordsCount: query.Pagination.TotalRecordsCount,
+	}, http.StatusOK, nil
+}
+
+func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error) {
+	log.Printf("ChatService -> EditQuery -> userID: %s, chatID: %s, messageID: %s, queryID: %s, query: %s", userID, chatID, messageID, queryID, query)
+
+	message, queryData, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+
+	if queryData.IsExecuted || queryData.IsRolledBack {
+		return nil, http.StatusBadRequest, fmt.Errorf("query has already been executed, cannot edit")
+	}
+
+	originalQuery := queryData.Query
+	// Fix the query update logic
+	for i := range *message.Queries {
+		if (*message.Queries)[i].ID == queryData.ID {
+			(*message.Queries)[i].Query = query
+			(*message.Queries)[i].IsEdited = true
+			if (*message.Queries)[i].Pagination != nil && (*message.Queries)[i].Pagination.PaginatedQuery != nil {
+				(*message.Queries)[i].Pagination.PaginatedQuery = utils.ToStringPtr(strings.Replace(*(*message.Queries)[i].Pagination.PaginatedQuery, originalQuery, query, 1))
+			}
+		}
+	}
+
+	message.IsEdited = true
+	if err := s.chatRepo.UpdateMessage(message.ID, message); err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to update message: %v", err)
+	}
+
+	// Update the query in LLM messages too
+	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(message.ID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to find LLM message: %v", err)
+	}
+
+	if assistantResponse, ok := llmMsg.Content["assistant_response"].(map[string]interface{}); ok {
+		log.Printf("ChatService -> EditQuery -> assistantResponse: %+v", assistantResponse)
+		log.Printf("ChatService -> EditQuery -> queries type: %T", assistantResponse["queries"])
+
+		llmMsg.IsEdited = true
+		queries := assistantResponse["queries"]
+		// Handle primitive.A (BSON array) type
+		switch queriesVal := queries.(type) {
+		case primitive.A:
+			for i, q := range queriesVal {
+				qMap, ok := q.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if qMap["id"] == queryData.ID {
+					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
+					qMap["is_edited"] = true
+					qMap["is_executed"] = false
+					if qMap["pagination"] != nil {
+						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
+						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+					}
+					queriesVal[i] = qMap
+					break
+				}
+			}
+			assistantResponse["queries"] = queriesVal
+		case []interface{}:
+			for i, q := range queriesVal {
+				qMap, ok := q.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if qMap["id"] == queryData.ID {
+					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
+					qMap["is_edited"] = true
+					qMap["is_executed"] = false
+					if qMap["pagination"] != nil {
+						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
+						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+					}
+					queriesVal[i] = qMap
+					break
+				}
+			}
+			assistantResponse["queries"] = queriesVal
+		}
+	}
+
+	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to update LLM message: %v", err)
+	}
+
+	return &dtos.EditQueryResponse{
+		ChatID:    chatID,
+		MessageID: messageID,
+		QueryID:   queryID,
+		Query:     query,
+		IsEdited:  true,
+	}, http.StatusOK, nil
 }

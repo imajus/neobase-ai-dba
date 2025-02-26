@@ -167,8 +167,8 @@ export default function ConnectionModal({ initialData, onClose, onEdit, onSubmit
       const [key, value] = line.split('=').map(s => s.trim());
       switch (key) {
         case 'DATABASE_TYPE':
-          if (['postgresql', 'mysql'].includes(value)) {
-            result.type = value as 'postgresql' | 'mysql';
+          if (['postgresql', 'yugabytedb', 'mysql', 'clickhouse', 'mongodb', 'redis', 'neo4j'].includes(value)) {
+            result.type = value as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
           }
           break;
         case 'DATABASE_HOST':
@@ -291,6 +291,7 @@ DATABASE_PASSWORD=your_password`}
               >
                 {[
                   { value: 'postgresql', label: 'PostgreSQL' },
+                  { value: 'yugabytedb', label: 'YugabyteDB' },
                   { value: 'mysql', label: 'MySQL' },
                   { value: 'clickhouse', label: 'ClickHouse' },
                   { value: 'mongodb', label: 'MongoDB' },

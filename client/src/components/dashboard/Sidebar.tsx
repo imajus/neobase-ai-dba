@@ -20,7 +20,7 @@ import DeleteConnectionModal from '../modals/DeleteConnectionModal';
 export interface Connection {
   id: string;
   name: string;
-  type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
+  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
 }
 
 interface SidebarProps {
@@ -157,7 +157,7 @@ export default function Sidebar({
             </div>
           ) : (
             connections.length > 0 ? (
-              connections.map((connection) => (
+              [...connections].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).map((connection) => (
                 <div key={connection.id} className="mb-4">
                   <div className={`relative group ${!isExpanded ? 'md:w-12 md:h-12' : ''}`}>
                     <button
@@ -168,7 +168,7 @@ export default function Sidebar({
                     >
                       <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
                         <DatabaseLogo
-                          type={connection.connection.type as 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
+                          type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
                           size={28}
                           className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
                         />
@@ -176,7 +176,7 @@ export default function Sidebar({
                           }`}>
                           <div className="text-left">
                             <h3 className="font-bold text-lg leading-tight">{connection.connection.database}</h3>
-                            <p className="text-gray-600 capitalize text-sm">{connection.connection.type === 'postgresql' ? 'PostgreSQL' : connection.connection.type === 'mysql' ? 'MySQL' : connection.connection.type === 'clickhouse' ? 'ClickHouse' : connection.connection.type === 'mongodb' ? 'MongoDB' : connection.connection.type === 'redis' ? 'Redis' : connection.connection.type === 'neo4j' ? 'Neo4j' : 'Unknown'}</p>
+                            <p className="text-gray-600 capitalize text-sm">{connection.connection.type === 'postgresql' ? 'PostgreSQL' : connection.connection.type === 'yugabytedb' ? 'YugabyteDB' : connection.connection.type === 'mysql' ? 'MySQL' : connection.connection.type === 'clickhouse' ? 'ClickHouse' : connection.connection.type === 'mongodb' ? 'MongoDB' : connection.connection.type === 'redis' ? 'Redis' : connection.connection.type === 'neo4j' ? 'Neo4j' : 'Unknown'}</p>
                           </div>
                         </div>
                       </div>

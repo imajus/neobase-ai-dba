@@ -1,6 +1,10 @@
 export interface QueryResult {
     id: string;
     query: string;
+    pagination?: {
+        total_records_count?: number;
+        paginated_query?: string;
+    };
     description: string;
     execution_time?: number | null;
     example_execution_time?: number | null;
@@ -16,6 +20,7 @@ export interface QueryResult {
     is_critical?: boolean;
     can_rollback?: boolean;
     is_streaming?: boolean;
+    is_edited?: boolean;
 }
 
 export interface Message {
@@ -26,6 +31,7 @@ export interface Message {
     is_loading?: boolean;
     loading_steps?: LoadingStep[];
     queries?: QueryResult[];
+    is_edited?: boolean;
     is_streaming?: boolean;
 }
 

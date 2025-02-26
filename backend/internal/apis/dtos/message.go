@@ -17,6 +17,7 @@ type MessageResponse struct {
 	Type      string   `json:"type"`
 	Content   string   `json:"content"`
 	Queries   *[]Query `json:"queries,omitempty"`
+	IsEdited  bool     `json:"is_edited"`
 	CreatedAt string   `json:"created_at"`
 }
 
@@ -37,6 +38,12 @@ type Query struct {
 	Tables                 *string                `json:"tables,omitempty"`
 	RollbackQuery          *string                `json:"rollback_query,omitempty"`
 	RollbackDependentQuery *string                `json:"rollback_dependent_query,omitempty"`
+	Pagination             *Pagination            `json:"pagination,omitempty"`
+	IsEdited               bool                   `json:"is_edited"`
+}
+
+type Pagination struct {
+	TotalRecordsCount int `json:"total_records_count"`
 }
 
 type QueryError struct {
@@ -65,6 +72,7 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 		var exampleResult []interface{}
 		var executionResult map[string]interface{}
 
+		log.Printf("ToQueryDto -> saved query.ExampleResult: %v", query.ExampleResult)
 		if query.ExampleResult != nil {
 			log.Printf("ToQueryDto -> query.ExampleResult: %v", *query.ExampleResult)
 			err := json.Unmarshal([]byte(*query.ExampleResult), &exampleResult)
@@ -81,6 +89,16 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			}
 		}
 
+		var pagination *Pagination
+		if query.Pagination != nil {
+			totalCount := 0
+			if query.Pagination.TotalRecordsCount != nil {
+				totalCount = *query.Pagination.TotalRecordsCount
+			}
+			pagination = &Pagination{
+				TotalRecordsCount: totalCount,
+			}
+		}
 		log.Printf("ToQueryDto -> final exampleResult: %v", exampleResult)
 		queriesDto[i] = Query{
 			ID:                     query.ID.Hex(),
@@ -99,6 +117,8 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			Tables:                 query.Tables,
 			RollbackQuery:          query.RollbackQuery,
 			RollbackDependentQuery: query.RollbackDependentQuery,
+			Pagination:             pagination,
+			IsEdited:               query.IsEdited,
 		}
 	}
 	return &queriesDto

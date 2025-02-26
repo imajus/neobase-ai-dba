@@ -10,7 +10,7 @@ import (
 
 	// Database drivers
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
-	_ "github.com/lib/pq"              // PostgreSQL driver
+	_ "github.com/lib/pq"              // PostgreSQL/YugabyteDB Driver
 
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	cleanupInterval     = 5 * time.Minute  // Check every 5 minutes
+	cleanupInterval     = 10 * time.Minute // Check every 10 minutes
 	idleTimeout         = 15 * time.Minute // Close after 15 minutes of inactivity
 	schemaCheckInterval = 24 * time.Hour   // Check every 24 hour
 )
@@ -45,6 +45,8 @@ type Manager struct {
 	activeExecutions map[string]*QueryExecution // key: streamID
 	executionMu      sync.RWMutex
 	cleanupMetrics   cleanupMetrics
+	fetchers         map[string]FetcherFactory
+	fetchersMu       sync.RWMutex
 }
 
 // NewManager creates a new connection manager
@@ -63,6 +65,7 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		schemaManager:    schemaManager,
 		activeExecutions: make(map[string]*QueryExecution),
 		executionMu:      sync.RWMutex{},
+		fetchers:         make(map[string]FetcherFactory),
 	}
 
 	// Set the DBManager in the SchemaManager
@@ -80,6 +83,15 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		m.startCleanupRoutine()
 	}()
 
+	// Register default fetchers
+	m.RegisterFetcher("postgresql", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
+	m.RegisterFetcher("yugabytedb", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
 	return m, nil
 }
 
@@ -87,6 +99,13 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 func (m *Manager) RegisterDriver(dbType string, driver DatabaseDriver) {
 	m.drivers[dbType] = driver
 	log.Printf("DBManager -> Registered driver for type: %s", dbType)
+}
+
+// RegisterFetcher registers a schema fetcher for a database type
+func (m *Manager) RegisterFetcher(dbType string, factory FetcherFactory) {
+	m.fetchersMu.Lock()
+	defer m.fetchersMu.Unlock()
+	m.fetchers[dbType] = factory
 }
 
 // Connect creates a new database connection
@@ -185,7 +204,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 	}()
 
 	conn.OnSchemaChange = func(chatID string) {
-		m.schemaManager.TriggerSchemaCheck(chatID, TriggerTypeManual)
+		m.doSchemaCheck(chatID)
 	}
 
 	log.Printf("DBManager -> Connect -> Connection completed successfully for chatID: %s", chatID)
@@ -294,7 +313,7 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 
 	// Return appropriate wrapper based on database type
 	switch conn.Config.Type {
-	case constants.DatabaseTypePostgreSQL:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB: // Use same wrapper for both
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
 	// Add cases for other database types
 	default:
@@ -610,17 +629,24 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 		return fmt.Errorf("connection not found")
 	}
 
-	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(context.Background(), chatID, conn, dbConn.Config.Type)
+	// Force clear any cached schema to ensure we get fresh data
+	m.schemaManager.ClearSchemaCache(chatID)
+
+	// Get fresh schema from database
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(ctx, chatID, conn, dbConn.Config.Type)
 	if err != nil {
 		return fmt.Errorf("schema check failed: %v", err)
 	}
 
 	if diff != nil {
-		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %+v", chatID, diff)
+		log.Printf("DBManager -> doSchemaCheck -> Schema diff for chat %s: %+v", chatID, diff)
 	}
 
 	if hasChanged {
-		log.Printf("DBManager -> doSchemaCheck -> Schema changes detected for chat %s: %t", chatID, hasChanged)
+		log.Printf("DBManager -> doSchemaCheck -> Schema has changed for chat %s: %t", chatID, hasChanged)
 		if m.streamHandler != nil {
 			m.streamHandler.HandleSchemaChange(dbConn.UserID, chatID, dbConn.StreamID, diff)
 		}
@@ -738,7 +764,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 	m.executionMu.Lock()
 
 	// Create cancellable context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute timeout
+	execCtx, cancel := context.WithTimeout(ctx, 1*time.Minute) // 1 minute timeout
 
 	// Track execution
 	execution := &QueryExecution{
@@ -845,7 +871,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			log.Println("Manager -> ExecuteQuery -> Triggering schema check")
 			time.Sleep(2 * time.Second)
 			switch conn.Config.Type {
-			case constants.DatabaseTypePostgreSQL:
+			case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
 					if conn.OnSchemaChange != nil {
 						conn.OnSchemaChange(conn.ChatID)
@@ -863,23 +889,23 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 // TestConnection tests if the provided credentials are valid without creating a persistent connection
 func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	switch config.Type {
-	case constants.DatabaseTypePostgreSQL:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		dsn := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 			config.Host, config.Port, *config.Username, *config.Password, config.Database,
 		)
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
-			return fmt.Errorf("failed to create PostgreSQL connection: %v", err)
+			return fmt.Errorf("failed to create connection: %v", err)
 		}
 		defer db.Close()
 
 		err = db.Ping()
 		if err != nil {
-			return fmt.Errorf("failed to connect to PostgreSQL: %v", err)
+			return fmt.Errorf("failed to conne: %v", err)
 		}
 
-	case "mysql":
+	case constants.DatabaseTypeMySQL:
 		dsn := fmt.Sprintf(
 			"%s:%s@tcp(%s:%s)/%s",
 			*config.Username, *config.Password, config.Host, config.Port, config.Database,
@@ -895,7 +921,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 			return fmt.Errorf("failed to connect to MySQL: %v", err)
 		}
 
-	case "mongodb":
+	case constants.DatabaseTypeMongoDB:
 		uri := fmt.Sprintf(
 			"mongodb://%s:%s@%s:%s/%s",
 			*config.Username, *config.Password, config.Host, config.Port, config.Database,

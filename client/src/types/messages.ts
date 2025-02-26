@@ -16,9 +16,11 @@ export interface BackendMessage {
     chat_id: string;
     type: 'user' | 'assistant';
     content: string;
+    is_edited: boolean;
     queries?: {
         id: string;
         query: string;
+        is_edited: boolean;
         description: string;
         execution_time: number;
         example_execution_time: number;
@@ -34,6 +36,10 @@ export interface BackendMessage {
         example_result: any[];
         execution_result: any[];
         query_type: string;
+        pagination?: {
+            total_records_count?: number;
+            paginated_query?: string;
+        };
         tables: string;
         rollback_query: string;
     }[];
@@ -49,6 +55,7 @@ export const transformBackendMessage = (msg: BackendMessage): Message => ({
     is_loading: false,
     loading_steps: [],
     is_streaming: false,
+    is_edited: msg.is_edited,
     created_at: msg.created_at
 });
 
@@ -61,5 +68,24 @@ export interface SendMessageResponse {
         type: 'user' | 'assistant';
         content: string;
         created_at: string;
+    };
+}
+
+export interface ExecuteQueryResponse {
+    success: boolean;
+    data: {
+        chat_id: string;
+        message_id: string;
+        query_id: string;
+        execution_time?: number;
+        execution_result?: any[];
+        total_records_count: number;
+        is_rolled_back: boolean;
+        is_executed: boolean;
+        error?: {
+            code: string;
+            message: string;
+            details?: string;
+        };
     };
 }

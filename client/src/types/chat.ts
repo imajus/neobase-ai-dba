@@ -1,6 +1,6 @@
 // Create a new file for chat types
 export interface Connection {
-    type: 'postgresql' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
+    type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
     host: string;
     port: string;
     username: string;

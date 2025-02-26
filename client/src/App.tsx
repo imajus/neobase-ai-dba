@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
-import { LoadingStep, Message, QueryResult } from './components/chat/types';
+import { LoadingStep, Message } from './components/chat/types';
 import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
@@ -25,7 +25,6 @@ function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
-  const [connections, setConnections] = useState<Chat[]>([]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<Chat>();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -621,20 +620,6 @@ function AppContent() {
     }
   };
 
-  const handleStreamResponse = (response: StreamResponse) => {
-    // ... existing response handling logic
-
-    setMessages(prev => {
-      const messages = [...prev];
-      const lastMessage = messages[messages.length - 1];
-      // Update last message
-      messages[messages.length - 1] = {
-        ...lastMessage,
-        // ... updated properties
-      };
-      return messages;
-    });
-  };
 
   // Update SSE handling
   useEffect(() => {
@@ -807,7 +792,6 @@ function AppContent() {
             break;
 
           case 'response-cancelled':
-
             // Remove temporary streaming message
             setMessages(prev => {
               return prev.filter(msg => !(msg.is_streaming && msg.id === 'temp'));
@@ -845,113 +829,6 @@ function AppContent() {
             );
             break;
 
-          case 'query-executed':
-            setMessages(prev => {
-              const newMessages = prev.map(msg => {
-                if (msg.id === response.data.message_id) {
-                  return {
-                    ...msg,
-                    queries: msg.queries?.map(q => {
-                      if (q.id === response.data.query_id) {
-                        return {
-                          ...q,
-                          is_executed: true,
-                          is_rolled_back: false,
-                          execution_time: response.data.execution_time,
-                          execution_result: response.data.execution_result,
-                          error: undefined
-                        } as QueryResult;
-                      }
-                      return q;
-                    })
-                  };
-                }
-                return msg;
-              });
-
-              // Only update state if there are actual changes
-              const hasChanges = JSON.stringify(prev) !== JSON.stringify(newMessages);
-              return hasChanges ? newMessages : prev;
-            });
-
-            toast('Query executed!', {
-              ...toastStyle,
-              icon: '✅',
-            });
-            break;
-
-          case 'query-execution-failed':
-            setMessages(prev => prev.map(msg => {
-              if (msg.id === response.data.message_id) {
-                return {
-                  ...msg,
-                  queries: msg.queries?.map(q => {
-                    if (q.id === response.data.query_id) {
-                      return {
-                        ...q,
-                        is_executed: false,
-                        is_rolled_back: false,
-                        execution_result: undefined,
-                        error: response.data.error
-                      } as QueryResult;
-                    }
-                    return q;
-                  })
-                };
-              }
-              return msg;
-            }));
-            break;
-
-          case 'rollback-executed':
-            setMessages(prev => prev.map(msg => {
-              if (msg.id === response.data.message_id) {
-                return {
-                  ...msg,
-                  queries: msg.queries?.map(q => {
-                    if (q.id === response.data.query_id) {
-                      return {
-                        ...q,
-                        is_executed: true,
-                        is_rolled_back: true,
-                        execution_time: response.data.execution_time,
-                        execution_result: response.data.execution_result,
-                        error: undefined
-                      } as QueryResult;
-                    }
-                    return q;
-                  })
-                };
-              }
-              return msg;
-            }));
-            toast('Changes reverted', {
-              ...toastStyle,
-              icon: '↺',
-            });
-            break;
-
-          case 'rollback-query-failed':
-            setMessages(prev => prev.map(msg => {
-              if (msg.id === response.data.message_id) {
-                return {
-                  ...msg,
-                  queries: msg.queries?.map(q => {
-                    if (q.id === response.data.query_id) {
-                      return {
-                        ...q,
-                        is_rolled_back: false,
-                        error: response.data.error
-                      } as QueryResult;
-                    }
-                    return q;
-                  })
-                };
-              }
-              return msg;
-            }));
-            toast.error(`Rollback failed: ${response.data.error.message}`, errorToast);
-            break;
         }
       } catch (error) {
         console.error('Failed to parse SSE message:', error);
@@ -996,6 +873,13 @@ function AppContent() {
       );
 
       if (response.data.success) {
+        // Set is_edited to true
+        setMessages(prev => prev.map(msg => {
+          if (msg.id === id) {
+            return { ...msg, is_edited: true };
+          }
+          return msg;
+        }));
         console.log('ai-response-step -> creating new temp message');
         const tempMsg: Message = {
           id: `temp`,

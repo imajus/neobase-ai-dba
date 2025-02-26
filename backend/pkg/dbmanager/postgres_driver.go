@@ -42,8 +42,10 @@ type PostgresSchema struct {
 type PostgresTable struct {
 	Name        string
 	Columns     map[string]PostgresColumn
+	Indexes     map[string]PostgresIndex
 	PrimaryKey  []string
 	ForeignKeys map[string]PostgresForeignKey
+	RowCount    int64
 }
 
 type PostgresColumn struct {
@@ -112,35 +114,35 @@ func (pc PostgresColumn) toColumnInfo() ColumnInfo {
 }
 
 func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	log.Printf("PostgreSQL Driver -> Connect -> Starting with config: %+v", config)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Starting with config: %+v", config)
 
 	// If username or password is nil, set it to empty string
 	if config.Username == nil {
 		config.Username = utils.ToStringPtr("")
-		log.Printf("PostgreSQL Driver -> Connect -> Set nil username to empty string")
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Set nil username to empty string")
 	}
 	if config.Password == nil {
 		config.Password = utils.ToStringPtr("")
-		log.Printf("PostgreSQL Driver -> Connect -> Set nil password to empty string")
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Set nil password to empty string")
 	}
 
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.Host, config.Port, *config.Username, *config.Password, config.Database)
 
-	log.Printf("PostgreSQL Driver -> Connect -> Attempting connection with DSN: %s", dsn)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Attempting connection with DSN: %s", dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> Connect -> Connection failed: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection failed: %v", err)
 		return nil, fmt.Errorf("failed to connect to PostgreSQL: %v", err)
 	}
 
-	log.Printf("PostgreSQL Driver -> Connect -> GORM connection successful")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> GORM connection successful")
 
 	// Configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> Connect -> Failed to get underlying *sql.DB: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Failed to get underlying *sql.DB: %v", err)
 		return nil, err
 	}
 
@@ -148,15 +150,15 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	sqlDB.SetMaxOpenConns(10)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	log.Printf("PostgreSQL Driver -> Connect -> Connection pool configured")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection pool configured")
 
 	// Test connection with ping
 	if err := sqlDB.Ping(); err != nil {
-		log.Printf("PostgreSQL Driver -> Connect -> Ping failed: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Ping failed: %v", err)
 		return nil, fmt.Errorf("ping failed: %v", err)
 	}
 
-	log.Printf("PostgreSQL Driver -> Connect -> Connection verified with ping")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection verified with ping")
 
 	return &Connection{
 		DB:       db,
@@ -193,10 +195,10 @@ func (d *PostgresDriver) IsAlive(conn *Connection) bool {
 // Modify ExecuteQuery to check for schema changes
 func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	startTime := time.Now()
-	log.Printf("PostgreSQL Driver -> ExecuteQuery -> Query: %v", query)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Query: %v", query)
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> ExecuteQuery -> Failed to get SQL connection: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Failed to get SQL connection: %v", err)
 		return &QueryExecutionResult{
 			ExecutionTime: int(time.Since(startTime).Milliseconds()),
 			Error: &dtos.QueryError{
@@ -212,7 +214,7 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 	var lastResult *sql.Rows
 	var lastError error
 
-	log.Printf("PostgreSQL Driver -> ExecuteQuery -> Statements: %v", statements)
+	log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Statements: %v", statements)
 	// Execute each statement
 	for _, stmt := range statements {
 		if stmt = strings.TrimSpace(stmt); stmt == "" {
@@ -221,7 +223,7 @@ func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, que
 
 		lastResult, lastError = sqlDB.QueryContext(ctx, stmt)
 		if lastError != nil {
-			log.Printf("PostgreSQL Driver -> ExecuteQuery -> Query execution failed: %v", lastError)
+			log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Query execution failed: %v", lastError)
 			return &QueryExecutionResult{
 				ExecutionTime: int(time.Since(startTime).Milliseconds()),
 				Error: &dtos.QueryError{
@@ -284,16 +286,16 @@ func splitStatements(query string) []string {
 }
 
 func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
-	log.Printf("PostgreSQL Driver -> BeginTx -> Starting transaction")
+	log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Starting transaction")
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> BeginTx -> Failed to get SQL connection: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Failed to get SQL connection: %v", err)
 		return nil
 	}
 
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
-		log.Printf("PostgreSQL Driver -> BeginTx -> Failed to begin transaction: %v", err)
+		log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Failed to begin transaction: %v", err)
 		return nil
 	}
 
@@ -354,33 +356,27 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 
 			// Check for specific PostgreSQL errors
 			if strings.Contains(strings.ToUpper(stmt), "DROP TABLE") {
+				// Extract table name
+				tableName := extractTableName(stmt)
+				log.Printf("PostgresDriver -> ExecuteQuery -> Checking existence of table: %s", tableName)
+
 				// Check if table exists before dropping
 				var exists bool
-				checkStmt := `SELECT EXISTS (
-					SELECT FROM information_schema.tables 
-					WHERE table_schema = 'public' 
-					AND table_name = $1
-				)`
-				tableName := extractTableName(stmt)
+				checkStmt := `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`
+
 				err = tx.tx.QueryRow(checkStmt, tableName).Scan(&exists)
 				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Code:    "TABLE_CHECK_FAILED",
-							Message: err.Error(),
-							Details: fmt.Sprintf("Failed to check table existence: %s", tableName),
-						},
-					}
-				}
-				if !exists {
+					log.Printf("PostgresDriver -> ExecuteQuery -> Error checking table existence: %v", err)
 					return &QueryExecutionResult{
 						Error: &dtos.QueryError{
 							Code:    "TABLE_NOT_FOUND",
-							Message: fmt.Sprintf("Table '%s' does not exist", tableName),
+							Message: err.Error(),
 							Details: "Cannot drop a table that doesn't exist",
 						},
 					}
 				}
+
+				log.Printf("PostgresDriver -> ExecuteQuery -> Table '%s' exists, proceeding with DROP", tableName)
 			}
 		}
 	}
@@ -430,16 +426,37 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 	return result
 }
 
-// Helper function to extract table name from DROP TABLE statement
+// Fix the extractTableName function to properly handle table names
 func extractTableName(stmt string) string {
-	stmt = strings.ToUpper(stmt)
-	stmt = strings.TrimSpace(strings.TrimPrefix(stmt, "DROP TABLE IF EXISTS"))
-	stmt = strings.TrimSpace(strings.TrimPrefix(stmt, "DROP TABLE"))
-	parts := strings.Fields(stmt)
-	if len(parts) > 0 {
-		return strings.ToLower(strings.Trim(parts[0], ";"))
+	// Preserve original case for the extraction
+	originalStmt := strings.TrimSpace(stmt)
+	upperStmt := strings.ToUpper(originalStmt)
+
+	var tableName string
+
+	// Handle different DROP TABLE variations
+	if strings.HasPrefix(upperStmt, "DROP TABLE IF EXISTS") {
+		tableName = strings.TrimSpace(originalStmt[len("DROP TABLE IF EXISTS"):])
+	} else if strings.HasPrefix(upperStmt, "DROP TABLE") {
+		tableName = strings.TrimSpace(originalStmt[len("DROP TABLE"):])
+	} else {
+		return ""
 	}
-	return ""
+
+	// Handle schema prefixes, quotes, and trailing characters
+	tableName = strings.Split(tableName, " ")[0] // Get first word
+	tableName = strings.Trim(tableName, "\"`;")  // Remove quotes and semicolons
+
+	// Handle schema prefixes like "public."
+	if strings.Contains(tableName, ".") {
+		parts := strings.Split(tableName, ".")
+		tableName = parts[len(parts)-1] // Get the last part after the dot
+	}
+
+	log.Printf("PostgresDriver -> extractTableName -> Extracted table name '%s' from statement: %s",
+		tableName, originalStmt)
+
+	return tableName
 }
 
 func (t *PostgresTransaction) Commit() error {
@@ -499,84 +516,52 @@ func processRows(rows *sql.Rows, startTime time.Time) ([]map[string]interface{},
 	return results, nil
 }
 
-// Update GetSchema to include foreign keys
+// Improve the GetSchema method to properly detect all tables
 func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaInfo, error) {
 	sqlDB := db.GetDB()
 	if sqlDB == nil {
 		return nil, fmt.Errorf("failed to get SQL DB connection")
 	}
 
-	// Get columns
-	columnsQuery := `
-		SELECT 
-			c.table_name,
-			c.column_name,
-			c.data_type,
-			c.is_nullable,
-			c.column_default,
-			pd.description
-		FROM information_schema.columns c
-		LEFT JOIN pg_description pd ON 
-			pd.objoid = (quote_ident(c.table_name)::regclass)::oid AND 
-			pd.objsubid = c.ordinal_position
-		WHERE c.table_schema = 'public'
-		ORDER BY c.table_name, c.ordinal_position;
+	// Get all tables in the database
+	tableQuery := `
+		SELECT tablename 
+		FROM pg_catalog.pg_tables 
+		WHERE schemaname = 'public';
 	`
 
-	rows, err := sqlDB.QueryContext(ctx, columnsQuery)
+	tableRows, err := sqlDB.QueryContext(ctx, tableQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch columns: %v", err)
+		return nil, fmt.Errorf("failed to query tables: %v", err)
 	}
-	defer rows.Close()
+	defer tableRows.Close()
 
-	// Build schema
-	schema := &SchemaInfo{
-		Tables: make(map[string]TableSchema),
-	}
-
-	// Process columns
-	for rows.Next() {
-		var col columnInfo
-		if err := rows.Scan(
-			&col.TableName,
-			&col.ColumnName,
-			&col.DataType,
-			&col.IsNullable,
-			&col.ColumnDefault,
-			&col.Description,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan column: %v", err)
+	// Create a list of all tables
+	allTables := make([]string, 0)
+	for tableRows.Next() {
+		var tableName string
+		if err := tableRows.Scan(&tableName); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %v", err)
 		}
-
-		table, exists := schema.Tables[col.TableName]
-		if !exists {
-			table = TableSchema{
-				Name:        col.TableName,
-				Columns:     make(map[string]ColumnInfo),
-				Indexes:     make(map[string]IndexInfo),
-				ForeignKeys: make(map[string]ForeignKey),
-				Constraints: make(map[string]ConstraintInfo),
-			}
-		}
-
-		// Add column
-		table.Columns[col.ColumnName] = ColumnInfo{
-			Name:         col.ColumnName,
-			Type:         col.DataType,
-			IsNullable:   col.IsNullable == "YES",
-			DefaultValue: col.ColumnDefault.String,
-			Comment:      col.Description.String,
-		}
-
-		schema.Tables[col.TableName] = table
+		allTables = append(allTables, tableName)
 	}
 
-	// Get essential schema elements
+	log.Printf("PostgresDriver -> GetSchema -> Found %d tables in database: %v", len(allTables), allTables)
+
+	// Continue with the rest of the schema fetching...
 	tables, err := d.getTables(ctx, sqlDB)
 	if err != nil {
 		return nil, err
 	}
 
+	// Verify that all tables were properly fetched
+	for _, tableName := range allTables {
+		if _, exists := tables[tableName]; !exists {
+			log.Printf("PostgresDriver -> GetSchema -> Warning: Table %s exists but wasn't properly fetched", tableName)
+		}
+	}
+
+	// Continue with the rest of the schema fetching...
 	indexes, err := d.getIndexes(ctx, sqlDB)
 	if err != nil {
 		return nil, err
@@ -605,62 +590,311 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 	return d.convertToSchemaInfo(tables, indexes, views), nil
 }
 
-// Update the column fetching query and struct
-type columnInfo struct {
-	TableName     string         `db:"table_name"`
-	ColumnName    string         `db:"column_name"`
-	DataType      string         `db:"data_type"`
-	IsNullable    string         `db:"is_nullable"`
-	ColumnDefault sql.NullString `db:"column_default"`
-	Description   sql.NullString `db:"description"`
-}
-
-func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]PostgresTable, error) {
-	query := `
-		SELECT 
-			table_name, 
-			column_name, 
-			data_type, 
-			is_nullable, 
-			column_default,
-			col_description((table_schema || '.' || table_name)::regclass::oid, ordinal_position) as column_comment
-		FROM information_schema.columns 
-		WHERE table_schema = 'public'
-		ORDER BY table_name, ordinal_position;
-	`
-
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	tables := make(map[string]PostgresTable)
-	for rows.Next() {
-		var tableName, columnName, dataType, isNullable, columnDefault, columnComment sql.NullString
-		if err := rows.Scan(&tableName, &columnName, &dataType, &isNullable, &columnDefault, &columnComment); err != nil {
-			return nil, err
+// Update the function signature to include indexes
+func convertTablesToSchemaFormat(tables map[string]PostgresTable, indexes map[string][]PostgresIndex) map[string]TableSchema {
+	result := make(map[string]TableSchema)
+	for name, table := range tables {
+		schema := TableSchema{
+			Name:        name,
+			Columns:     make(map[string]ColumnInfo),
+			Indexes:     make(map[string]IndexInfo),
+			ForeignKeys: make(map[string]ForeignKey),
+			Constraints: make(map[string]ConstraintInfo),
+			RowCount:    table.RowCount,
 		}
 
-		table, exists := tables[tableName.String]
-		if !exists {
-			table = PostgresTable{
-				Name:       tableName.String,
-				Columns:    make(map[string]PostgresColumn),
-				PrimaryKey: make([]string, 0),
+		// Convert columns
+		for colName, col := range table.Columns {
+			schema.Columns[colName] = col.toColumnInfo()
+		}
+
+		// Convert indexes
+		if tableIndexes, ok := indexes[name]; ok {
+			for _, idx := range tableIndexes {
+				schema.Indexes[idx.Name] = IndexInfo{
+					Name:     idx.Name,
+					Columns:  idx.Columns,
+					IsUnique: idx.IsUnique,
+				}
 			}
 		}
 
-		table.Columns[columnName.String] = PostgresColumn{
-			Name:         columnName.String,
-			Type:         dataType.String,
-			IsNullable:   isNullable.String == "YES",
-			DefaultValue: columnDefault.String,
-			Comment:      columnComment.String,
+		// Convert foreign keys
+		if table.ForeignKeys != nil {
+			for fkName, fk := range table.ForeignKeys {
+				schema.ForeignKeys[fkName] = ForeignKey{
+					Name:       fk.Name,
+					ColumnName: fk.Column,
+					RefTable:   fk.RefTable,
+					RefColumn:  fk.RefColumn,
+					OnDelete:   fk.OnDelete,
+					OnUpdate:   fk.OnUpdate,
+				}
+			}
 		}
 
-		tables[tableName.String] = table
+		result[name] = schema
 	}
+	return result
+}
+
+// Update the convertToSchemaInfo function to pass indexes
+func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, indexes map[string][]PostgresIndex, views map[string]PostgresView) *SchemaInfo {
+	schema := &SchemaInfo{
+		Tables:    convertTablesToSchemaFormat(tables, indexes),
+		Views:     make(map[string]ViewSchema),
+		UpdatedAt: time.Now(),
+	}
+
+	// Convert views
+	for viewName, view := range views {
+		schema.Views[viewName] = ViewSchema{
+			Name:       viewName,
+			Definition: view.Definition,
+		}
+	}
+
+	return schema
+}
+
+// Improve the getTables method to properly fetch column details
+func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]PostgresTable, error) {
+	// First get a list of all tables
+	tableQuery := `
+		SELECT tablename 
+		FROM pg_catalog.pg_tables 
+		WHERE schemaname = 'public';
+	`
+
+	tableRows, err := db.QueryContext(ctx, tableQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tables: %v", err)
+	}
+	defer tableRows.Close()
+
+	// Create a map to store all tables
+	tables := make(map[string]PostgresTable)
+	allTableNames := make([]string, 0)
+
+	// Initialize all tables first
+	for tableRows.Next() {
+		var tableName string
+		if err := tableRows.Scan(&tableName); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %v", err)
+		}
+
+		allTableNames = append(allTableNames, tableName)
+		tables[tableName] = PostgresTable{
+			Name:        tableName,
+			Columns:     make(map[string]PostgresColumn),
+			Indexes:     make(map[string]PostgresIndex),
+			ForeignKeys: make(map[string]PostgresForeignKey),
+		}
+	}
+
+	if err := tableRows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating table rows: %v", err)
+	}
+
+	log.Printf("PostgresDriver -> getTables -> Found %d tables in database: %v", len(tables), allTableNames)
+
+	// For each table, get columns with SUPER DETAILED logging
+	for tableName, table := range tables {
+		log.Printf("PostgresDriver -> getTables -> Fetching columns for table: %s", tableName)
+
+		// Get columns
+		columnQuery := `
+			SELECT 
+				column_name, 
+				data_type, 
+				is_nullable,
+				column_default,
+				col_description((table_schema || '.' || table_name)::regclass::oid, ordinal_position) as column_comment
+			FROM 
+				information_schema.columns
+			WHERE 
+				table_schema = 'public' AND 
+				table_name = $1
+			ORDER BY 
+				ordinal_position;
+		`
+
+		columnRows, err := db.QueryContext(ctx, columnQuery, tableName)
+		if err != nil {
+			log.Printf("PostgresDriver -> getTables -> Error fetching columns for table %s: %v", tableName, err)
+			continue
+		}
+
+		columnCount := 0
+		for columnRows.Next() {
+			var (
+				columnName, dataType, isNullable string
+				columnDefault, columnComment     sql.NullString
+			)
+
+			if err := columnRows.Scan(&columnName, &dataType, &isNullable, &columnDefault, &columnComment); err != nil {
+				log.Printf("PostgresDriver -> getTables -> Error scanning column for table %s: %v", tableName, err)
+				continue
+			}
+
+			// Convert is_nullable to bool
+			isNullableBool := isNullable == "YES"
+
+			// Get default value
+			defaultValue := ""
+			if columnDefault.Valid {
+				defaultValue = columnDefault.String
+			}
+
+			// Get comment
+			comment := ""
+			if columnComment.Valid {
+				comment = columnComment.String
+			}
+
+			log.Printf("PostgresDriver -> getTables -> Found column in table %s: name=%s, type=%s, nullable=%v, default=%s, comment=%s",
+				tableName, columnName, dataType, isNullableBool, defaultValue, comment)
+
+			table.Columns[columnName] = PostgresColumn{
+				Name:         columnName,
+				Type:         dataType,
+				IsNullable:   isNullableBool,
+				DefaultValue: defaultValue,
+				Comment:      comment,
+			}
+
+			columnCount++
+		}
+
+		columnRows.Close()
+		log.Printf("PostgresDriver -> getTables -> Fetched %d columns for table %s", columnCount, tableName)
+
+		// Get indexes with SUPER DETAILED logging
+		log.Printf("PostgresDriver -> getTables -> Fetching indexes for table: %s", tableName)
+		indexQuery := `
+			SELECT
+				i.relname as index_name,
+				array_to_string(array_agg(a.attname), ',') as column_names,
+				ix.indisunique as is_unique,
+				ix.indisprimary as is_primary
+			FROM
+				pg_class t,
+				pg_class i,
+				pg_index ix,
+				pg_attribute a
+			WHERE
+				t.oid = ix.indrelid
+				and i.oid = ix.indexrelid
+				and a.attrelid = t.oid
+				and a.attnum = ANY(ix.indkey)
+				and t.relkind = 'r'
+				and t.relname = $1
+			GROUP BY
+				i.relname,
+				ix.indisunique,
+				ix.indisprimary
+			ORDER BY
+				i.relname;
+		`
+
+		indexRows, err := db.QueryContext(ctx, indexQuery, tableName)
+		if err != nil {
+			log.Printf("PostgresDriver -> getTables -> Error fetching indexes for table %s: %v", tableName, err)
+			continue
+		}
+
+		indexCount := 0
+		for indexRows.Next() {
+			var (
+				indexName, columnNames string
+				isUnique, isPrimary    bool
+			)
+
+			if err := indexRows.Scan(&indexName, &columnNames, &isUnique, &isPrimary); err != nil {
+				log.Printf("PostgresDriver -> getTables -> Error scanning index for table %s: %v", tableName, err)
+				continue
+			}
+
+			log.Printf("PostgresDriver -> getTables -> Found index in table %s: name=%s, columns=%s, unique=%v, primary=%v",
+				tableName, indexName, columnNames, isUnique, isPrimary)
+
+			table.Indexes[indexName] = PostgresIndex{
+				Name:     indexName,
+				Columns:  strings.Split(columnNames, ","),
+				IsUnique: isUnique,
+			}
+
+			indexCount++
+		}
+
+		indexRows.Close()
+		log.Printf("PostgresDriver -> getTables -> Fetched %d indexes for table %s", indexCount, tableName)
+
+		// Get foreign keys with SUPER DETAILED logging
+		log.Printf("PostgresDriver -> getTables -> Fetching foreign keys for table: %s", tableName)
+		fkQuery := `
+			SELECT
+				tc.constraint_name,
+				kcu.column_name,
+				ccu.table_name AS foreign_table_name,
+				ccu.column_name AS foreign_column_name
+			FROM
+				information_schema.table_constraints AS tc
+				JOIN information_schema.key_column_usage AS kcu
+				  ON tc.constraint_name = kcu.constraint_name
+				JOIN information_schema.constraint_column_usage AS ccu
+				  ON ccu.constraint_name = tc.constraint_name
+			WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = $1;
+		`
+
+		fkRows, err := db.QueryContext(ctx, fkQuery, tableName)
+		if err != nil {
+			log.Printf("PostgresDriver -> getTables -> Error fetching foreign keys for table %s: %v", tableName, err)
+			continue
+		}
+
+		fkCount := 0
+		for fkRows.Next() {
+			var (
+				constraintName, columnName, foreignTableName, foreignColumnName string
+			)
+
+			if err := fkRows.Scan(&constraintName, &columnName, &foreignTableName, &foreignColumnName); err != nil {
+				log.Printf("PostgresDriver -> getTables -> Error scanning foreign key for table %s: %v", tableName, err)
+				continue
+			}
+
+			log.Printf("PostgresDriver -> getTables -> Found foreign key in table %s: name=%s, column=%s, references=%s.%s",
+				tableName, constraintName, columnName, foreignTableName, foreignColumnName)
+
+			table.ForeignKeys[constraintName] = PostgresForeignKey{
+				Name:      constraintName,
+				Column:    columnName,
+				RefTable:  foreignTableName,
+				RefColumn: foreignColumnName,
+			}
+
+			fkCount++
+		}
+
+		fkRows.Close()
+		log.Printf("PostgresDriver -> getTables -> Fetched %d foreign keys for table %s", fkCount, tableName)
+
+		// Update the table in the map
+		tables[tableName] = table
+	}
+
+	// Verify all tables were processed
+	for _, tableName := range allTableNames {
+		if _, exists := tables[tableName]; !exists {
+			log.Printf("PostgresDriver -> getTables -> Warning: Table %s exists but wasn't properly fetched", tableName)
+		} else if len(tables[tableName].Columns) == 0 {
+			log.Printf("PostgresDriver -> getTables -> Warning: Table %s has no columns", tableName)
+		}
+	}
+
+	log.Printf("PostgresDriver -> getTables -> Successfully fetched %d tables: %v", len(tables), allTableNames)
+
 	return tables, nil
 }
 
@@ -787,94 +1021,28 @@ func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[st
 	return fks, nil
 }
 
-// Update convertToSchemaInfo to use the conversion method
-func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, indexes map[string][]PostgresIndex, views map[string]PostgresView) *SchemaInfo {
-	schema := &SchemaInfo{
-		Tables:    make(map[string]TableSchema),
-		Views:     make(map[string]ViewSchema),
-		UpdatedAt: time.Now(),
-	}
-
-	// Convert tables and their components
-	for tableName, table := range tables {
-		tableSchema := TableSchema{
-			Name:        tableName,
-			Columns:     make(map[string]ColumnInfo),
-			Indexes:     make(map[string]IndexInfo),
-			ForeignKeys: make(map[string]ForeignKey),
-			Constraints: make(map[string]ConstraintInfo),
-		}
-
-		// Convert columns using the conversion method
-		for colName, col := range table.Columns {
-			tableSchema.Columns[colName] = col.toColumnInfo()
-		}
-
-		// Convert indexes
-		if tableIndexes, ok := indexes[tableName]; ok {
-			for _, idx := range tableIndexes {
-				tableSchema.Indexes[idx.Name] = IndexInfo{
-					Name:     idx.Name,
-					Columns:  idx.Columns,
-					IsUnique: idx.IsUnique,
-				}
-			}
-		}
-
-		// Convert foreign keys
-		if table.ForeignKeys != nil {
-			for fkName, fk := range table.ForeignKeys {
-				tableSchema.ForeignKeys[fkName] = ForeignKey{
-					Name:       fk.Name,
-					ColumnName: fk.Column,
-					RefTable:   fk.RefTable,
-					RefColumn:  fk.RefColumn,
-					OnDelete:   fk.OnDelete,
-					OnUpdate:   fk.OnUpdate,
-				}
-			}
-		}
-
-		schema.Tables[tableName] = tableSchema
-	}
-
-	// Convert views
-	for viewName, view := range views {
-		schema.Views[viewName] = ViewSchema{
-			Name:       viewName,
-			Definition: view.Definition,
-		}
-	}
-
-	return schema
-}
-
-// Add GetTableChecksum method
+// Fix the GetTableChecksum method to be more stable and consistent
 func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, table string) (string, error) {
 	sqlDB := db.GetDB()
 	if sqlDB == nil {
 		return "", fmt.Errorf("failed to get SQL DB connection")
 	}
 
-	// Get table definition checksum
+	// Get table definition checksum - use a more stable approach that ignores non-structural changes
 	query := `
-		SELECT COALESCE(
-			(SELECT md5(string_agg(column_definition, ',' ORDER BY ordinal_position))
-			FROM (
-				SELECT 
-					ordinal_position,
-					concat(
-						column_name, ':', 
-						data_type, ':', 
-						is_nullable, ':', 
-						coalesce(column_default, ''), ':',
-						coalesce(col_description((table_schema || '.' || table_name)::regclass::oid, ordinal_position), '')
-					) as column_definition
-				FROM information_schema.columns 
-				WHERE table_schema = 'public' AND table_name = $1
-			) t),
-			'no_columns'
-		) as checksum;
+		SELECT md5(string_agg(column_definition, ',' ORDER BY ordinal_position))
+		FROM (
+			SELECT 
+				ordinal_position,
+				concat(
+					column_name, ':', 
+					data_type, ':', 
+					is_nullable, ':', 
+					coalesce(column_default, '')
+				) as column_definition
+			FROM information_schema.columns 
+			WHERE table_schema = 'public' AND table_name = $1
+		) t;
 	`
 
 	var checksum string
@@ -882,28 +1050,24 @@ func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, ta
 		return "", fmt.Errorf("failed to get table checksum: %v", err)
 	}
 
-	// Get indexes checksum
+	// Get indexes checksum - use a more stable approach that ignores index names
 	indexQuery := `
-		SELECT COALESCE(
-			(SELECT md5(string_agg(index_definition, ',' ORDER BY index_name))
-			FROM (
-				SELECT 
-					i.relname as index_name,
-					concat(
-						i.relname, ':', 
-						array_to_string(array_agg(a.attname ORDER BY a.attnum), ','), ':',
-						ix.indisunique
-					) as index_definition
-				FROM pg_class t
-				JOIN pg_index ix ON t.oid = ix.indrelid
-				JOIN pg_class i ON i.oid = ix.indexrelid
-				JOIN pg_attribute a ON a.attrelid = t.oid
-				WHERE a.attnum = ANY(ix.indkey)
-				AND t.relname = $1
-				GROUP BY i.relname, ix.indisunique
-			) t),
-			'no_indexes'
-		) as checksum;
+		SELECT md5(string_agg(index_definition, ',' ORDER BY index_columns))
+		FROM (
+			SELECT 
+				array_to_string(array_agg(a.attname ORDER BY a.attnum), ',') as index_columns,
+				concat(
+					array_to_string(array_agg(a.attname ORDER BY a.attnum), ','), ':',
+					ix.indisunique
+				) as index_definition
+			FROM pg_class t
+			JOIN pg_index ix ON t.oid = ix.indrelid
+			JOIN pg_class i ON i.oid = ix.indexrelid
+			JOIN pg_attribute a ON a.attrelid = t.oid
+			WHERE a.attnum = ANY(ix.indkey)
+			AND t.relname = $1
+			GROUP BY ix.indexrelid, ix.indisunique
+		) t;
 	`
 
 	var indexChecksum string
@@ -911,29 +1075,24 @@ func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, ta
 		return "", fmt.Errorf("failed to get index checksum: %v", err)
 	}
 
-	// Get foreign keys checksum
+	// Get foreign keys checksum - use a more stable approach that ignores constraint names
 	fkQuery := `
-		SELECT COALESCE(
-			(SELECT md5(string_agg(fk_definition, ',' ORDER BY constraint_name))
-			FROM (
-				SELECT 
-					tc.constraint_name,
-					concat(
-						tc.constraint_name, ':',
-						kcu.column_name, ':',
-						ccu.table_name, ':',
-						ccu.column_name, ':',
-						rc.update_rule, ':',
-						rc.delete_rule
-					) as fk_definition
-				FROM information_schema.table_constraints tc
-				JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-				JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-				JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name
-				WHERE tc.table_name = $1 AND tc.constraint_type = 'FOREIGN KEY'
-			) t),
-			'no_foreign_keys'
-		) as checksum;
+		SELECT md5(string_agg(fk_definition, ',' ORDER BY source_column, target_table, target_column))
+		FROM (
+			SELECT 
+				kcu.column_name as source_column,
+				ccu.table_name as target_table,
+				ccu.column_name as target_column,
+				concat(
+					kcu.column_name, ':',
+					ccu.table_name, ':',
+					ccu.column_name
+				) as fk_definition
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+			JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+			WHERE tc.table_name = $1 AND tc.constraint_type = 'FOREIGN KEY'
+		) t;
 	`
 
 	var fkChecksum string

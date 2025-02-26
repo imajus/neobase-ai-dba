@@ -5,6 +5,7 @@ import (
 	"log"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -44,6 +45,7 @@ func (r *chatRepository) Create(chat *models.Chat) error {
 }
 
 func (r *chatRepository) Update(id primitive.ObjectID, chat *models.Chat) error {
+	chat.UpdatedAt = time.Now()
 	filter := bson.M{"_id": id}
 	update := bson.M{"$set": chat}
 	_, err := r.chatCollection.UpdateOne(context.Background(), filter, update)
@@ -94,11 +96,14 @@ func (r *chatRepository) FindByUserID(userID primitive.ObjectID, page, pageSize 
 
 func (r *chatRepository) CreateMessage(message *models.Message) error {
 	log.Printf("CreateMessage -> message: %v", message)
+	r.updateChatTimeStamp(message.ChatID)
 	_, err := r.messageCollection.InsertOne(context.Background(), message)
 	return err
 }
 
 func (r *chatRepository) UpdateMessage(id primitive.ObjectID, message *models.Message) error {
+	r.updateChatTimeStamp(message.ChatID)
+	message.UpdatedAt = time.Now()
 	filter := bson.M{"_id": id}
 	update := bson.M{"$set": message}
 	_, err := r.messageCollection.UpdateOne(context.Background(), filter, update)
@@ -169,4 +174,16 @@ func (r *chatRepository) FindMessageByID(id primitive.ObjectID) (*models.Message
 	var message models.Message
 	err := r.messageCollection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&message)
 	return &message, err
+}
+
+func (r *chatRepository) updateChatTimeStamp(chatID primitive.ObjectID) error {
+	go func() {
+		filter := bson.M{"_id": chatID}
+		update := bson.M{"$set": bson.M{"updated_at": time.Now()}}
+		_, err := r.chatCollection.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			log.Printf("Error updating chat timestamp: %v", err)
+		}
+	}()
+	return nil
 }

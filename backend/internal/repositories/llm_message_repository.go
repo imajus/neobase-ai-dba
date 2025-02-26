@@ -4,6 +4,7 @@ import (
 	"context"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -42,6 +43,7 @@ func (r *llmMessageRepository) CreateMessage(msg *models.LLMMessage) error {
 }
 
 func (r *llmMessageRepository) UpdateMessage(id primitive.ObjectID, message *models.LLMMessage) error {
+	message.UpdatedAt = time.Now()
 	filter := bson.M{"_id": id}
 	update := bson.M{"$set": message}
 	_, err := r.messageCollection.UpdateOne(context.Background(), filter, update)
