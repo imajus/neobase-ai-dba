@@ -5,8 +5,8 @@
 **NeoBase** is an AI-powered database assistant that helps you manage, query, and optimize your databases effortlessly. With a sleek Neo Brutalism design and real-time chat functionality, NeoBase makes database assistantistration intuitive and efficient.
 
 ## Screenshots
-<img width="1709" alt="Screenshot 2025-02-10 at 7 13 05 PM" src="https://github.com/user-attachments/assets/cfe39b91-b1c9-4ee3-969c-7ae55aeb133b" />
-<img width="1710" alt="Screenshot 2025-02-10 at 7 15 07 PM" src="https://github.com/user-attachments/assets/ee455016-d172-457b-9230-5884b3747669" />
+<img width="1710" alt="Screenshot 2025-02-26 at 6 43 22 PM" src="https://github.com/user-attachments/assets/16522d88-1fa0-449e-ae3b-e1ed489a9ff2" />
+<img width="1708" alt="Screenshot 2025-02-26 at 6 50 05 PM" src="https://github.com/user-attachments/assets/573926e4-df31-4ef7-ab8b-4dae6d2d1219" />
 
 
 ## Features
@@ -22,6 +22,7 @@
 
 ## Currently Supported DBs
 - PostgreSQL
+- Yugabyte
 - MySQL
 - MongoDB
 - Neo4j DB
