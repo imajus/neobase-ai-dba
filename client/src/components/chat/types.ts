@@ -20,6 +20,7 @@ export interface QueryResult {
     is_critical?: boolean;
     can_rollback?: boolean;
     is_streaming?: boolean;
+    is_edited?: boolean;
 }
 
 export interface Message {
@@ -30,6 +31,7 @@ export interface Message {
     is_loading?: boolean;
     loading_steps?: LoadingStep[];
     queries?: QueryResult[];
+    is_edited?: boolean;
     is_streaming?: boolean;
 }
 

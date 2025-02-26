@@ -51,3 +51,11 @@ type EditQueryRequest struct {
 	QueryID   string `json:"query_id" binding:"required"`
 	Query     string `json:"query" binding:"required"`
 }
+
+type EditQueryResponse struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	QueryID   string `json:"query_id"`
+	Query     string `json:"query"`
+	IsEdited  bool   `json:"is_edited"`
+}

@@ -45,6 +45,6 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.POST("/:id/queries/rollback", chatHandler.RollbackQuery)
 		protected.POST("/:id/queries/cancel", chatHandler.CancelQueryExecution)
 		protected.POST("/:id/queries/results", chatHandler.GetQueryResults)
-		protected.POST("/:id/queries/edit", chatHandler.EditQuery)
+		protected.PATCH("/:id/queries/edit", chatHandler.EditQuery)
 	}
 }

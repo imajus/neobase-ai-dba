@@ -996,6 +996,13 @@ function AppContent() {
       );
 
       if (response.data.success) {
+        // Set is_edited to true
+        setMessages(prev => prev.map(msg => {
+          if (msg.id === id) {
+            return { ...msg, is_edited: true };
+          }
+          return msg;
+        }));
         console.log('ai-response-step -> creating new temp message');
         const tempMsg: Message = {
           id: `temp`,

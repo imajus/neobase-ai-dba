@@ -16,9 +16,11 @@ export interface BackendMessage {
     chat_id: string;
     type: 'user' | 'assistant';
     content: string;
+    is_edited: boolean;
     queries?: {
         id: string;
         query: string;
+        is_edited: boolean;
         description: string;
         execution_time: number;
         example_execution_time: number;
@@ -53,6 +55,7 @@ export const transformBackendMessage = (msg: BackendMessage): Message => ({
     is_loading: false,
     loading_steps: [],
     is_streaming: false,
+    is_edited: msg.is_edited,
     created_at: msg.created_at
 });
 

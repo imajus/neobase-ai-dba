@@ -132,6 +132,17 @@ export default function ChatWindow({
   const scrollPositionRef = useRef<number>(0);
   const isScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showEditQueryConfirm, setShowEditQueryConfirm] = useState<{
+    show: boolean;
+    messageId: string | null;
+    queryId: string | null;
+    query: string | null;
+  }>({
+    show: false,
+    messageId: null,
+    queryId: null,
+    query: null
+  });
 
   useEffect(() => {
     if (isConnected) {
@@ -518,6 +529,57 @@ export default function ChatWindow({
     }, 100);
   };
 
+  const handleEditQuery = async (messageId: string, queryId: string, query: string) => {
+    setShowEditQueryConfirm({
+      show: true,
+      messageId,
+      queryId,
+      query
+    });
+  };
+
+  const handleConfirmQueryEdit = async () => {
+    if (!showEditQueryConfirm.messageId || !showEditQueryConfirm.queryId || !showEditQueryConfirm.query) return;
+
+    try {
+      const response = await chatService.editQuery(
+        chat.id,
+        showEditQueryConfirm.messageId,
+        showEditQueryConfirm.queryId,
+        showEditQueryConfirm.query
+      );
+
+      if (response.success) {
+        preserveScroll(chatContainerRef.current, () => {
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === showEditQueryConfirm.messageId) {
+              return {
+                ...msg,
+                queries: msg.queries?.map(q =>
+                  q.id === showEditQueryConfirm.queryId
+                    ? {
+                      ...q,
+                      query: showEditQueryConfirm.query!,
+                      is_edited: true,
+                      original_query: q.query
+                    }
+                    : q
+                )
+              };
+            }
+            return msg;
+          }));
+        });
+        toast.success('Query updated successfully');
+      }
+    } catch (error) {
+      console.error('Failed to edit query:', error);
+      toast.error('Failed to update query');
+    } finally {
+      setShowEditQueryConfirm({ show: false, messageId: null, queryId: null, query: null });
+    }
+  };
+
   return (
     <div className={`flex-1 flex flex-col h-screen transition-all duration-300 relative ${isExpanded ? 'md:ml-80' : 'md:ml-20'}`}>
       <ChatHeader
@@ -611,6 +673,7 @@ export default function ChatWindow({
                   queryTimeouts={queryTimeouts}
                   isFirstMessage={index === 0}
                   onQueryUpdate={handleQueryUpdate}
+                  onEditQuery={handleEditQuery}
                 />
               ))}
             </div>
@@ -715,6 +778,15 @@ export default function ChatWindow({
             }}
           />
         </div>
+      )}
+
+      {showEditQueryConfirm.show && (
+        <ConfirmationModal
+          title="Edit Query"
+          message="Are you sure you want to edit this query? This may affect the execution results."
+          onConfirm={handleConfirmQueryEdit}
+          onCancel={() => setShowEditQueryConfirm({ show: false, messageId: null, queryId: null, query: null })}
+        />
       )}
     </div>
   );

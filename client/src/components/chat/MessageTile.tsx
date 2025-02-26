@@ -43,6 +43,7 @@ interface MessageTileProps {
     queryTimeouts: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
     isFirstMessage?: boolean;
     onQueryUpdate: (callback: () => void) => void;
+    onEditQuery: (id: string, queryId: string, query: string) => void;
 }
 
 const toastStyle = {
@@ -83,7 +84,8 @@ export default function MessageTile({
     queryTimeouts,
     checkSSEConnection,
     isFirstMessage,
-    onQueryUpdate
+    onQueryUpdate,
+    onEditQuery
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -639,6 +641,10 @@ export default function MessageTile({
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
         const isCurrentlyStreaming = !isMessageStreaming && streamingQueryIndex === index;
+        const [isEditingQuery, setIsEditingQuery] = useState(false);
+        const [editedQueryText, setEditedQueryText] = useState(
+            removeDuplicateQueries(query.query)
+        );
 
         const shouldShowRollback = query.can_rollback &&
             query.is_executed &&
@@ -653,9 +659,13 @@ export default function MessageTile({
                 </p>
                 <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
-
                         <div className="flex items-center gap-2">
                             <span>Query {index + 1}:</span>
+                            {query.is_edited && (
+                                <span className="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded">
+                                    Edited
+                                </span>
+                            )}
                         </div>
                         <div className="flex items-center">
                             {queryStates[queryId]?.isExecuting ? (
@@ -695,21 +705,28 @@ export default function MessageTile({
                                     <XCircle className="w-4 h-4" />
                                 </button>
                             ) : (
-                                <button
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleExecuteQuery(queryId);
-                                        setTimeout(() => {
-                                            window.scrollTo(window.scrollX, window.scrollY);
-                                        }, 0);
-                                    }}
-                                    className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
-                                    title="Run query"
-                                >
-                                    <Play className="w-4 h-4" />
-                                </button>
+                                !queryStates[queryId]?.isExecuting && !query.is_executed && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setIsEditingQuery(true);
+                                        }}
+                                        className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300"
+                                        title="Edit query"
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                )
                             )}
+                            <div className="w-px h-4 bg-gray-700 mx-2" />
+                            <button
+                                onClick={() => handleExecuteQuery(queryId)}
+                                className="p-2 text-red-500 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
+                                title="Execute query"
+                            >
+                                <Play className="w-4 h-4" />
+                            </button>
                             <div className="w-px h-4 bg-gray-700 mx-2" />
                             <button
                                 onClick={() => handleCopyToClipboard(query.query)}
@@ -720,16 +737,52 @@ export default function MessageTile({
                             </button>
                         </div>
                     </div>
-                    <pre className={`
+                    {isEditingQuery ? (
+                        <div className="px-4 pb-4 border-t border-gray-700 pt-4">
+                            <textarea
+                                value={editedQueryText}
+                                onChange={(e) => setEditedQueryText(e.target.value)}
+                                className="w-full bg-gray-900 text-white p-3 rounded-none 
+                                           border-4 border-gray-600 font-mono text-sm min-h-[120px]
+                                           focus:outline-none focus:border-yellow-500 shadow-[4px_4px_0px_0px_rgba(75,85,99,1)]"
+                            />
+                            <div className="flex justify-end gap-3 mt-4">
+                                <button
+                                    onClick={() => {
+                                        setIsEditingQuery(false);
+                                        setEditedQueryText(query.query);
+                                    }}
+                                    className="px-4 py-2 bg-gray-800 text-white border-2 border-gray-600
+                                              hover:bg-gray-700 transition-colors shadow-[2px_2px_0px_0px_rgba(75,85,99,1)]
+                                              active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(75,85,99,1)]"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setIsEditingQuery(false);
+                                        onEditQuery(message.id, queryId, editedQueryText);
+                                    }}
+                                    className="px-4 py-2 bg-yellow-400 text-black border-2 border-black
+                                              hover:bg-yellow-300 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+                                              active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
+                                >
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <pre className={`
                     text-sm overflow-x-auto p-4 border-t border-gray-700
                     ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
                 `}>
-                        <code className="whitespace-pre-wrap break-words">
-                            {isCurrentlyStreaming && isQueryStreaming
-                                ? removeDuplicateQueries(currentQuery)
-                                : removeDuplicateQueries(query.query)}
-                        </code>
-                    </pre>
+                            <code className="whitespace-pre-wrap break-words">
+                                {isCurrentlyStreaming && isQueryStreaming
+                                    ? removeDuplicateQueries(currentQuery)
+                                    : removeDuplicateQueries(query.query)}
+                            </code>
+                        </pre>
+                    )}
                     {(query.execution_result || query.example_result || query.error) && (
                         <div className="border-t border-gray-700 mt-2 w-full">
                             {queryStates[queryId]?.isExecuting ? (
@@ -875,9 +928,9 @@ export default function MessageTile({
                                     ) : (
                                         <div className="px-0">
                                             <div className={`
-                                                text-green-400 pb-6 w-full
+                                            text-green-400 pb-6 w-full
                                                 ${!query.example_result && !query.error ? '' : ''}
-                                            `}>
+                                        `}>
                                                 {viewMode === 'table' ? (
                                                     <div className="w-full">
                                                         {shouldShowExampleResult ? (
@@ -1088,7 +1141,14 @@ export default function MessageTile({
                                 </div>
                             ) : (
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
-                                    <p className="text-lg whitespace-pre-wrap break-words">{message.content}</p>
+                                    <p className="text-lg whitespace-pre-wrap break-words">
+                                        {message.content}
+                                        {message.is_edited && message.type === 'user' && (
+                                            <span className="ml-2 text-xs text-gray-600 italic">
+                                                (edited)
+                                            </span>
+                                        )}
+                                    </p>
                                     {message.queries && message.queries.length > 0 && (
                                         <div className="min-w-full">
                                             {message.queries.map((query: QueryResult, index: number) =>

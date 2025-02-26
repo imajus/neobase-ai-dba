@@ -208,6 +208,30 @@ const chatService = {
             console.error('Refresh schema error:', error);
             throw new Error(error.response?.data?.error || 'Failed to refresh schema');
         }
+    },
+
+    async editQuery(
+        chatId: string,
+        messageId: string,
+        queryId: string,
+        query: string
+    ): Promise<{ success: boolean; data?: any }> {
+        try {
+            const response = await axios.patch(
+                `${import.meta.env.VITE_API_URL}/chats/${chatId}/queries/edit`,
+                {
+                    "message_id": messageId,
+                    "query_id": queryId,
+                    "query": query
+                },
+                {
+                    withCredentials: true,
+                }
+            );
+            return { success: true, data: response.data };
+        } catch (error: any) {
+            throw error.response?.data?.error || 'Failed to edit query';
+        }
     }
 };
 
