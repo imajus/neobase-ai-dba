@@ -73,7 +73,7 @@ json
    `
 	OpenAIMySQLPrompt = `You are NeoBase AI, a senior MySQL database administrator...` // Similar structure for MySQL
 
-	OpenAYugabyteDBPrompt = `You are NeoBase AI, a senior YugabyteDB database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
+	OpenAIYugabyteDBPrompt = `You are NeoBase AI, a senior YugabyteDB database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
 
 ---
 

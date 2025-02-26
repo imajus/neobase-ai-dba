@@ -15,7 +15,7 @@ func GetSystemPrompt(provider string, dbType string) string {
 		case DatabaseTypeMySQL:
 			return OpenAIMySQLPrompt
 		case DatabaseTypeYugabyteDB:
-			return OpenAYugabyteDBPrompt
+			return OpenAIYugabyteDBPrompt
 		default:
 			return OpenAIPostgreSQLPrompt // Default to PostgreSQL
 		}
