@@ -2251,11 +2251,15 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 		return nil, http.StatusBadRequest, fmt.Errorf("query has already been executed, cannot edit")
 	}
 
+	originalQuery := queryData.Query
 	// Fix the query update logic
 	for i := range *message.Queries {
 		if (*message.Queries)[i].ID == queryData.ID {
 			(*message.Queries)[i].Query = query
 			(*message.Queries)[i].IsEdited = true
+			if (*message.Queries)[i].Pagination != nil && (*message.Queries)[i].Pagination.PaginatedQuery != nil {
+				(*message.Queries)[i].Pagination.PaginatedQuery = utils.ToStringPtr(strings.Replace(*(*message.Queries)[i].Pagination.PaginatedQuery, originalQuery, query, 1))
+			}
 		}
 	}
 
@@ -2287,6 +2291,11 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 				if qMap["id"] == queryData.ID {
 					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
 					qMap["is_edited"] = true
+					qMap["is_executed"] = false
+					if qMap["pagination"] != nil {
+						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
+						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+					}
 					queriesVal[i] = qMap
 					break
 				}
@@ -2301,6 +2310,11 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 				if qMap["id"] == queryData.ID {
 					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
 					qMap["is_edited"] = true
+					qMap["is_executed"] = false
+					if qMap["pagination"] != nil {
+						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
+						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+					}
 					queriesVal[i] = qMap
 					break
 				}
