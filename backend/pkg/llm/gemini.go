@@ -48,6 +48,7 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	// Convert messages into parts for the Gemini API.
 	geminiMessages := make([]*genai.Content, 0)
 
+	// Add system prompt first
 	systemPrompt := ""
 	var responseSchema *genai.Schema
 
@@ -59,35 +60,43 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 		}
 	}
 
-	log.Printf("GenerateResponse -> messages: %v", messages)
+	// Add system message first
+	geminiMessages = append(geminiMessages, &genai.Content{
+		Role: "user",
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	})
 
+	// Add conversation history
 	for _, msg := range messages {
 		content := ""
-
-		// Handle different message types
 		switch msg.Role {
 		case "user":
 			if userMsg, ok := msg.Content["user_message"].(string); ok {
 				content = userMsg
 			}
 		case "assistant":
-			content = formatAssistantResponse(msg.Content["assistant_response"].(map[string]interface{}))
+			if assistantMsg, ok := msg.Content["assistant_response"].(map[string]interface{}); ok {
+				content = formatAssistantResponse(assistantMsg)
+			}
 		case "system":
 			if schemaUpdate, ok := msg.Content["schema_update"].(string); ok {
 				content = fmt.Sprintf("Database schema update:\n%s", schemaUpdate)
 			}
 		}
 
-		userRole := "user"
-		if msg.Role == "user" || msg.Role == "system" {
-			userRole = "user"
-		} else {
-			userRole = "model"
-		}
 		if content != "" {
+			role := "user"
+			if msg.Role == "assistant" {
+				role = "model"
+			}
+
 			geminiMessages = append(geminiMessages, &genai.Content{
-				Role:  userRole,
-				Parts: []genai.Part{genai.Text(content)},
+				Role: role,
+				Parts: []genai.Part{
+					genai.Text(content),
+				},
 			})
 		}
 	}
@@ -105,21 +114,36 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 		Parts: []genai.Part{genai.Text(systemPrompt)},
 	}
 	model.ResponseSchema = responseSchema
+	model.SafetySettings = []*genai.SafetySetting{
+		{
+			Category:  genai.HarmCategoryHarassment,
+			Threshold: genai.HarmBlockNone,
+		},
+		{
+			Category:  genai.HarmCategoryHateSpeech,
+			Threshold: genai.HarmBlockNone,
+		},
+	}
 
+	// Start chat session
 	session := model.StartChat()
 	session.History = geminiMessages
-	result, err := session.SendMessage(ctx, genai.Text(""))
+
+	// Send empty message to get response based on history
+	result, err := session.SendMessage(ctx, genai.Text("Please provide a response based on our conversation history."))
 	if err != nil {
-		log.Printf("gemini API error: %v", err)
+		log.Printf("Gemini API error: %v", err)
 		return "", fmt.Errorf("gemini API error: %v", err)
 	}
 
 	log.Printf("GEMINI -> GenerateResponse -> result: %v", result)
+	log.Printf("GEMINI -> GenerateResponse -> result.Candidates[0].Content.Parts[0]: %v", result.Candidates[0].Content.Parts[0])
 	responseText := strings.ReplaceAll(fmt.Sprintf("%v", result.Candidates[0].Content.Parts[0]), "```json", "")
 	responseText = strings.ReplaceAll(responseText, "```", "")
 	var llmResponse constants.LLMResponse
-	if errJSON := json.Unmarshal([]byte(responseText), &llmResponse); errJSON != nil {
-		log.Printf("Warning: Gemini response didn't match expected JSON schema: %v", errJSON)
+	if err := json.Unmarshal([]byte(responseText), &llmResponse); err != nil {
+		log.Printf("Warning: Gemini response didn't match expected JSON schema: %v", err)
+		return "", fmt.Errorf("invalid JSON response: %v", err)
 	}
 
 	return responseText, nil

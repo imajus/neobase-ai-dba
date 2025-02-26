@@ -12,7 +12,6 @@ import (
 	"neobase-ai/pkg/llm"
 	"neobase-ai/pkg/mongodb"
 	"neobase-ai/pkg/redis"
-	"os"
 	"time"
 
 	"go.uber.org/dig"
@@ -112,10 +111,10 @@ func Initialize() {
 			// Register default OpenAI client
 			err := manager.RegisterClient(constants.OpenAI, llm.Config{
 				Provider:            constants.OpenAI,
-				Model:               constants.OpenAIModel,
-				APIKey:              os.Getenv("OPENAI_API_KEY"),
-				MaxCompletionTokens: constants.OpenAIMaxCompletionTokens,
-				Temperature:         constants.OpenAITemperature,
+				Model:               config.Env.OpenAIModel,
+				APIKey:              config.Env.OpenAIAPIKey,
+				MaxCompletionTokens: config.Env.OpenAIMaxCompletionTokens,
+				Temperature:         config.Env.OpenAITemperature,
 				DBConfigs: []llm.LLMDBConfig{
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
@@ -141,10 +140,10 @@ func Initialize() {
 			// Register default Gemini client
 			err := manager.RegisterClient(constants.Gemini, llm.Config{
 				Provider:            constants.Gemini,
-				Model:               constants.GeminiModel,
-				APIKey:              os.Getenv("GEMINI_API_KEY"),
-				MaxCompletionTokens: constants.GeminiMaxCompletionTokens,
-				Temperature:         constants.GeminiTemperature,
+				Model:               config.Env.GeminiModel,
+				APIKey:              config.Env.GeminiAPIKey,
+				MaxCompletionTokens: config.Env.GeminiMaxCompletionTokens,
+				Temperature:         config.Env.GeminiTemperature,
 				DBConfigs: []llm.LLMDBConfig{
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
