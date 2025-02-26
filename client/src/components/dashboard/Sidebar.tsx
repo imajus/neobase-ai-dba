@@ -175,7 +175,7 @@ export default function Sidebar({
                         <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
                           }`}>
                           <div className="text-left">
-                            <h3 className="font-bold text-lg leading-tight">{connection.connection.database}</h3>
+                            <h3 className="font-bold text-lg leading-tight">{connection.connection.database.length > 20 ? connection.connection.database.slice(0, 20) + '...' : connection.connection.database}</h3>
                             <p className="text-gray-600 capitalize text-sm">{connection.connection.type === 'postgresql' ? 'PostgreSQL' : connection.connection.type === 'yugabytedb' ? 'YugabyteDB' : connection.connection.type === 'mysql' ? 'MySQL' : connection.connection.type === 'clickhouse' ? 'ClickHouse' : connection.connection.type === 'mongodb' ? 'MongoDB' : connection.connection.type === 'redis' ? 'Redis' : connection.connection.type === 'neo4j' ? 'Neo4j' : 'Unknown'}</p>
                           </div>
                         </div>
