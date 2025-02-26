@@ -935,7 +935,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 		if diff.IsFirstTime {
 			// For first time, format the full schema
 			schemaMsg = schemaManager.FormatSchemaForLLM(diff.FullSchema)
-			log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
 		} else {
 			// For subsequent changes, get current schema and show changes
 			schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type)
@@ -947,8 +946,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 					s.formatSchemaDiff(diff))
 			}
 		}
-
-		log.Printf("ChatService -> HandleSchemaChange -> saving schemaMsg as LLM message: %s", schemaMsg)
 
 		log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
 
