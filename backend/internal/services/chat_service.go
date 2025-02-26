@@ -947,8 +947,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 			}
 		}
 
-		log.Printf("ChatService -> HandleSchemaChange -> schemaMsg: %s", schemaMsg)
-
 		// Clear previous system message from LLM
 		if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
 			log.Printf("ChatService -> HandleSchemaChange -> Error deleting system message: %v", err)
@@ -965,7 +963,6 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 			},
 		}
 
-		log.Printf("ChatService -> HandleSchemaChange -> llmMsg: %+v", llmMsg)
 		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
 			log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
 		}
