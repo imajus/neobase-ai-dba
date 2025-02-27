@@ -31,8 +31,9 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
    - Use EXPLAIN-friendly syntax for PostgreSQL.  
-   - Avoid SELECT * – always specify columns.  Also cap limit to max 50 as we will apply paginated query with offset.
-   - Dont' use comments in query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
+   - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response
 
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
@@ -54,7 +55,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
        “tables”: “users,orders”,
@@ -73,7 +74,7 @@ json
    `
 	OpenAIMySQLPrompt = `You are NeoBase AI, a senior MySQL database administrator...` // Similar structure for MySQL
 
-	OpenAYugabyteDBPrompt = `You are NeoBase AI, a senior YugabyteDB database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
+	OpenAIYugabyteDBPrompt = `You are NeoBase AI, a senior YugabyteDB database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
 
 ---
 
@@ -95,9 +96,10 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
-   - Use EXPLAIN-friendly syntax for YugabyteDB.  
-   - Avoid SELECT * – always specify columns.  Also cap limit to max 50 as we will apply paginated query with offset.
-   - Dont' use comments in query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Use EXPLAIN-friendly syntax for YugabyteDB.
+   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
+   - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response
 
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
@@ -119,7 +121,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
        “tables”: “users,orders”,
@@ -137,3 +139,182 @@ json
 }`
 	// Add other database prompts as needed
 )
+
+// LLM response schema for structured query generation
+const OpenAIPostgresLLMResponseSchema = `{
+   "type": "object",
+   "required": ["assistantMessage"],
+   "properties": {
+       "queries": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": [
+                   "query",
+                   "queryType",
+                   "explanation",
+                   "isCritical",
+                   "canRollback",
+                   "estimateResponseTime"
+               ],
+               "properties": {
+                   "query": {
+                       "type": "string",
+                       "description": "SQL query to fetch order details."
+                   },
+                   "tables": {
+                       "type": "string",
+                       "description": "Tables being used in the query(comma separated)"
+                   },
+                   "queryType": {
+                       "type": "string",
+                       "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
+                   },
+                   "pagination": {
+                       "type": "object",
+                       "required": [
+                           "paginatedQuery"
+                       ],
+                       "properties": {
+                           "paginatedQuery": {
+                               "type": "string",
+                               "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                           }
+                       }
+                   },
+                   "isCritical": {
+                       "type": "boolean",
+                       "description": "Indicates if the query is critical."
+                   },
+                   "canRollback": {
+                       "type": "boolean",
+                       "description": "Indicates if the operation can be rolled back."
+                   },
+                   "explanation": {
+                       "type": "string",
+                       "description": "Description of what the query does. It should be descriptive and helpful to the user and guide the user with appropriate actions & results."
+                   },
+                   "exampleResult": {
+                       "type": "array",
+                       "items": {
+                           "type": "object",
+                           "description": "Key-value pairs representing column names and example values.",
+                           "additionalProperties": {
+                               "type": "string"
+                           }
+                       },
+                       "description": "An example array of results that the query might return."
+                   },
+                   "rollbackQuery": {
+                       "type": "string",
+                       "description": "Query to undo this operation (if canRollback=true), default empty"
+                   },
+                   "estimateResponseTime": {
+                       "type": "number",
+                       "description": "Estimated time (in milliseconds) to fetch the response."
+                   },
+                   "rollbackDependentQuery": {
+                       "type": "string",
+                       "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                   }
+               },
+               "additionalProperties": false
+           },
+           "description": "List of queries related to orders."
+       },
+       "assistantMessage": {
+           "type": "string",
+           "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
+       }
+   },
+   "additionalProperties": false
+}`
+
+const OpenAIYugabyteDBLLMResponseSchema = `{
+   "type": "object",
+   "required": ["assistantMessage"],
+   "properties": {
+       "queries": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": [
+                   "query",
+                   "queryType",
+                   "explanation",
+                   "isCritical",
+                   "canRollback",
+                   "estimateResponseTime"
+               ],
+               "properties": {
+                   "query": {
+                       "type": "string",
+                       "description": "SQL query to fetch order details."
+                   },
+                   "tables": {
+                       "type": "string",
+                       "description": "Tables being used in the query(comma separated)"
+                   },
+                   "queryType": {
+                       "type": "string",
+                       "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
+                   },
+                   "pagination": {
+                       "type": "object",
+                       "required": [
+                           "paginatedQuery"
+                       ],
+                       "properties": {
+                           "paginatedQuery": {
+                               "type": "string",
+                               "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                           }
+                       }
+                   },
+                   "isCritical": {
+                       "type": "boolean",
+                       "description": "Indicates if the query is critical."
+                   },
+                   "canRollback": {
+                       "type": "boolean",
+                       "description": "Indicates if the operation can be rolled back."
+                   },
+                   "explanation": {
+                       "type": "string",
+                          "description": "Description of what the query does. It should be descriptive and helpful to the user and guide the user with appropriate actions & results."
+                   },
+                   "exampleResult": {
+                       "type": "array",
+                       "items": {
+                           "type": "object",
+                           "description": "Key-value pairs representing column names and example values.",
+                           "additionalProperties": {
+                               "type": "string"
+                           }
+                       },
+                       "description": "An example array of results that the query might return."
+                   },
+                   "rollbackQuery": {
+                       "type": "string",
+                       "description": "Query to undo this operation (if canRollback=true), default empty"
+                   },
+                   "estimateResponseTime": {
+                       "type": "number",
+                       "description": "Estimated time (in milliseconds) to fetch the response."
+                   },
+                   "rollbackDependentQuery": {
+                       "type": "string",
+                       "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                   }
+               },
+               "additionalProperties": false
+           },
+           "description": "List of queries related to orders."
+       },
+       "assistantMessage": {
+           "type": "string",
+           "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
+       }
+   },
+   "additionalProperties": false
+}`

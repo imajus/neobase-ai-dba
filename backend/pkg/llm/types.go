@@ -33,12 +33,12 @@ type Config struct {
 	Model               string
 	APIKey              string
 	MaxCompletionTokens int
-	Temperature         float32
+	Temperature         float64
 	DBConfigs           []LLMDBConfig
 }
 
 type LLMDBConfig struct {
 	DBType       string
-	Schema       string
+	Schema       interface{}
 	SystemPrompt string
 }

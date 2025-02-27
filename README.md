@@ -20,22 +20,32 @@
 - **Schema Management**: Create indexes, views, and manage schemas effortlessly.
 - **Self-Hosted & Open Source**: Deploy on your infrastructure with full control.
 
-## Currently Supported DBs
+## Supported DBs
 - PostgreSQL
 - Yugabyte
-- MySQL
-- MongoDB
-- Neo4j DB
-- Redis
-- Clickhouse
 
+## Planned to be supported DBs
+- MongoDB (Priority 1)
+- MySQL (Priority 2)
+- Neo4j DB (Priority 3)
+- Redis (Priority 4)
+- Clickhouse (Priority 5)
+
+## Supported LLM Clients
+- OpenAI (Any chat completion model)
+- Google Gemini (Any chat completion model)
+
+## Planned to be supported LLM Clients
+- Anthropic (Claude 3.5 Sonnet)
+- Ollama (Any chat completion model)
 
 ## Tech Stack
 
 - **Frontend**: React, Tailwind CSS
 - **Backend**: Go (Gin framework)
-- **AI Orchestrator**: OpenAI GPT-4
-- **Database Drivers**: PostgreSQL, MySQL, MongoDB, Redis, Neo4j, etc.
+- **App Used Database**: MongoDB, Redis
+- **AI Orchestrator**: OpenAI, Google Gemini
+- **Database Drivers**: PostgreSQL, Yugabyte, MySQL, MongoDB, Redis, Neo4j, etc.
 - **Styling**: Neo Brutalism design with custom Tailwind utilities
 
 
@@ -46,22 +56,38 @@
 - Go (v1.22+)
 - Node.js (v18+)
 - OpenAI API key
+- Google API key
 - Docker
 
 ## Usage
 
-1. **Add a Database Connection**:
-   - Click "New Connection" in the sidebar.
-   - Enter your database credentials (e.g., host, port, username, password).
+1. **Setup Environment Variables**:
+   - Create a `.env` file in the root directory.
+   - Add your API keys and other environment variables.
+   - See `.env.example` for reference.
 
-2. **Chat with Your Database**:
+2. **Create a new user in the app**:
+   - Admin credentials are set via `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables.
+   - Creating a new user requires an username, password and user signup secret.
+   - User signup secret is generated via Admin credenials by sending a POST request to `api/auth/generate-signup-secret`
+   - Use this secret to signup a new user from NeoBase UI.
+
+3. **Add a Database Connection**:
+   - Click "Add Connection" in the sidebar.
+   - Choose & Enter your database credentials (e.g., host, port, username, password).
+   - Click "Save" to add the connection.
+
+4. **Chat with Your Database**:
    - Type natural language prompts in the chat interface (e.g., "Show me all users").
-   - View the generated SQL query and results.
+   - View the generated SQL, Other DBs query and results.
+   - Paginated results that support large volume of data.
 
-3. **Manage Transactions**:
-   - Start a transaction, execute queries, and commit or rollback changes.
+5. **Manage Transactions**:
+   - Run the query in transaction mode by clicking "Play" icon button in query.
+   - You can also cancel the query by clicking "Cancel" icon button in query.
+   - Perform rollbacks by clicking "History" icon button in query.
 
-4. **Optimize Queries**:
+6. **Optimize Queries**:
    - Get AI-driven suggestions to improve query performance.
 
 

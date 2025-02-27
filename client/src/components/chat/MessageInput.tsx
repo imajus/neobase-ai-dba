@@ -48,7 +48,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded }:
                             handleSubmit(e);
                         }
                     }}
-                    placeholder="Talk to your database..."
+                    placeholder={isConnected ? "Talk to your database..." : "You are not connected to your database..."}
                     className="
             neo-input 
             flex-1

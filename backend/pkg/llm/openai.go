@@ -7,7 +7,6 @@ import (
 	"log"
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
-	"strings"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -16,7 +15,7 @@ type OpenAIClient struct {
 	client              *openai.Client
 	model               string
 	maxCompletionTokens int
-	temperature         float32
+	temperature         float64
 	DBConfigs           []LLMDBConfig
 }
 
@@ -41,6 +40,11 @@ func NewOpenAIClient(config Config) (*OpenAIClient, error) {
 }
 
 func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
 	// Convert messages to OpenAI format
 	openAIMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 
@@ -50,7 +54,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	for _, dbConfig := range c.DBConfigs {
 		if dbConfig.DBType == dbType {
 			systemPrompt = dbConfig.SystemPrompt
-			responseSchema = dbConfig.Schema
+			responseSchema = dbConfig.Schema.(string)
 			break
 		}
 	}
@@ -61,7 +65,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		Content: systemPrompt,
 	})
 
-	log.Printf("GenerateResponse -> messages: %v", messages)
+	log.Printf("OPENAI -> GenerateResponse -> messages: %v", messages)
 
 	for _, msg := range messages {
 		content := ""
@@ -93,7 +97,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		Model:               c.model,
 		Messages:            openAIMessages,
 		MaxCompletionTokens: c.maxCompletionTokens,
-		Temperature:         c.temperature,
+		Temperature:         float32(c.temperature),
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
 			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
@@ -103,6 +107,11 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 				Strict:      false,
 			},
 		},
+	}
+
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
 
 	// Call OpenAI API
@@ -116,7 +125,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		return "", fmt.Errorf("no response from OpenAI")
 	}
 
-	log.Printf("GenerateResponse -> resp: %v", resp)
+	log.Printf("OPENAI -> GenerateResponse -> resp: %v", resp)
 	// Validate response against schema
 	var llmResponse constants.LLMResponse
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &llmResponse); err != nil {
@@ -131,33 +140,5 @@ func (c *OpenAIClient) GetModelInfo() ModelInfo {
 		Name:                c.model,
 		Provider:            "openai",
 		MaxCompletionTokens: c.maxCompletionTokens,
-		ContextLimit:        getModelContextLimit(c.model),
-	}
-}
-
-// Helper functions
-func mapRole(role string) string {
-	switch strings.ToLower(role) {
-	case "user":
-		return "user"
-	case "assistant":
-		return "assistant"
-	case "system":
-		return "system"
-	default:
-		return "user"
-	}
-}
-
-func getModelContextLimit(model string) int {
-	switch model {
-	case openai.GPT4TurboPreview:
-		return 128000 // 128k tokens
-	case openai.GPT4:
-		return 8192 // 8k tokens
-	case openai.GPT3Dot5Turbo:
-		return 4096 // 4k tokens
-	default:
-		return 4096
 	}
 }

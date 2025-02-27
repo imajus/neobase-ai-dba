@@ -83,6 +83,11 @@ func NewChatService(
 func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error) {
 	log.Printf("Creating chat for user %s", userID)
 
+	// Check if the database type is supported
+	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB {
+		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL and YugabyteDB are supported for now")
+	}
+
 	// Test connection without creating a persistent connection
 	err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 		Type:     req.Connection.Type,
@@ -509,6 +514,19 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
 				log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
 			}
+			var tables *string
+			if queryMap["tables"] != nil {
+				tables = utils.ToStringPtr(queryMap["tables"].(string))
+			}
+			var queryType *string
+			if queryMap["queryType"] != nil {
+				queryType = utils.ToStringPtr(queryMap["queryType"].(string))
+			}
+
+			var rollbackQuery *string
+			if queryMap["rollbackQuery"] != nil {
+				rollbackQuery = utils.ToStringPtr(queryMap["rollbackQuery"].(string))
+			}
 			queries = append(queries, models.Query{
 				ID:                     primitive.NewObjectID(),
 				Query:                  queryMap["query"].(string),
@@ -522,9 +540,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				ExampleResult:          exampleResult,
 				ExecutionResult:        nil,
 				Error:                  nil,
-				QueryType:              utils.ToStringPtr(queryMap["queryType"].(string)),
-				Tables:                 utils.ToStringPtr(queryMap["tables"].(string)),
-				RollbackQuery:          utils.ToStringPtr(queryMap["rollbackQuery"].(string)),
+				QueryType:              queryType,
+				Tables:                 tables,
+				RollbackQuery:          rollbackQuery,
 				RollbackDependentQuery: rollbackDependentQuery,
 				Pagination:             pagination,
 			})
@@ -807,6 +825,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 	s.processesMu.Lock()
 	defer s.processesMu.Unlock()
 
+	log.Printf("CancelProcessing -> activeProcesses: %+v", s.activeProcesses)
 	if cancel, exists := s.activeProcesses[streamID]; exists {
 		log.Printf("CancelProcessing -> canceling LLM processing for streamID: %s", streamID)
 		cancel() // Only cancels the LLM context
@@ -828,7 +847,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 				ChatID:  chatObjID,
 				UserID:  userObjID,
 				Type:    string(MessageTypeAssistant),
-				Content: "Response cancelled by user",
+				Content: "Operation cancelled by user",
 			}
 
 			// Save cancelled event to database
@@ -839,7 +858,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 		// Send cancelled event using stream
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "response-cancelled",
-			Data:  "Response cancelled by user",
+			Data:  "Operation cancelled by user",
 		})
 	}
 }
@@ -1034,7 +1053,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		return nil, http.StatusForbidden, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
 	select {
@@ -1435,7 +1454,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusForbidden, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
 	select {
@@ -2066,9 +2085,10 @@ func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string)
 }
 
 // Update the ProcessMessage method to use a separate context for LLM processing
-func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error {
+func (s *chatService) ProcessMessage(_ context.Context, userID, chatID string, streamID string) error {
 	// Create a new context specifically for LLM processing
-	llmCtx, cancel := context.WithCancel(context.Background())
+	// Use context.Background() to avoid cancellation of the parent context
+	msgCtx, cancel := context.WithCancel(context.Background())
 
 	log.Printf("ProcessMessage -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
@@ -2085,11 +2105,11 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 			s.processesMu.Unlock()
 		}()
 
-		if err := s.processMessageInternal(llmCtx, ctx, userID, chatID, streamID); err != nil {
+		if err := s.processMessageInternal(msgCtx, userID, chatID, streamID); err != nil {
 			log.Printf("Error processing message: %v", err)
 			// Use parent context for sending stream events
 			select {
-			case <-ctx.Done():
+			case <-msgCtx.Done():
 				return
 			default:
 				go func() {
@@ -2134,14 +2154,15 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 }
 
 // Update processMessageInternal to use both contexts
-func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, userID, chatID, streamID string) error {
+func (s *chatService) processMessageInternal(msgCtx context.Context, userID, chatID, streamID string) error {
+	// Cancellation with s.activeProcesses[streamID]
 	log.Printf("processMessageInternal -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 	select {
-	case <-sseCtx.Done():
+	case <-msgCtx.Done():
 		return fmt.Errorf("sse connection closed")
 	default:
 		// LLM processing will be handled in this method
-		s.processLLMResponse(llmCtx, userID, chatID, streamID)
+		s.processLLMResponse(msgCtx, userID, chatID, streamID)
 	}
 
 	return nil
@@ -2149,45 +2170,55 @@ func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, use
 
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
 	log.Println("ChatService -> RefreshSchema")
-	schema, err := s.dbManager.GetSchemaManager().GetLatestSchema(chatID)
-	if err != nil {
-		return http.StatusInternalServerError, err
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		return http.StatusOK, nil
+	default:
+		schema, err := s.dbManager.GetSchemaManager().GetLatestSchema(ctx, chatID)
+		if err != nil {
+			return http.StatusOK, nil
+		}
+
+		go func() {
+			userObjID, err := primitive.ObjectIDFromHex(userID)
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
+				return
+			}
+			chatObjID, err := primitive.ObjectIDFromHex(chatID)
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error getting chatID: %v", err)
+				return
+			}
+
+			// Clear previous system message from LLM
+			if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
+			}
+
+			schemaMsg := s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
+
+			log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
+			llmMsg := &models.LLMMessage{
+				Base:   models.NewBase(),
+				UserID: userObjID,
+				ChatID: chatObjID,
+				Role:   string(MessageTypeSystem),
+				Content: map[string]interface{}{
+					"schema_update": schemaMsg,
+				},
+			}
+			if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
+			}
+			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
+		}()
+		return http.StatusOK, nil
 	}
-	go func() {
-		userObjID, err := primitive.ObjectIDFromHex(userID)
-		if err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
-			return
-		}
-		chatObjID, err := primitive.ObjectIDFromHex(chatID)
-		if err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error getting chatID: %v", err)
-			return
-		}
-
-		// Clear previous system message from LLM
-		if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
-		}
-
-		schemaMsg := s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
-
-		log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
-		llmMsg := &models.LLMMessage{
-			Base:   models.NewBase(),
-			UserID: userObjID,
-			ChatID: chatObjID,
-			Role:   string(MessageTypeSystem),
-			Content: map[string]interface{}{
-				"schema_update": schemaMsg,
-			},
-		}
-		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
-		}
-		log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
-	}()
-	return http.StatusOK, nil
 }
 
 // Fetches paginated results for a query

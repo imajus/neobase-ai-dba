@@ -12,7 +12,6 @@ import (
 	"neobase-ai/pkg/llm"
 	"neobase-ai/pkg/mongodb"
 	"neobase-ai/pkg/redis"
-	"os"
 	"time"
 
 	"go.uber.org/dig"
@@ -112,24 +111,24 @@ func Initialize() {
 			// Register default OpenAI client
 			err := manager.RegisterClient(constants.OpenAI, llm.Config{
 				Provider:            constants.OpenAI,
-				Model:               constants.OpenAIModel,
-				APIKey:              os.Getenv("OPENAI_API_KEY"),
-				MaxCompletionTokens: constants.OpenAIMaxCompletionTokens,
-				Temperature:         constants.OpenAITemperature,
+				Model:               config.Env.OpenAIModel,
+				APIKey:              config.Env.OpenAIAPIKey,
+				MaxCompletionTokens: config.Env.OpenAIMaxCompletionTokens,
+				Temperature:         config.Env.OpenAITemperature,
 				DBConfigs: []llm.LLMDBConfig{
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
-						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypePostgreSQL),
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypePostgreSQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypePostgreSQL),
 					},
 					{
 						DBType:       constants.DatabaseTypeYugabyteDB,
-						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypeYugabyteDB),
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
 					},
 					{
 						DBType:       constants.DatabaseTypeMySQL,
-						Schema:       constants.GetLLMResponseSchema(constants.DatabaseTypeMySQL),
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL),
 					},
 				},
@@ -139,7 +138,28 @@ func Initialize() {
 			}
 		case constants.Gemini:
 			// Register default Gemini client
-
+			err := manager.RegisterClient(constants.Gemini, llm.Config{
+				Provider:            constants.Gemini,
+				Model:               config.Env.GeminiModel,
+				APIKey:              config.Env.GeminiAPIKey,
+				MaxCompletionTokens: config.Env.GeminiMaxCompletionTokens,
+				Temperature:         config.Env.GeminiTemperature,
+				DBConfigs: []llm.LLMDBConfig{
+					{
+						DBType:       constants.DatabaseTypePostgreSQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypePostgreSQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeYugabyteDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeYugabyteDB),
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to register Gemini client: %v", err)
+			}
 		}
 		return manager
 	}); err != nil {

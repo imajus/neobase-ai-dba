@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 )
 
@@ -28,6 +29,8 @@ func (m *Manager) RegisterClient(name string, config Config) error {
 	switch config.Provider {
 	case "openai":
 		client, err = NewOpenAIClient(config)
+	case "gemini":
+		client, err = NewGeminiClient(config)
 	// Add other providers here (Gemini, etc.)
 	default:
 		return fmt.Errorf("unsupported LLM provider: %s", config.Provider)
@@ -68,4 +71,18 @@ func formatAssistantResponse(response map[string]interface{}) string {
 		return fmt.Sprintf("%v", response)
 	}
 	return string(jsonBytes)
+}
+
+// Helper functions
+func mapRole(role string) string {
+	switch strings.ToLower(role) {
+	case "user":
+		return "user"
+	case "assistant":
+		return "assistant"
+	case "system":
+		return "system"
+	default:
+		return "user"
+	}
 }

@@ -38,7 +38,8 @@ function AppContent() {
   const [isMessageSending, setIsMessageSending] = useState(false);
   const [temporaryMessage, setTemporaryMessage] = useState<Message | null>(null);
   const { user, setUser } = useUser();
-
+  const [refreshSchemaController, setRefreshSchemaController] = useState<AbortController | null>(null);
+  const [isSSEReconnecting, setIsSSEReconnecting] = useState(false);
   // Check auth status on mount
   useEffect(() => {
     checkAuth();
@@ -439,6 +440,7 @@ function AppContent() {
       // Setup SSE event handlers
       sse.onopen = () => {
         console.log('SSE connection opened successfully');
+        setIsSSEReconnecting(true);
       };
 
       sse.onmessage = (event) => {
@@ -458,11 +460,24 @@ function AppContent() {
 
       sse.onerror = (e: any) => {
         console.error('SSE connection error:', e);
-        handleConnectionStatusChange(chatId, false, 'sse-error');
-        // Don't close the connection on every error
-        if (sse.readyState === EventSource.CLOSED) {
-          setEventSource(null);
-        }
+        // Here's check if the SSE connection is tried to be reconnected by SSE-open
+        setTimeout(() => {
+          console.log('SSE connection error -> isSSEReconnecting', isSSEReconnecting);
+          // If false, that means the connection was not tried to be reconnected by SSE-open
+          if (!isSSEReconnecting) {
+            setIsSSEReconnecting(false);
+
+            handleConnectionStatusChange(chatId, false, 'sse-error');
+            // Don't close the connection on every error
+            if (sse.readyState === EventSource.CLOSED) {
+              setEventSource(null);
+            }
+          } else {
+            // If true, that means the connection was tried to be reconnected by SSE-open
+            console.log('SSE connection error -> isSSEReconnecting is true, making it false');
+            setIsSSEReconnecting(false);
+          }
+        }, 2000);
       };
 
       setEventSource(sse);
@@ -488,13 +503,15 @@ function AppContent() {
   // Refresh schema
   const handleRefreshSchema = async () => {
     try {
+      const controller = new AbortController();
+      setRefreshSchemaController(controller);
       console.log('handleRefreshSchema called');
-      const response = await chatService.refreshSchema(selectedConnection?.id || '');
+      const response = await chatService.refreshSchema(selectedConnection?.id || '', controller);
       console.log('handleRefreshSchema response', response);
       if (response) {
         toast.success('Knowledge base refreshed successfully');
       } else {
-        toast.error('Failed to refresh knowledge base');
+        toast.error('Cancelled Knowledge Base Refresh');
       }
     } catch (error) {
       console.error('Failed to refresh schema:', error);
@@ -502,20 +519,18 @@ function AppContent() {
     }
   };
 
+  const handleCancelRefreshSchema = async () => {
+    if (refreshSchemaController) {
+      refreshSchemaController.abort();
+      setRefreshSchemaController(null);
+    }
+  };
+
   const handleCancelStream = async () => {
     if (!selectedConnection?.id || !streamId) return;
     try {
       console.log('handleCancelStream -> streamId', streamId);
-      await axios.post(
-        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/stream/cancel?stream_id=${streamId}`,
-        {},
-        {
-          withCredentials: true,
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      await chatService.cancelStream(selectedConnection.id, streamId);
 
       // Remove temporary streaming message
       setMessages(prev => {
@@ -580,6 +595,8 @@ function AppContent() {
       }
       console.log('new stream id', streamId);
 
+      // Wait for 100 ms for the eventSource to be open
+      await new Promise(resolve => setTimeout(resolve, 100));
       const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
 
       if (response.success) {
@@ -965,6 +982,7 @@ function AppContent() {
           isConnected={!!connectionStatuses[selectedConnection.id]}
           onCancelStream={handleCancelStream}
           onRefreshSchema={handleRefreshSchema}
+          onCancelRefreshSchema={handleCancelRefreshSchema}
         />
       ) : (
         <div className={`
@@ -1077,7 +1095,7 @@ function AppContent() {
                 <LineChart className="w-6 h-6 text-black" />
               </div>
               <h3 className="text-lg font-bold mb-2">
-                Visual Results
+                Visualize Results
               </h3>
               <p className="text-gray-600">
                 View your data in tables or JSON format. Execute queries and see results in real-time.

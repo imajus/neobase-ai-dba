@@ -3,6 +3,7 @@ package dbmanager
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 
@@ -62,8 +63,26 @@ func (w *PostgresWrapper) GetDB() *sql.DB {
 
 // GetSchema fetches the current database schema
 func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresWrapper -> GetSchema -> Context cancelled: %v", err)
+		return nil, err
+	}
 	if err := w.updateUsage(); err != nil {
 		return nil, fmt.Errorf("failed to update usage: %v", err)
+	}
+
+	sqlDB, err := w.db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SQL DB: %v", err)
+	}
+
+	// Set a reasonable timeout for the connection
+	if err := sqlDB.PingContext(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			log.Printf("Database ping cancelled by context")
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to ping database: %v", err)
 	}
 
 	driver, exists := w.manager.drivers["postgresql"]
@@ -76,13 +95,27 @@ func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
 	}
 
 	if fetcher, ok := driver.(SchemaFetcher); ok {
-		return fetcher.GetSchema(ctx, w)
+		schema, err := fetcher.GetSchema(ctx, w)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				log.Printf("Schema fetch cancelled by context")
+				return nil, err
+			}
+			return nil, err
+		}
+		return schema, nil
 	}
 	return nil, fmt.Errorf("driver does not support schema fetching")
 }
 
 // GetTableChecksum calculates checksum for a single table
 func (w *PostgresWrapper) GetTableChecksum(ctx context.Context, table string) (string, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresWrapper -> GetTableChecksum -> Context cancelled: %v", err)
+		return "", err
+	}
+
 	if err := w.updateUsage(); err != nil {
 		return "", fmt.Errorf("failed to update usage: %v", err)
 	}

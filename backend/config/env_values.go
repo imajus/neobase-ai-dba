@@ -32,6 +32,18 @@ type Environment struct {
 	RedisPort     string
 	RedisUsername string
 	RedisPassword string
+
+	// OpenAI configs
+	OpenAIAPIKey              string
+	OpenAIModel               string
+	OpenAIMaxCompletionTokens int
+	OpenAITemperature         float64
+
+	// Gemini configs
+	GeminiAPIKey              string
+	GeminiModel               string
+	GeminiMaxCompletionTokens int
+	GeminiTemperature         float64
 }
 
 var Env Environment
@@ -67,7 +79,22 @@ func LoadEnv() error {
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
 	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
 	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "neobase")
+
+	// LLM configs
 	Env.DefaultLLMClient = getEnvWithDefault("DEFAULT_LLM_CLIENT", constants.OpenAI)
+
+	// OpenAI configs
+	Env.OpenAIAPIKey = getRequiredEnv("OPENAI_API_KEY", "")
+	Env.OpenAIModel = getEnvWithDefault("OPENAI_MODEL", constants.OpenAIModel)
+	Env.OpenAIMaxCompletionTokens = getIntEnvWithDefault("OPENAI_MAX_COMPLETION_TOKENS", constants.OpenAIMaxCompletionTokens)
+	Env.OpenAITemperature = getFloatEnvWithDefault("OPENAI_TEMPERATURE", constants.OpenAITemperature)
+
+	// Gemini configs
+	Env.GeminiAPIKey = getRequiredEnv("GEMINI_API_KEY", "")
+	Env.GeminiModel = getEnvWithDefault("GEMINI_MODEL", constants.GeminiModel)
+	Env.GeminiMaxCompletionTokens = getIntEnvWithDefault("GEMINI_MAX_COMPLETION_TOKENS", constants.GeminiMaxCompletionTokens)
+	Env.GeminiTemperature = getFloatEnvWithDefault("GEMINI_TEMPERATURE", constants.GeminiTemperature)
+
 	return validateConfig()
 }
 
@@ -98,6 +125,14 @@ func getIntEnvWithDefault(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return value
+}
+
+func getFloatEnvWithDefault(key string, defaultValue float64) float64 {
+	strValue := os.Getenv(key)
+	if strValue == "" {
+		return defaultValue
+	}
+	return defaultValue
 }
 
 func validateConfig() error {

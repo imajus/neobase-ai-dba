@@ -202,6 +202,12 @@ func (sm *SchemaManager) fetchSchema(ctx context.Context, db DBExecutor, dbType 
 
 // Update GetSchema to use fetchSchema and getFetcher
 func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetSchema -> context cancelled: %v", err)
+		return nil, err
+	}
+
 	// Always fetch fresh schema from database for schema checks
 	schema, err := sm.fetchSchema(ctx, db, dbType)
 	if err != nil {
@@ -211,6 +217,11 @@ func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExec
 	// Log all tables found in the database
 	tableNames := make([]string, 0, len(schema.Tables))
 	for tableName := range schema.Tables {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("GetSchema -> context cancelled: %v", err)
+			return nil, err
+		}
 		tableNames = append(tableNames, tableName)
 	}
 	log.Printf("SchemaManager -> GetSchema -> Fresh schema contains tables: %v", tableNames)
@@ -220,6 +231,12 @@ func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExec
 
 // Fix the CheckSchemaChanges function to properly call CompareSchemas
 func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, db DBExecutor, dbType string) (*SchemaDiff, bool, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("CheckSchemaChanges -> context cancelled: %v", err)
+		return nil, false, err
+	}
+
 	_, exists := sm.dbManager.drivers[dbType]
 	if !exists {
 		return nil, false, fmt.Errorf("no driver found for type: %s", dbType)
@@ -447,8 +464,20 @@ func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema 
 
 // Get current table checksums without fetching full schema
 func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, dbType string) (map[string]string, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("getTableChecksums -> context cancelled: %v", err)
+		return nil, err
+	}
+
 	switch dbType {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("getTableChecksums -> context cancelled: %v", err)
+			return nil, err
+		}
+
 		checksums := make(map[string]string)
 
 		// Get schema directly from the database
@@ -459,6 +488,12 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 
 		// Calculate checksums for each table
 		for tableName, table := range schema.Tables {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("getTableChecksums -> context cancelled: %v", err)
+				return nil, err
+			}
+
 			// Convert table definition to string for checksum
 			tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
 				tableName,
@@ -486,6 +521,12 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 
 // Update fetchTableList to use driver directly
 func (sm *SchemaManager) fetchTableList(ctx context.Context, db DBExecutor) ([]string, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("fetchTableList -> context cancelled: %v", err)
+		return nil, err
+	}
+
 	schema, err := db.GetSchema(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get schema: %v", err)
@@ -499,63 +540,15 @@ func (sm *SchemaManager) fetchTableList(ctx context.Context, db DBExecutor) ([]s
 	return tables, nil
 }
 
-// Update calculateTableChecksum to use driver directly
-func (sm *SchemaManager) calculateTableChecksum(ctx context.Context, db DBExecutor, table string) (string, error) {
-	return db.GetTableChecksum(ctx, table)
-}
-
-// Update QuickSchemaCheck to use fetchTableList and calculateTableChecksum
-func (sm *SchemaManager) QuickSchemaCheck(ctx context.Context, chatID string, db DBExecutor) (bool, error) {
-	storedSchema, err := sm.getStoredSchema(ctx, chatID)
-	if err != nil {
-		return true, fmt.Errorf("failed to get stored schema: %v", err)
-	}
-
-	currentTables, err := sm.fetchTableList(ctx, db)
-	if err != nil {
-		return false, fmt.Errorf("failed to fetch current tables: %v", err)
-	}
-
-	// Quick check: compare table counts and names
-	storedTables := make([]string, 0, len(storedSchema.FullSchema.Tables))
-	for tableName := range storedSchema.FullSchema.Tables {
-		storedTables = append(storedTables, tableName)
-	}
-	sort.Strings(storedTables)
-
-	if !reflect.DeepEqual(currentTables, storedTables) {
-		return true, nil
-	}
-
-	// Compare table checksums
-	for _, tableName := range currentTables {
-		currentChecksum, err := sm.calculateTableChecksum(ctx, db, tableName)
-		if err != nil {
-			log.Printf("QuickSchemaCheck -> Error calculating checksum for table %s: %v", tableName, err)
-			continue
-		}
-
-		storedChecksum, exists := storedSchema.TableChecksums[tableName]
-		if !exists || storedChecksum != currentChecksum {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 // Update schema retrieval methods
 func (sm *SchemaManager) getStoredSchema(ctx context.Context, chatID string) (*SchemaStorage, error) {
-	return sm.storageService.Retrieve(ctx, chatID)
-}
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("getStoredSchema -> context cancelled: %v", err)
+		return nil, err
+	}
 
-// Add helper functions
-func columnsEqual(a, b ColumnInfo) bool {
-	return a.Name == b.Name &&
-		a.Type == b.Type &&
-		a.IsNullable == b.IsNullable &&
-		a.DefaultValue == b.DefaultValue &&
-		a.Comment == b.Comment
+	return sm.storageService.Retrieve(ctx, chatID)
 }
 
 // Add type-specific schema simplification
@@ -704,6 +697,7 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 	}
 	sort.Strings(tableNames)
 
+	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
 		table := schema.Tables[tableName]
 		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
@@ -766,13 +760,51 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			}
 		}
 		result.WriteString("\n")
+
+		// Add Enums information
+		if len(schema.Enums) > 0 {
+			result.WriteString("\n  Enums:\n")
+			for _, enum := range schema.Enums {
+				result.WriteString(fmt.Sprintf("  - %s", enum.Name))
+			}
+		}
+		// Add indexes information
+		if len(table.Indexes) > 0 {
+			result.WriteString("\n  Indexes:\n")
+			for _, idx := range table.Indexes {
+				result.WriteString(fmt.Sprintf("  - %s (%s)", idx.Name, strings.Join(idx.Columns, ", ")))
+			}
+		}
+
+		result.WriteString("\n")
+		// Add constraints information
+		if len(table.Constraints) > 0 {
+			result.WriteString("\n  Constraints:\n")
+			for _, constraint := range table.Constraints {
+				result.WriteString(fmt.Sprintf("  - %s", constraint.Name))
+			}
+		}
+		result.WriteString("\n")
+		// Add Views information
+		if len(schema.Views) > 0 {
+			result.WriteString("\n  Views:\n")
+			for _, view := range schema.Views {
+				result.WriteString(fmt.Sprintf("  - %s", view.Name))
+			}
+		}
 	}
 
 	return result.String()
 }
 
-// Update HasSchemaChanged to properly compare checksums
+// HasSchemaChanged to support context cancellation
 func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db DBExecutor) (bool, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("HasSchemaChanged -> context cancelled: %v", err)
+		return false, err
+	}
+
 	log.Printf("HasSchemaChanged -> chatID: %s", chatID)
 
 	conn, exists := sm.dbManager.connections[chatID]
@@ -786,6 +818,13 @@ func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db
 		log.Printf("HasSchemaChanged -> error getting current checksums: %v", err)
 		return true, nil
 	}
+
+	// Check for context cancellation after expensive operation
+	if err := ctx.Err(); err != nil {
+		log.Printf("HasSchemaChanged -> context cancelled: %v", err)
+		return false, err
+	}
+
 	log.Printf("HasSchemaChanged -> currentChecksums: %+v", currentChecksums)
 
 	// Check in-memory cache
@@ -805,6 +844,12 @@ func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db
 
 		// Compare each table's checksum
 		for tableName, currentChecksum := range currentChecksums {
+			// Check for context cancellation during iteration
+			if err := ctx.Err(); err != nil {
+				log.Printf("HasSchemaChanged -> context cancelled: %v", err)
+				return false, err
+			}
+
 			table, ok := cachedSchema.Tables[tableName]
 			if !ok {
 				log.Printf("HasSchemaChanged -> table %s not found in cache", tableName)
@@ -820,6 +865,12 @@ func (sm *SchemaManager) HasSchemaChanged(ctx context.Context, chatID string, db
 			}
 		}
 		return false, nil
+	}
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("HasSchemaChanged -> context cancelled: %v", err)
+		return false, err
 	}
 
 	// Check Redis if not in memory
@@ -841,10 +892,17 @@ const (
 )
 
 // Helper function to get the latest schema
-func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
+func (sm *SchemaManager) GetLatestSchema(ctx context.Context, chatID string) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetLatestSchema -> context cancelled: %v", err)
+		return nil, err
+	}
+
 	// Get current connection
 	db, err := sm.dbManager.GetConnection(chatID)
 	if err != nil {
+		log.Printf("GetLatestSchema -> error getting connection: %v", err)
 		return nil, fmt.Errorf("failed to get connection: %v", err)
 	}
 
@@ -854,15 +912,28 @@ func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
 		return nil, fmt.Errorf("connection not found for chatID: %s", chatID)
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetLatestSchema -> context cancelled: %v", err)
+		return nil, err
+	}
+
 	// For manual triggers (DDL), directly fetch and store new schema
 	log.Printf("SchemaManager -> RefreshSchema -> Manual trigger, fetching new schema")
-	schema, err := db.GetSchema(context.Background())
+	schema, err := db.GetSchema(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current schema: %v", err)
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetLatestSchema -> context cancelled: %v", err)
+		return nil, err
+	}
+
+	log.Printf("SchemaManager -> RefreshSchema -> Storing fresh schema")
 	// Store the fresh schema immediately
-	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
+	if err := sm.storeSchema(ctx, chatID, schema, db, conn.Config.Type); err != nil {
 		return nil, fmt.Errorf("failed to store schema: %v", err)
 	}
 

@@ -143,6 +143,23 @@ const chatService = {
             throw new Error(error.response?.data?.error || 'Failed to send message');
         }
     },
+    async cancelStream(chatId: string, streamId: string): Promise<void> {
+        try {
+            await axios.post(
+                `${import.meta.env.VITE_API_URL}/chats/${chatId}/stream/cancel?stream_id=${streamId}`,
+                {},
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+        } catch (error: any) {
+            console.error('Cancel stream error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to cancel stream');
+        }
+    },
 
     async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<ExecuteQueryResponse | undefined> {
         try {
@@ -199,7 +216,7 @@ const chatService = {
         }
     },
 
-    async refreshSchema(chatId: string): Promise<boolean> {
+    async refreshSchema(chatId: string, controller: AbortController): Promise<boolean> {
         try {
             const response = await axios.post(`${API_URL}/chats/${chatId}/refresh-schema`, {
                 withCredentials: true,
@@ -207,9 +224,14 @@ const chatService = {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
                 }
+            }, {
+                signal: controller.signal,
             });
             return response.data.success;
         } catch (error: any) {
+            if (error.name === 'CanceledError' || error.name === 'AbortError') {
+                return false;
+            }
             console.error('Refresh schema error:', error);
             throw new Error(error.response?.data?.error || 'Failed to refresh schema');
         }
