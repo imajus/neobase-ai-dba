@@ -1047,7 +1047,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		return nil, http.StatusForbidden, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
 	select {
@@ -1448,7 +1448,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusForbidden, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
 	select {

@@ -839,7 +839,7 @@ export default function MessageTile({
                             </code>
                         </pre>
                     )}
-                    {(query.execution_result || query.example_result || query.error) && (
+                    {(query.execution_result || query.example_result || query.error || queryStates[queryId]?.isExecuting) && (
                         <div className="border-t border-gray-700 mt-2 w-full">
                             {queryStates[queryId]?.isExecuting ? (
                                 <div className="flex items-center justify-center p-8">

@@ -31,10 +31,11 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
    - Use EXPLAIN-friendly syntax for PostgreSQL.  
- - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)(NOTE: do not paginate the original query)
-   - Dont' use comments in query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
-   - If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(NOTE: do not paginate the original query)
-4. **Response Formatting**  
+   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
+   - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response
+
+   4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -54,7 +55,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
        “tables”: “users,orders”,
@@ -94,9 +95,9 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
    - Use EXPLAIN-friendly syntax for PostgreSQL.
-   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)(NOTE: do not paginate the original query)
-   - Dont' use comments in query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
-   - If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(NOTE: do not paginate the original query)
+   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
+   - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response
 
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
@@ -118,7 +119,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
        “tables”: “users,orders”,
