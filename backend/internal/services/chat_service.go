@@ -2162,45 +2162,55 @@ func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, use
 
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
 	log.Println("ChatService -> RefreshSchema")
-	schema, err := s.dbManager.GetSchemaManager().GetLatestSchema(chatID)
-	if err != nil {
-		return http.StatusInternalServerError, err
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		return http.StatusOK, nil
+	default:
+		schema, err := s.dbManager.GetSchemaManager().GetLatestSchema(ctx, chatID)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+
+		go func() {
+			userObjID, err := primitive.ObjectIDFromHex(userID)
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
+				return
+			}
+			chatObjID, err := primitive.ObjectIDFromHex(chatID)
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error getting chatID: %v", err)
+				return
+			}
+
+			// Clear previous system message from LLM
+			if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
+			}
+
+			schemaMsg := s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
+
+			log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
+			llmMsg := &models.LLMMessage{
+				Base:   models.NewBase(),
+				UserID: userObjID,
+				ChatID: chatObjID,
+				Role:   string(MessageTypeSystem),
+				Content: map[string]interface{}{
+					"schema_update": schemaMsg,
+				},
+			}
+			if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
+			}
+			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
+		}()
+		return http.StatusOK, nil
 	}
-	go func() {
-		userObjID, err := primitive.ObjectIDFromHex(userID)
-		if err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
-			return
-		}
-		chatObjID, err := primitive.ObjectIDFromHex(chatID)
-		if err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error getting chatID: %v", err)
-			return
-		}
-
-		// Clear previous system message from LLM
-		if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
-		}
-
-		schemaMsg := s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
-
-		log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
-		llmMsg := &models.LLMMessage{
-			Base:   models.NewBase(),
-			UserID: userObjID,
-			ChatID: chatObjID,
-			Role:   string(MessageTypeSystem),
-			Content: map[string]interface{}{
-				"schema_update": schemaMsg,
-			},
-		}
-		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-			log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
-		}
-		log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
-	}()
-	return http.StatusOK, nil
 }
 
 // Fetches paginated results for a query

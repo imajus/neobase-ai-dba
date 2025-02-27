@@ -199,7 +199,7 @@ const chatService = {
         }
     },
 
-    async refreshSchema(chatId: string): Promise<boolean> {
+    async refreshSchema(chatId: string, controller: AbortController): Promise<boolean> {
         try {
             const response = await axios.post(`${API_URL}/chats/${chatId}/refresh-schema`, {
                 withCredentials: true,
@@ -207,6 +207,8 @@ const chatService = {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
                 }
+            }, {
+                signal: controller.signal,
             });
             return response.data.success;
         } catch (error: any) {

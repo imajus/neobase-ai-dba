@@ -29,6 +29,7 @@ interface ChatWindowProps {
   isConnected: boolean;
   onCancelStream: () => Promise<void>;
   onRefreshSchema: () => Promise<void>;
+  onCancelRefreshSchema: () => void;
   checkSSEConnection: () => Promise<void>;
 }
 
@@ -104,6 +105,7 @@ export default function ChatWindow({
   isConnected,
   onCancelStream,
   onRefreshSchema,
+  onCancelRefreshSchema,
   checkSSEConnection
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
@@ -125,7 +127,6 @@ export default function ChatWindow({
   const pageSize = 20; // Messages per page
   const loadingRef = useRef<HTMLDivElement>(null);
   const [isMessageSending, setIsMessageSending] = useState(false);
-  const prevMessageCountRef = useRef(messages.length);
   const isLoadingOldMessages = useRef(false);
   const messageUpdateSource = useRef<UpdateSource>(null);
   const isInitialLoad = useRef(true);
@@ -739,12 +740,15 @@ export default function ChatWindow({
       {showRefreshSchema && (
         <ConfirmationModal
           title="Refresh Knowledge Base"
-          message="Are you sure you want to refresh the knowledge base? This action will refetch the schema from the database and update the knowledge base."
+          message="This action will refetch the schema from the database and update the knowledge base. This may take a few minutes depending on the size of the database."
           onConfirm={async () => {
             await onRefreshSchema();
             setShowRefreshSchema(false);
           }}
-          onCancel={() => setShowRefreshSchema(false)}
+          onCancel={async () => {
+            await onCancelRefreshSchema();
+            setShowRefreshSchema(false);
+          }}
         />
       )}
 

@@ -704,6 +704,7 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 	}
 	sort.Strings(tableNames)
 
+	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
 		table := schema.Tables[tableName]
 		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
@@ -766,6 +767,38 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			}
 		}
 		result.WriteString("\n")
+
+		// Add Enums information
+		if len(schema.Enums) > 0 {
+			result.WriteString("\n  Enums:\n")
+			for _, enum := range schema.Enums {
+				result.WriteString(fmt.Sprintf("  - %s", enum.Name))
+			}
+		}
+		// Add indexes information
+		if len(table.Indexes) > 0 {
+			result.WriteString("\n  Indexes:\n")
+			for _, idx := range table.Indexes {
+				result.WriteString(fmt.Sprintf("  - %s (%s)", idx.Name, strings.Join(idx.Columns, ", ")))
+			}
+		}
+
+		result.WriteString("\n")
+		// Add constraints information
+		if len(table.Constraints) > 0 {
+			result.WriteString("\n  Constraints:\n")
+			for _, constraint := range table.Constraints {
+				result.WriteString(fmt.Sprintf("  - %s", constraint.Name))
+			}
+		}
+		result.WriteString("\n")
+		// Add Views information
+		if len(schema.Views) > 0 {
+			result.WriteString("\n  Views:\n")
+			for _, view := range schema.Views {
+				result.WriteString(fmt.Sprintf("  - %s", view.Name))
+			}
+		}
 	}
 
 	return result.String()
@@ -841,7 +874,7 @@ const (
 )
 
 // Helper function to get the latest schema
-func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
+func (sm *SchemaManager) GetLatestSchema(ctx context.Context, chatID string) (*SchemaInfo, error) {
 	// Get current connection
 	db, err := sm.dbManager.GetConnection(chatID)
 	if err != nil {
@@ -856,13 +889,13 @@ func (sm *SchemaManager) GetLatestSchema(chatID string) (*SchemaInfo, error) {
 
 	// For manual triggers (DDL), directly fetch and store new schema
 	log.Printf("SchemaManager -> RefreshSchema -> Manual trigger, fetching new schema")
-	schema, err := db.GetSchema(context.Background())
+	schema, err := db.GetSchema(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current schema: %v", err)
 	}
 
 	// Store the fresh schema immediately
-	if err := sm.storeSchema(context.Background(), chatID, schema, db, conn.Config.Type); err != nil {
+	if err := sm.storeSchema(ctx, chatID, schema, db, conn.Config.Type); err != nil {
 		return nil, fmt.Errorf("failed to store schema: %v", err)
 	}
 

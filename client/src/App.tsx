@@ -38,7 +38,7 @@ function AppContent() {
   const [isMessageSending, setIsMessageSending] = useState(false);
   const [temporaryMessage, setTemporaryMessage] = useState<Message | null>(null);
   const { user, setUser } = useUser();
-
+  const [refreshSchemaController, setRefreshSchemaController] = useState<AbortController | null>(null);
   // Check auth status on mount
   useEffect(() => {
     checkAuth();
@@ -488,8 +488,10 @@ function AppContent() {
   // Refresh schema
   const handleRefreshSchema = async () => {
     try {
+      const controller = new AbortController();
+      setRefreshSchemaController(controller);
       console.log('handleRefreshSchema called');
-      const response = await chatService.refreshSchema(selectedConnection?.id || '');
+      const response = await chatService.refreshSchema(selectedConnection?.id || '', controller);
       console.log('handleRefreshSchema response', response);
       if (response) {
         toast.success('Knowledge base refreshed successfully');
@@ -499,6 +501,13 @@ function AppContent() {
     } catch (error) {
       console.error('Failed to refresh schema:', error);
       toast.error('Failed to refresh schema ' + error);
+    }
+  };
+
+  const handleCancelRefreshSchema = async () => {
+    if (refreshSchemaController) {
+      refreshSchemaController.abort();
+      setRefreshSchemaController(null);
     }
   };
 
@@ -967,6 +976,7 @@ function AppContent() {
           isConnected={!!connectionStatuses[selectedConnection.id]}
           onCancelStream={handleCancelStream}
           onRefreshSchema={handleRefreshSchema}
+          onCancelRefreshSchema={handleCancelRefreshSchema}
         />
       ) : (
         <div className={`
@@ -1079,7 +1089,7 @@ function AppContent() {
                 <LineChart className="w-6 h-6 text-black" />
               </div>
               <h3 className="text-lg font-bold mb-2">
-                Visual Results
+                Visualize Results
               </h3>
               <p className="text-gray-600">
                 View your data in tables or JSON format. Execute queries and see results in real-time.

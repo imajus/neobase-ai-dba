@@ -31,9 +31,9 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
    - Use EXPLAIN-friendly syntax for PostgreSQL.  
-   - Avoid SELECT * – always specify columns.  Also cap limit to max 50 as we will apply paginated query with offset.
+ - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)(NOTE: do not paginate the original query)
    - Dont' use comments in query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
-
+   - If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(NOTE: do not paginate the original query)
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
@@ -93,9 +93,10 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
-   - Use EXPLAIN-friendly syntax for PostgreSQL.  
-   - Avoid SELECT * – always specify columns.  Also cap limit to max 50 as we will apply paginated query with offset.
+   - Use EXPLAIN-friendly syntax for PostgreSQL.
+   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)(NOTE: do not paginate the original query)
    - Dont' use comments in query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(NOTE: do not paginate the original query)
 
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
@@ -145,7 +146,7 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
-				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime"},
+				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime", "pagination"},
 				Properties: map[string]*genai.Schema{
 					"query": &genai.Schema{
 						Type: genai.TypeString,
@@ -203,7 +204,7 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
-				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime"},
+				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime", "pagination"},
 				Properties: map[string]*genai.Schema{
 					"query": &genai.Schema{
 						Type: genai.TypeString,
