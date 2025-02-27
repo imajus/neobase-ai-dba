@@ -2163,7 +2163,7 @@ func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, use
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
 	log.Println("ChatService -> RefreshSchema")
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	select {
@@ -2172,7 +2172,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 	default:
 		schema, err := s.dbManager.GetSchemaManager().GetLatestSchema(ctx, chatID)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return http.StatusOK, nil
 		}
 
 		go func() {

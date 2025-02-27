@@ -496,7 +496,7 @@ function AppContent() {
       if (response) {
         toast.success('Knowledge base refreshed successfully');
       } else {
-        toast.error('Failed to refresh knowledge base');
+        toast.error('Cancelled Knowledge Base Refresh');
       }
     } catch (error) {
       console.error('Failed to refresh schema:', error);

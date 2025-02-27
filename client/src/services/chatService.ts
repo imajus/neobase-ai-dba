@@ -212,6 +212,9 @@ const chatService = {
             });
             return response.data.success;
         } catch (error: any) {
+            if (error.name === 'CanceledError' || error.name === 'AbortError') {
+                return false;
+            }
             console.error('Refresh schema error:', error);
             throw new Error(error.response?.data?.error || 'Failed to refresh schema');
         }

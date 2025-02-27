@@ -62,6 +62,12 @@ func (w *PostgresWrapper) GetDB() *sql.DB {
 
 // GetSchema fetches the current database schema
 func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresWrapper -> GetSchema -> Context cancelled: %v", err)
+		return nil, err
+	}
+
 	if err := w.updateUsage(); err != nil {
 		return nil, fmt.Errorf("failed to update usage: %v", err)
 	}
@@ -83,6 +89,12 @@ func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
 
 // GetTableChecksum calculates checksum for a single table
 func (w *PostgresWrapper) GetTableChecksum(ctx context.Context, table string) (string, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresWrapper -> GetTableChecksum -> Context cancelled: %v", err)
+		return "", err
+	}
+
 	if err := w.updateUsage(); err != nil {
 		return "", fmt.Errorf("failed to update usage: %v", err)
 	}

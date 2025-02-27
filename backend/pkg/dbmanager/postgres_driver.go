@@ -524,6 +524,12 @@ func processRows(rows *sql.Rows, startTime time.Time) ([]map[string]interface{},
 
 // Improve the GetSchema method to properly detect all tables
 func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
+		return nil, err
+	}
+
 	sqlDB := db.GetDB()
 	if sqlDB == nil {
 		return nil, fmt.Errorf("failed to get SQL DB connection")
@@ -542,9 +548,20 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 	}
 	defer tableRows.Close()
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
+		return nil, err
+	}
 	// Create a list of all tables
 	allTables := make([]string, 0)
 	for tableRows.Next() {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		var tableName string
 		if err := tableRows.Scan(&tableName); err != nil {
 			return nil, fmt.Errorf("failed to scan table name: %v", err)
@@ -554,6 +571,11 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 
 	log.Printf("PostgresDriver -> GetSchema -> Found %d tables in database: %v", len(allTables), allTables)
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// Continue with the rest of the schema fetching...
 	tables, err := d.getTables(ctx, sqlDB)
 	if err != nil {
@@ -562,11 +584,22 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 
 	// Verify that all tables were properly fetched
 	for _, tableName := range allTables {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		if _, exists := tables[tableName]; !exists {
 			log.Printf("PostgresDriver -> GetSchema -> Warning: Table %s exists but wasn't properly fetched", tableName)
 		}
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
+		return nil, err
+	}
 	// Continue with the rest of the schema fetching...
 	indexes, err := d.getIndexes(ctx, sqlDB)
 	if err != nil {
@@ -586,6 +619,12 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 
 	// Add foreign keys to tables
 	for tableName, tableFKs := range foreignKeys {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		if table, exists := tables[tableName]; exists {
 			table.ForeignKeys = tableFKs
 			tables[tableName] = table
@@ -665,6 +704,12 @@ func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, in
 
 // Improve the getTables method to properly fetch column details
 func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]PostgresTable, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+		return nil, err
+	}
+
 	// First get a list of all tables
 	tableQuery := `
 		SELECT tablename 
@@ -684,6 +729,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 
 	// Initialize all tables first
 	for tableRows.Next() {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		var tableName string
 		if err := tableRows.Scan(&tableName); err != nil {
 			return nil, fmt.Errorf("failed to scan table name: %v", err)
@@ -706,6 +757,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 
 	// For each table, get columns with SUPER DETAILED logging
 	for tableName, table := range tables {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		log.Printf("PostgresDriver -> getTables -> Fetching columns for table: %s", tableName)
 
 		// Get columns
@@ -733,6 +790,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 
 		columnCount := 0
 		for columnRows.Next() {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+				return nil, err
+			}
+
 			var (
 				columnName, dataType, isNullable string
 				columnDefault, columnComment     sql.NullString
@@ -811,6 +874,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 
 		indexCount := 0
 		for indexRows.Next() {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+				return nil, err
+			}
+
 			var (
 				indexName, columnNames string
 				isUnique, isPrimary    bool
@@ -861,6 +930,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 
 		fkCount := 0
 		for fkRows.Next() {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+				return nil, err
+			}
+
 			var (
 				constraintName, columnName, foreignTableName, foreignColumnName string
 			)
@@ -892,6 +967,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 
 	// Verify all tables were processed
 	for _, tableName := range allTableNames {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		if _, exists := tables[tableName]; !exists {
 			log.Printf("PostgresDriver -> getTables -> Warning: Table %s exists but wasn't properly fetched", tableName)
 		} else if len(tables[tableName].Columns) == 0 {
@@ -905,6 +986,12 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 }
 
 func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string][]PostgresIndex, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> getIndexes -> Context cancelled: %v", err)
+		return nil, err
+	}
+
 	query := `
 		SELECT 
 			t.relname AS table_name,
@@ -928,6 +1015,12 @@ func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string
 
 	indexes := make(map[string][]PostgresIndex)
 	for rows.Next() {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> getIndexes -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		var (
 			index          PostgresIndex
 			columnNamesStr string
@@ -955,6 +1048,12 @@ func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string
 }
 
 func (d *PostgresDriver) getViews(ctx context.Context, db *sql.DB) (map[string]PostgresView, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> getViews -> Context cancelled: %v", err)
+		return nil, err
+	}
+
 	query := `
 		SELECT 
 			viewname,
@@ -971,6 +1070,12 @@ func (d *PostgresDriver) getViews(ctx context.Context, db *sql.DB) (map[string]P
 
 	views := make(map[string]PostgresView)
 	for rows.Next() {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> getViews -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		var view PostgresView
 		if err := rows.Scan(&view.Name, &view.Definition); err != nil {
 			return nil, err
@@ -981,6 +1086,12 @@ func (d *PostgresDriver) getViews(ctx context.Context, db *sql.DB) (map[string]P
 }
 
 func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[string]map[string]PostgresForeignKey, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> getForeignKeys -> Context cancelled: %v", err)
+		return nil, err
+	}
+
 	query := `
 		SELECT 
 			tc.table_name,
@@ -1005,6 +1116,12 @@ func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[st
 
 	fks := make(map[string]map[string]PostgresForeignKey)
 	for rows.Next() {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("PostgresDriver -> getForeignKeys -> Context cancelled: %v", err)
+			return nil, err
+		}
+
 		var tableName, constraintName, columnName, refTable, refColumn, updateRule, deleteRule string
 		if err := rows.Scan(&tableName, &constraintName, &columnName, &refTable, &refColumn, &updateRule, &deleteRule); err != nil {
 			return nil, err
@@ -1029,6 +1146,12 @@ func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[st
 
 // Fix the GetTableChecksum method to be more stable and consistent
 func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, table string) (string, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> GetTableChecksum -> Context cancelled: %v", err)
+		return "", err
+	}
+
 	sqlDB := db.GetDB()
 	if sqlDB == nil {
 		return "", fmt.Errorf("failed to get SQL DB connection")
