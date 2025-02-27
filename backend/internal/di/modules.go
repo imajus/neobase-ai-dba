@@ -189,11 +189,23 @@ func Initialize() {
 		log.Fatalf("Failed to provide chat service: %v", err)
 	}
 
+	if err := DiContainer.Provide(func(redisRepo redis.IRedisRepositories) services.GitHubService {
+		return services.NewGitHubService(redisRepo)
+	}); err != nil {
+		log.Fatalf("Failed to provide github handler: %v", err)
+	}
+
 	// Provide handlers
 	if err := DiContainer.Provide(func(authService services.AuthService) *handlers.AuthHandler {
 		return handlers.NewAuthHandler(authService)
 	}); err != nil {
 		log.Fatalf("Failed to provide auth handler: %v", err)
+	}
+
+	if err := DiContainer.Provide(func(githubService services.GitHubService) *handlers.GitHubHandler {
+		return handlers.NewGitHubHandler(githubService)
+	}); err != nil {
+		log.Fatalf("Failed to provide github handler: %v", err)
 	}
 
 	// Chat Handler
@@ -224,6 +236,18 @@ func GetAuthHandler() (*handlers.AuthHandler, error) {
 func GetChatHandler() (*handlers.ChatHandler, error) {
 	var handler *handlers.ChatHandler
 	err := DiContainer.Invoke(func(h *handlers.ChatHandler) {
+		handler = h
+	})
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+// GetGitHubHandler retrieves the GitHubHandler from the DI container
+func GetGitHubHandler() (*handlers.GitHubHandler, error) {
+	var handler *handlers.GitHubHandler
+	err := DiContainer.Invoke(func(h *handlers.GitHubHandler) {
 		handler = h
 	})
 	if err != nil {

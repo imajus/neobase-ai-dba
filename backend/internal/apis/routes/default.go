@@ -1,7 +1,9 @@
 package routes
 
 import (
+	"log"
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/di"
 	"neobase-ai/internal/middleware"
 	"net/http"
 
@@ -20,6 +22,12 @@ func SetupDefaultRoutes(router *gin.Engine) {
 		})
 	})
 
+	githubHandler, err := di.GetGitHubHandler()
+	if err != nil {
+		log.Fatalf("Failed to get github handler: %v", err)
+	}
+	// Github repository statistics route
+	router.GET("/api/github/stats", githubHandler.GetGitHubStats)
 	// Setup all route groups
 	SetupAuthRoutes(router)
 	SetupChatRoutes(router)
