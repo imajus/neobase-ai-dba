@@ -39,6 +39,7 @@ function AppContent() {
   const [temporaryMessage, setTemporaryMessage] = useState<Message | null>(null);
   const { user, setUser } = useUser();
   const [refreshSchemaController, setRefreshSchemaController] = useState<AbortController | null>(null);
+  const [isSSEReconnecting, setIsSSEReconnecting] = useState(false);
   // Check auth status on mount
   useEffect(() => {
     checkAuth();
@@ -439,6 +440,7 @@ function AppContent() {
       // Setup SSE event handlers
       sse.onopen = () => {
         console.log('SSE connection opened successfully');
+        setIsSSEReconnecting(true);
       };
 
       sse.onmessage = (event) => {
@@ -458,11 +460,24 @@ function AppContent() {
 
       sse.onerror = (e: any) => {
         console.error('SSE connection error:', e);
-        handleConnectionStatusChange(chatId, false, 'sse-error');
-        // Don't close the connection on every error
-        if (sse.readyState === EventSource.CLOSED) {
-          setEventSource(null);
-        }
+        // Here's check if the SSE connection is tried to be reconnected by SSE-open
+        setTimeout(() => {
+          console.log('SSE connection error -> isSSEReconnecting', isSSEReconnecting);
+          // If false, that means the connection was not tried to be reconnected by SSE-open
+          if (!isSSEReconnecting) {
+            setIsSSEReconnecting(false);
+
+            handleConnectionStatusChange(chatId, false, 'sse-error');
+            // Don't close the connection on every error
+            if (sse.readyState === EventSource.CLOSED) {
+              setEventSource(null);
+            }
+          } else {
+            // If true, that means the connection was tried to be reconnected by SSE-open
+            console.log('SSE connection error -> isSSEReconnecting is true, making it false');
+            setIsSSEReconnecting(false);
+          }
+        }, 2000);
       };
 
       setEventSource(sse);
@@ -515,16 +530,7 @@ function AppContent() {
     if (!selectedConnection?.id || !streamId) return;
     try {
       console.log('handleCancelStream -> streamId', streamId);
-      await axios.post(
-        `${import.meta.env.VITE_API_URL}/chats/${selectedConnection.id}/stream/cancel?stream_id=${streamId}`,
-        {},
-        {
-          withCredentials: true,
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      await chatService.cancelStream(selectedConnection.id, streamId);
 
       // Remove temporary streaming message
       setMessages(prev => {

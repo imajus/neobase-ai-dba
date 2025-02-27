@@ -143,6 +143,23 @@ const chatService = {
             throw new Error(error.response?.data?.error || 'Failed to send message');
         }
     },
+    async cancelStream(chatId: string, streamId: string): Promise<void> {
+        try {
+            await axios.post(
+                `${import.meta.env.VITE_API_URL}/chats/${chatId}/stream/cancel?stream_id=${streamId}`,
+                {},
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+        } catch (error: any) {
+            console.error('Cancel stream error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to cancel stream');
+        }
+    },
 
     async executeQuery(chatId: string, messageId: string, queryId: string, streamId: string, controller: AbortController): Promise<ExecuteQueryResponse | undefined> {
         try {

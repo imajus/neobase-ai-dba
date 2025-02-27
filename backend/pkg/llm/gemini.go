@@ -45,6 +45,11 @@ func NewGeminiClient(config Config) (*GeminiClient, error) {
 }
 
 func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
 	// Convert messages into parts for the Gemini API.
 	geminiMessages := make([]*genai.Content, 0)
 
@@ -67,7 +72,10 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 			genai.Text(systemPrompt),
 		},
 	})
-
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	// Add conversation history
 	for _, msg := range messages {
 		content := ""
@@ -129,6 +137,10 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	session := model.StartChat()
 	session.History = geminiMessages
 
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	// Send empty message to get response based on history
 	result, err := session.SendMessage(ctx, genai.Text("Please provide a response based on our conversation history."))
 	if err != nil {

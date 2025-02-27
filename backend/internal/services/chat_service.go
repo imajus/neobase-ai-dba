@@ -820,6 +820,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 	s.processesMu.Lock()
 	defer s.processesMu.Unlock()
 
+	log.Printf("CancelProcessing -> activeProcesses: %+v", s.activeProcesses)
 	if cancel, exists := s.activeProcesses[streamID]; exists {
 		log.Printf("CancelProcessing -> canceling LLM processing for streamID: %s", streamID)
 		cancel() // Only cancels the LLM context
@@ -841,7 +842,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 				ChatID:  chatObjID,
 				UserID:  userObjID,
 				Type:    string(MessageTypeAssistant),
-				Content: "Response cancelled by user",
+				Content: "Operation cancelled by user",
 			}
 
 			// Save cancelled event to database
@@ -852,7 +853,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 		// Send cancelled event using stream
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "response-cancelled",
-			Data:  "Response cancelled by user",
+			Data:  "Operation cancelled by user",
 		})
 	}
 }
@@ -2079,9 +2080,10 @@ func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string)
 }
 
 // Update the ProcessMessage method to use a separate context for LLM processing
-func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error {
+func (s *chatService) ProcessMessage(_ context.Context, userID, chatID string, streamID string) error {
 	// Create a new context specifically for LLM processing
-	llmCtx, cancel := context.WithCancel(context.Background())
+	// Use context.Background() to avoid cancellation of the parent context
+	msgCtx, cancel := context.WithCancel(context.Background())
 
 	log.Printf("ProcessMessage -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
@@ -2098,11 +2100,11 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 			s.processesMu.Unlock()
 		}()
 
-		if err := s.processMessageInternal(llmCtx, ctx, userID, chatID, streamID); err != nil {
+		if err := s.processMessageInternal(msgCtx, userID, chatID, streamID); err != nil {
 			log.Printf("Error processing message: %v", err)
 			// Use parent context for sending stream events
 			select {
-			case <-ctx.Done():
+			case <-msgCtx.Done():
 				return
 			default:
 				go func() {
@@ -2147,14 +2149,15 @@ func (s *chatService) ProcessMessage(ctx context.Context, userID, chatID string,
 }
 
 // Update processMessageInternal to use both contexts
-func (s *chatService) processMessageInternal(llmCtx, sseCtx context.Context, userID, chatID, streamID string) error {
+func (s *chatService) processMessageInternal(msgCtx context.Context, userID, chatID, streamID string) error {
+	// Cancellation with s.activeProcesses[streamID]
 	log.Printf("processMessageInternal -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 	select {
-	case <-sseCtx.Done():
+	case <-msgCtx.Done():
 		return fmt.Errorf("sse connection closed")
 	default:
 		// LLM processing will be handled in this method
-		s.processLLMResponse(llmCtx, userID, chatID, streamID)
+		s.processLLMResponse(msgCtx, userID, chatID, streamID)
 	}
 
 	return nil

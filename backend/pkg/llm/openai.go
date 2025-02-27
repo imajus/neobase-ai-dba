@@ -40,6 +40,11 @@ func NewOpenAIClient(config Config) (*OpenAIClient, error) {
 }
 
 func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
 	// Convert messages to OpenAI format
 	openAIMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 
@@ -102,6 +107,11 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 				Strict:      false,
 			},
 		},
+	}
+
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
 
 	// Call OpenAI API
