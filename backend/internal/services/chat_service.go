@@ -83,6 +83,11 @@ func NewChatService(
 func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error) {
 	log.Printf("Creating chat for user %s", userID)
 
+	// Check if the database type is supported
+	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB {
+		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL and YugabyteDB are supported for now")
+	}
+
 	// Test connection without creating a persistent connection
 	err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 		Type:     req.Connection.Type,

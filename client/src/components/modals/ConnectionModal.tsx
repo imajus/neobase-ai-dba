@@ -292,11 +292,11 @@ DATABASE_PASSWORD=your_password`}
                 {[
                   { value: 'postgresql', label: 'PostgreSQL' },
                   { value: 'yugabytedb', label: 'YugabyteDB' },
-                  { value: 'mysql', label: 'MySQL' },
-                  { value: 'clickhouse', label: 'ClickHouse' },
-                  { value: 'mongodb', label: 'MongoDB' },
-                  { value: 'redis', label: 'Redis' },
-                  { value: 'neo4j', label: 'Neo4J' }
+                  { value: 'mysql', label: 'MySQL (Coming Soon)' },
+                  { value: 'clickhouse', label: 'ClickHouse (Coming Soon)' },
+                  { value: 'mongodb', label: 'MongoDB (Coming Soon)' },
+                  { value: 'redis', label: 'Redis (Coming Soon)' },
+                  { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
                 ].map(option => (
                   <option key={option.value} value={option.value}>
                     {option.label}
