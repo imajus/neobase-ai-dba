@@ -39,7 +39,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, always try to give latest date such as created_at.
+   - In Example Result, give String JSON representation of the query, always try to give latest date such as created_at.
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -64,10 +64,8 @@ json
       "canRollback": "boolean”,
       “rollbackDependentQuery”: “Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
-      "estimateResponseTime": "response time in milliseconds(example:78)"
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      "estimateResponseTime": "response time in milliseconds(example:78)",
+      "exampleResultString": "[{ "column1": "example_value1", "column2": "example_value2" }, { "column1": "example_value1", "column2": "example_value2" }]",
     }
   ]
 }`
@@ -103,7 +101,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, always try to give latest date such as created_at.
+   - In Example Result, give String JSON representation of the query, always try to give latest date such as created_at.
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -128,10 +126,8 @@ json
       "canRollback": "boolean”,
       “rollbackDependentQuery”: “Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
-      "estimateResponseTime": "response time in milliseconds(example:78)"
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      "estimateResponseTime": "response time in milliseconds(example:78)",
+      "exampleResultString": "[{ "column1": "example_value1", "column2": "example_value2" }, { "column1": "example_value1", "column2": "example_value2" }]",
     }
   ]
 }
@@ -147,7 +143,7 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
-				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime", "pagination"},
+				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime", "pagination", "exampleResultString"},
 				Properties: map[string]*genai.Schema{
 					"query": &genai.Schema{
 						Type: genai.TypeString,
@@ -184,6 +180,9 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeNumber,
 					},
 					"rollbackDependentQuery": &genai.Schema{
+						Type: genai.TypeString,
+					},
+					"exampleResultString": &genai.Schema{
 						Type: genai.TypeString,
 					},
 				},
@@ -205,7 +204,7 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
-				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime", "pagination"},
+				Required: []string{"query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime", "pagination", "exampleResultString"},
 				Properties: map[string]*genai.Schema{
 					"query": &genai.Schema{
 						Type: genai.TypeString,
@@ -242,6 +241,9 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeNumber,
 					},
 					"rollbackDependentQuery": &genai.Schema{
+						Type: genai.TypeString,
+					},
+					"exampleResultString": &genai.Schema{
 						Type: genai.TypeString,
 					},
 				},

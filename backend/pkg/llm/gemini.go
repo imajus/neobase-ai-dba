@@ -152,13 +152,40 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	log.Printf("GEMINI -> GenerateResponse -> result.Candidates[0].Content.Parts[0]: %v", result.Candidates[0].Content.Parts[0])
 	responseText := strings.ReplaceAll(fmt.Sprintf("%v", result.Candidates[0].Content.Parts[0]), "```json", "")
 	responseText = strings.ReplaceAll(responseText, "```", "")
+
 	var llmResponse constants.LLMResponse
 	if err := json.Unmarshal([]byte(responseText), &llmResponse); err != nil {
 		log.Printf("Warning: Gemini response didn't match expected JSON schema: %v", err)
 		return "", fmt.Errorf("invalid JSON response: %v", err)
 	}
 
-	return responseText, nil
+	var mapResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(responseText), &mapResponse); err != nil {
+		log.Printf("Warning: Gemini response didn't match expected JSON schema: %v", err)
+		return "", fmt.Errorf("invalid JSON response: %v", err)
+	}
+
+	temporaryQueries := []map[string]interface{}{}
+	for _, v := range mapResponse["queries"].([]interface{}) {
+		value := v.(map[string]interface{})
+		log.Printf("gemini responseMap loop queries: %v", value)
+		var exampleResult []map[string]interface{}
+		if value["exampleResultString"] != nil && value["exampleResultString"] != "" {
+			if err := json.Unmarshal([]byte(value["exampleResultString"].(string)), &exampleResult); err == nil {
+				value["exampleResult"] = exampleResult
+			}
+		}
+		temporaryQueries = append(temporaryQueries, value)
+	}
+
+	mapResponse["queries"] = temporaryQueries
+
+	convertedResponseText, err := json.Marshal(mapResponse)
+	if err != nil {
+		log.Printf("marshal map err: %v", err)
+		return responseText, nil
+	}
+	return string(convertedResponseText), nil
 }
 
 // GetModelInfo returns information about the Gemini model.
