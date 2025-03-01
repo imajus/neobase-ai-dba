@@ -194,6 +194,13 @@ func (sm *SchemaManager) getFetcher(dbType string, db DBExecutor) (SchemaFetcher
 
 // Update schema fetching methods to use appropriate fetcher
 func (sm *SchemaManager) fetchSchema(ctx context.Context, db DBExecutor, dbType string, selectedTables []string) (*SchemaInfo, error) {
+	// Check for context cancellation before starting
+	if err := ctx.Err(); err != nil {
+		log.Printf("fetchSchema -> context cancelled before starting: %v", err)
+		return nil, err
+	}
+
+	// Get the appropriate fetcher for this database type
 	fetcher, err := sm.getFetcher(dbType, db)
 	if err != nil {
 		return nil, err
@@ -205,14 +212,28 @@ func (sm *SchemaManager) fetchSchema(ctx context.Context, db DBExecutor, dbType 
 func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExecutor, dbType string, selectedTables []string) (*SchemaInfo, error) {
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
-		log.Printf("GetSchema -> context cancelled: %v", err)
+		log.Printf("GetSchema -> context cancelled at start: %v", err)
 		return nil, err
 	}
 
+	// Create a new context with a longer timeout specifically for this operation
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+
 	// Always fetch fresh schema from database for schema checks
-	schema, err := sm.fetchSchema(ctx, db, dbType, selectedTables)
+	schema, err := sm.fetchSchema(fetchCtx, db, dbType, selectedTables)
 	if err != nil {
+		if fetchCtx.Err() != nil {
+			log.Printf("GetSchema -> context timeout during schema fetch: %v", fetchCtx.Err())
+			return nil, fmt.Errorf("timeout while fetching schema: %v", fetchCtx.Err())
+		}
 		return nil, fmt.Errorf("failed to fetch schema: %v", err)
+	}
+
+	// Check for context cancellation again
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetSchema -> context cancelled after schema fetch: %v", err)
+		return nil, err
 	}
 
 	// Log all tables found in the database
@@ -220,7 +241,7 @@ func (sm *SchemaManager) GetSchema(ctx context.Context, chatID string, db DBExec
 	for tableName := range schema.Tables {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
-			log.Printf("GetSchema -> context cancelled: %v", err)
+			log.Printf("GetSchema -> context cancelled during table processing: %v", err)
 			return nil, err
 		}
 		tableNames = append(tableNames, tableName)
@@ -821,8 +842,83 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			result.WriteString("\n")
 		}
 
+		// Add foreign key information
+		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.ForeignKeys) > 0 {
+			result.WriteString("\nForeign Keys:\n")
+
+			// Sort foreign keys for consistent output
+			fkNames := make([]string, 0, len(fullTable.ForeignKeys))
+			for fkName := range fullTable.ForeignKeys {
+				fkNames = append(fkNames, fkName)
+			}
+			sort.Strings(fkNames)
+
+			for _, fkName := range fkNames {
+				fk := fullTable.ForeignKeys[fkName]
+				result.WriteString(fmt.Sprintf("  - %s: %s references %s(%s)",
+					fkName,
+					fk.ColumnName,
+					fk.RefTable,
+					fk.RefColumn))
+
+				if fk.OnDelete != "NO ACTION" {
+					result.WriteString(fmt.Sprintf(" ON DELETE %s", fk.OnDelete))
+				}
+
+				if fk.OnUpdate != "NO ACTION" {
+					result.WriteString(fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate))
+				}
+
+				result.WriteString("\n")
+			}
+		}
+
+		// Add index information
+		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.Indexes) > 0 {
+			result.WriteString("\nIndexes:\n")
+
+			// Sort indexes for consistent output
+			indexNames := make([]string, 0, len(fullTable.Indexes))
+			for indexName := range fullTable.Indexes {
+				indexNames = append(indexNames, indexName)
+			}
+			sort.Strings(indexNames)
+
+			for _, indexName := range indexNames {
+				index := fullTable.Indexes[indexName]
+				uniqueStr := ""
+				if index.IsUnique {
+					uniqueStr = "UNIQUE "
+				}
+				result.WriteString(fmt.Sprintf("  - %s: %sINDEX on (%s)\n",
+					indexName,
+					uniqueStr,
+					strings.Join(index.Columns, ", ")))
+			}
+		}
+
+		// Add constraint information
+		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.Constraints) > 0 {
+			result.WriteString("\nConstraints:\n")
+
+			// Sort constraints for consistent output
+			constraintNames := make([]string, 0, len(fullTable.Constraints))
+			for constraintName := range fullTable.Constraints {
+				constraintNames = append(constraintNames, constraintName)
+			}
+			sort.Strings(constraintNames)
+
+			for _, constraintName := range constraintNames {
+				constraint := fullTable.Constraints[constraintName]
+				result.WriteString(fmt.Sprintf("  - %s (%s): %s\n",
+					constraintName,
+					constraint.Type,
+					constraint.Definition))
+			}
+		}
+
 		// Add row count information
-		result.WriteString(fmt.Sprintf("Row Count: %d\n", table.RowCount))
+		result.WriteString(fmt.Sprintf("\nRow Count: %d\n", table.RowCount))
 
 		// Add example records if available
 		if len(table.ExampleRecords) > 0 {
@@ -859,6 +955,71 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			}
 		}
 
+		result.WriteString("\n")
+	}
+
+	// Add views information
+	if len(storage.FullSchema.Views) > 0 {
+		result.WriteString("Views:\n")
+
+		// Sort views for consistent output
+		viewNames := make([]string, 0, len(storage.FullSchema.Views))
+		for viewName := range storage.FullSchema.Views {
+			viewNames = append(viewNames, viewName)
+		}
+		sort.Strings(viewNames)
+
+		for _, viewName := range viewNames {
+			view := storage.FullSchema.Views[viewName]
+			result.WriteString(fmt.Sprintf("  - %s: %s\n", viewName, view.Definition))
+		}
+		result.WriteString("\n")
+	}
+
+	// Add sequences information
+	if len(storage.FullSchema.Sequences) > 0 {
+		result.WriteString("Sequences:\n")
+
+		// Sort sequences for consistent output
+		sequenceNames := make([]string, 0, len(storage.FullSchema.Sequences))
+		for sequenceName := range storage.FullSchema.Sequences {
+			sequenceNames = append(sequenceNames, sequenceName)
+		}
+		sort.Strings(sequenceNames)
+
+		for _, sequenceName := range sequenceNames {
+			sequence := storage.FullSchema.Sequences[sequenceName]
+			result.WriteString(fmt.Sprintf("  - %s: starts at %d, increments by %d",
+				sequenceName,
+				sequence.StartValue,
+				sequence.Increment))
+
+			if sequence.IsCycled {
+				result.WriteString(", cycles")
+			}
+
+			result.WriteString("\n")
+		}
+		result.WriteString("\n")
+	}
+
+	// Add enums information
+	if len(storage.FullSchema.Enums) > 0 {
+		result.WriteString("Enums:\n")
+
+		// Sort enums for consistent output
+		enumNames := make([]string, 0, len(storage.FullSchema.Enums))
+		for enumName := range storage.FullSchema.Enums {
+			enumNames = append(enumNames, enumName)
+		}
+		sort.Strings(enumNames)
+
+		for _, enumName := range enumNames {
+			enum := storage.FullSchema.Enums[enumName]
+			result.WriteString(fmt.Sprintf("  - %s: %s\n",
+				enumName,
+				strings.Join(enum.Values, ", ")))
+		}
 		result.WriteString("\n")
 	}
 
@@ -1674,16 +1835,6 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 	}
 
 	return storage, nil
-}
-
-// FormatSchemaWithExamples formats the schema with example records for LLM
-func (sm *SchemaManager) FormatSchemaWithExamples(ctx context.Context, chatID string, db DBExecutor, dbType string, selectedTables []string) (string, error) {
-	storage, err := sm.GetSchemaWithExamples(ctx, chatID, db, dbType, selectedTables)
-	if err != nil {
-		return "", fmt.Errorf("failed to get schema with examples: %v", err)
-	}
-
-	return sm.FormatSchemaForLLMWithExamples(storage), nil
 }
 
 // FormatSchemaWithExamplesAndCollections formats the schema with example records for LLM with selected collections

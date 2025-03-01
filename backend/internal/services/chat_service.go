@@ -207,8 +207,12 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	if selectedCollectionsChanged {
 		log.Printf("ChatService -> Update -> Triggering schema refresh due to selected collections change")
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			// Create a completely new context with a much longer timeout
+			// This ensures it's not tied to the API request context
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 			defer cancel()
+
+			log.Printf("ChatService -> Update -> Starting schema refresh with 60-minute timeout")
 			_, err := s.RefreshSchema(ctx, userID, chatID)
 			if err != nil {
 				log.Printf("ChatService -> Update -> Error refreshing schema: %v", err)
@@ -253,7 +257,7 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 
 	go func() {
 		// Delete DB connection
-		if err := s.dbManager.Disconnect(chatID, userID); err != nil {
+		if err := s.dbManager.Disconnect(chatID, userID, true); err != nil {
 			log.Printf("failed to delete DB connection: %v", err)
 		}
 	}()
@@ -1076,7 +1080,7 @@ func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, s
 	s.dbManager.Subscribe(chatID, streamID)
 	log.Printf("ChatService -> DisconnectDB -> Subscribed to updates with streamID: %s", streamID)
 
-	if err := s.dbManager.Disconnect(chatID, userID); err != nil {
+	if err := s.dbManager.Disconnect(chatID, userID, false); err != nil {
 		log.Printf("ChatService -> DisconnectDB -> failed to disconnect: %v", err)
 		return http.StatusBadRequest, fmt.Errorf("failed to disconnect: %v", err)
 	}
@@ -2246,8 +2250,8 @@ func (s *chatService) processMessageInternal(msgCtx context.Context, userID, cha
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
 	log.Printf("ChatService -> RefreshSchema -> Starting for chatID: %s", chatID)
 
-	// Increase the timeout for the initial context
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	// Increase the timeout for the initial context to 60 minutes
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
 
 	select {
@@ -2288,7 +2292,8 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 
 		go func() {
 			// Create a new context with a longer timeout specifically for the schema refresh operation
-			schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 60*time.Minute)
+			// Increase to 90 minutes to handle large schemas or slow database responses
+			schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 90*time.Minute)
 			defer schemaCancel()
 
 			userObjID, err := primitive.ObjectIDFromHex(userID)
@@ -2298,7 +2303,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 			}
 
 			// Force a fresh schema fetch by using a new context with a longer timeout
-			log.Printf("ChatService -> RefreshSchema -> Forcing fresh schema fetch for chatID: %s", chatID)
+			log.Printf("ChatService -> RefreshSchema -> Forcing fresh schema fetch for chatID: %s with 90-minute timeout", chatID)
 
 			// Use the method to get schema with examples and pass selected collections
 			schemaMsg, err := s.dbManager.RefreshSchemaWithExamples(schemaCtx, chatID, selectedCollectionsSlice)
@@ -2560,21 +2565,7 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 	case <-ctx.Done():
 		return nil, http.StatusRequestTimeout, fmt.Errorf("request timed out")
 	default:
-		// Get database connection
-		dbConn, err := s.dbManager.GetConnection(chatID)
-		if err != nil {
-			log.Printf("ChatService -> GetAllTables -> Failed to get database connection: %v", err)
-			return nil, http.StatusNotFound, fmt.Errorf("connection not found")
-		}
-
-		// Get connection info
-		connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
-		if !exists {
-			log.Printf("ChatService -> GetAllTables -> Connection not found for chatID: %s", chatID)
-			return nil, http.StatusNotFound, fmt.Errorf("connection not found")
-		}
-
-		// Get chat to get selected collections
+		// Get chat details first
 		chatObjID, err := primitive.ObjectIDFromHex(chatID)
 		if err != nil {
 			log.Printf("ChatService -> GetAllTables -> Error getting chatID: %v", err)
@@ -2590,6 +2581,40 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		if chat == nil {
 			log.Printf("ChatService -> GetAllTables -> Chat not found for chatID: %s", chatID)
 			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+		}
+
+		// Get database connection
+		dbConn, err := s.dbManager.GetConnection(chatID)
+		if err != nil {
+			log.Printf("ChatService -> GetAllTables -> Connection not found, attempting to connect: %v", err)
+
+			// Connection not found, try to connect with proper config
+			connectErr := s.dbManager.Connect(chatID, userID, "", dbmanager.ConnectionConfig{
+				Type:     chat.Connection.Type,
+				Host:     chat.Connection.Host,
+				Port:     chat.Connection.Port,
+				Username: chat.Connection.Username,
+				Password: chat.Connection.Password,
+				Database: chat.Connection.Database,
+			})
+			if connectErr != nil {
+				log.Printf("ChatService -> GetAllTables -> Failed to connect: %v", connectErr)
+				return nil, http.StatusNotFound, fmt.Errorf("failed to establish database connection: %v", connectErr)
+			}
+
+			// Try to get connection again after connecting
+			dbConn, err = s.dbManager.GetConnection(chatID)
+			if err != nil {
+				log.Printf("ChatService -> GetAllTables -> Still failed to get connection after connect: %v", err)
+				return nil, http.StatusNotFound, fmt.Errorf("connection established but not ready yet: %v", err)
+			}
+		}
+
+		// Get connection info
+		connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+		if !exists {
+			log.Printf("ChatService -> GetAllTables -> Connection info not found")
+			return nil, http.StatusNotFound, fmt.Errorf("connection info not found")
 		}
 
 		// Convert the selectedCollections string to a slice

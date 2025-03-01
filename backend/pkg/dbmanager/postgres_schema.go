@@ -17,6 +17,9 @@ type PostgresSchemaFetcher struct {
 func (f *PostgresSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo, error) {
 	schema := &SchemaInfo{
 		Tables:    make(map[string]TableSchema),
+		Views:     make(map[string]ViewSchema),
+		Sequences: make(map[string]SequenceSchema),
+		Enums:     make(map[string]EnumSchema),
 		UpdatedAt: time.Now(),
 	}
 
@@ -32,6 +35,7 @@ func (f *PostgresSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo, e
 			Columns:     make(map[string]ColumnInfo),
 			Indexes:     make(map[string]IndexInfo),
 			ForeignKeys: make(map[string]ForeignKey),
+			Constraints: make(map[string]ConstraintInfo),
 		}
 
 		// Fetch columns
@@ -49,18 +53,46 @@ func (f *PostgresSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo, e
 		tableSchema.Indexes = indexes
 
 		// Fetch foreign keys
-		fks, err := f.fetchForeignKeys(ctx, table)
+		fkeys, err := f.fetchForeignKeys(ctx, table)
 		if err != nil {
 			return nil, err
 		}
-		tableSchema.ForeignKeys = fks
+		tableSchema.ForeignKeys = fkeys
 
-		// Calculate table checksum
+		// Fetch constraints
+		constraints, err := f.fetchConstraints(ctx, table)
+		if err != nil {
+			return nil, err
+		}
+		tableSchema.Constraints = constraints
+
+		// Calculate table schema checksum
 		tableData, _ := json.Marshal(tableSchema)
 		tableSchema.Checksum = fmt.Sprintf("%x", md5.Sum(tableData))
 
 		schema.Tables[table] = tableSchema
 	}
+
+	// Fetch views
+	views, err := f.fetchViews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	schema.Views = views
+
+	// Fetch sequences
+	sequences, err := f.fetchSequences(ctx)
+	if err != nil {
+		return nil, err
+	}
+	schema.Sequences = sequences
+
+	// Fetch enums
+	enums, err := f.fetchEnums(ctx)
+	if err != nil {
+		return nil, err
+	}
+	schema.Enums = enums
 
 	// Calculate overall schema checksum
 	schemaData, _ := json.Marshal(schema.Tables)
@@ -338,4 +370,277 @@ func (f *PostgresSchemaFetcher) FetchExampleRecords(ctx context.Context, db DBEx
 	}
 
 	return records, nil
+}
+
+// fetchViews retrieves all views in the database
+func (f *PostgresSchemaFetcher) fetchViews(_ context.Context) (map[string]ViewSchema, error) {
+	views := make(map[string]ViewSchema)
+	var viewList []struct {
+		Name       string `db:"view_name"`
+		Definition string `db:"view_definition"`
+	}
+
+	query := `
+        SELECT 
+            table_name as view_name,
+            view_definition
+        FROM information_schema.views
+        WHERE table_schema = 'public'
+        ORDER BY table_name;
+    `
+	err := f.db.Query(query, &viewList)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch views: %v", err)
+	}
+
+	for _, view := range viewList {
+		views[view.Name] = ViewSchema{
+			Name:       view.Name,
+			Definition: view.Definition,
+		}
+	}
+	return views, nil
+}
+
+// fetchConstraints retrieves all constraints for a specific table
+func (f *PostgresSchemaFetcher) fetchConstraints(_ context.Context, table string) (map[string]ConstraintInfo, error) {
+	constraints := make(map[string]ConstraintInfo)
+	var constraintList []struct {
+		Name       string `db:"constraint_name"`
+		Type       string `db:"constraint_type"`
+		Definition string `db:"definition"`
+		Columns    string `db:"columns"`
+	}
+
+	query := `
+        SELECT 
+            tc.constraint_name,
+            tc.constraint_type,
+            pg_get_constraintdef(c.oid) as definition,
+            array_to_string(array_agg(ccu.column_name), ',') as columns
+        FROM information_schema.table_constraints tc
+        JOIN pg_constraint c ON tc.constraint_name = c.conname
+        JOIN information_schema.constraint_column_usage ccu 
+            ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.table_name = $1
+        AND tc.constraint_type != 'FOREIGN KEY'
+        GROUP BY tc.constraint_name, tc.constraint_type, c.oid;
+    `
+	err := f.db.Query(query, &constraintList, table)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch constraints for table %s: %v", table, err)
+	}
+
+	for _, constraint := range constraintList {
+		constraints[constraint.Name] = ConstraintInfo{
+			Name:       constraint.Name,
+			Type:       constraint.Type,
+			Definition: constraint.Definition,
+			Columns:    strings.Split(constraint.Columns, ","),
+		}
+	}
+	return constraints, nil
+}
+
+// fetchSequences retrieves all sequences in the database
+func (f *PostgresSchemaFetcher) fetchSequences(_ context.Context) (map[string]SequenceSchema, error) {
+	sequences := make(map[string]SequenceSchema)
+	var sequenceList []struct {
+		Name       string `db:"sequence_name"`
+		StartValue int64  `db:"start_value"`
+		Increment  int64  `db:"increment_by"`
+		MinValue   int64  `db:"min_value"`
+		MaxValue   int64  `db:"max_value"`
+		CacheSize  int64  `db:"cache_size"`
+		IsCycled   bool   `db:"is_cycled"`
+	}
+
+	query := `
+        SELECT 
+            sequence_name,
+            start_value,
+            increment_by,
+            min_value,
+            max_value,
+            cache_size,
+            cycle_option = 'YES' as is_cycled
+        FROM information_schema.sequences
+        WHERE sequence_schema = 'public'
+        ORDER BY sequence_name;
+    `
+	err := f.db.Query(query, &sequenceList)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch sequences: %v", err)
+	}
+
+	for _, seq := range sequenceList {
+		sequences[seq.Name] = SequenceSchema{
+			Name:       seq.Name,
+			StartValue: seq.StartValue,
+			Increment:  seq.Increment,
+			MinValue:   seq.MinValue,
+			MaxValue:   seq.MaxValue,
+			CacheSize:  seq.CacheSize,
+			IsCycled:   seq.IsCycled,
+		}
+	}
+	return sequences, nil
+}
+
+// fetchEnums retrieves all enum types in the database
+func (f *PostgresSchemaFetcher) fetchEnums(_ context.Context) (map[string]EnumSchema, error) {
+	enums := make(map[string]EnumSchema)
+	var enumList []struct {
+		Name   string `db:"type_name"`
+		Values string `db:"enum_values"`
+		Schema string `db:"type_schema"`
+	}
+
+	query := `
+        SELECT 
+            t.typname as type_name,
+            array_to_string(array_agg(e.enumlabel ORDER BY e.enumsortorder), ',') as enum_values,
+            n.nspname as type_schema
+        FROM pg_type t
+        JOIN pg_enum e ON t.oid = e.enumtypid
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE n.nspname = 'public'
+        GROUP BY t.typname, n.nspname
+        ORDER BY t.typname;
+    `
+	err := f.db.Query(query, &enumList)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch enums: %v", err)
+	}
+
+	for _, enum := range enumList {
+		enums[enum.Name] = EnumSchema{
+			Name:   enum.Name,
+			Values: strings.Split(enum.Values, ","),
+			Schema: enum.Schema,
+		}
+	}
+	return enums, nil
+}
+
+// filterSchemaForSelectedTables filters the schema to only include elements related to the selected tables
+func (f *PostgresSchemaFetcher) filterSchemaForSelectedTables(schema *SchemaInfo, selectedTables []string) *SchemaInfo {
+	// If no tables are selected or "ALL" is selected, return the full schema
+	if len(selectedTables) == 0 || (len(selectedTables) == 1 && selectedTables[0] == "ALL") {
+		return schema
+	}
+
+	// Create a map for quick lookup of selected tables
+	selectedTablesMap := make(map[string]bool)
+	for _, table := range selectedTables {
+		selectedTablesMap[table] = true
+	}
+
+	// Create a new filtered schema
+	filteredSchema := &SchemaInfo{
+		Tables:    make(map[string]TableSchema),
+		Views:     make(map[string]ViewSchema),
+		Sequences: make(map[string]SequenceSchema),
+		Enums:     make(map[string]EnumSchema),
+		UpdatedAt: schema.UpdatedAt,
+	}
+
+	// Filter tables
+	for tableName, tableSchema := range schema.Tables {
+		if selectedTablesMap[tableName] {
+			filteredSchema.Tables[tableName] = tableSchema
+		}
+	}
+
+	// Collect all foreign key references to include related tables
+	referencedTables := make(map[string]bool)
+	for _, tableSchema := range filteredSchema.Tables {
+		for _, fk := range tableSchema.ForeignKeys {
+			referencedTables[fk.RefTable] = true
+		}
+	}
+
+	// Add referenced tables that weren't in the original selection
+	for refTable := range referencedTables {
+		if !selectedTablesMap[refTable] {
+			if tableSchema, ok := schema.Tables[refTable]; ok {
+				filteredSchema.Tables[refTable] = tableSchema
+			}
+		}
+	}
+
+	// Filter views based on their definition referencing selected tables
+	for viewName, viewSchema := range schema.Views {
+		shouldInclude := false
+
+		// Check if the view definition references any of the selected tables
+		for tableName := range selectedTablesMap {
+			if strings.Contains(strings.ToLower(viewSchema.Definition), strings.ToLower(tableName)) {
+				shouldInclude = true
+				break
+			}
+		}
+
+		if shouldInclude {
+			filteredSchema.Views[viewName] = viewSchema
+		}
+	}
+
+	// Filter sequences based on their usage in selected tables
+	// This is a simplistic approach - ideally we would check column defaults
+	for seqName, seqSchema := range schema.Sequences {
+		shouldInclude := false
+
+		// Check if the sequence name matches a pattern like "tablename_columnname_seq"
+		for tableName := range selectedTablesMap {
+			if strings.HasPrefix(seqName, tableName+"_") {
+				shouldInclude = true
+				break
+			}
+		}
+
+		if shouldInclude {
+			filteredSchema.Sequences[seqName] = seqSchema
+		}
+	}
+
+	// Filter enums based on their usage in selected tables
+	for enumName, enumSchema := range schema.Enums {
+		shouldInclude := false
+
+		// Check if any column in selected tables uses this enum type
+		for _, tableSchema := range filteredSchema.Tables {
+			for _, column := range tableSchema.Columns {
+				if column.Type == enumName {
+					shouldInclude = true
+					break
+				}
+			}
+			if shouldInclude {
+				break
+			}
+		}
+
+		if shouldInclude {
+			filteredSchema.Enums[enumName] = enumSchema
+		}
+	}
+
+	// Recalculate checksum for the filtered schema
+	schemaData, _ := json.Marshal(filteredSchema.Tables)
+	filteredSchema.Checksum = fmt.Sprintf("%x", md5.Sum(schemaData))
+
+	return filteredSchema
+}
+
+// GetSchema retrieves the schema for the selected tables
+func (f *PostgresSchemaFetcher) GetSchema(ctx context.Context, db DBExecutor, selectedTables []string) (*SchemaInfo, error) {
+	// Fetch the full schema
+	schema, err := f.FetchSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter the schema based on selected tables
+	return f.filterSchemaForSelectedTables(schema, selectedTables), nil
 }

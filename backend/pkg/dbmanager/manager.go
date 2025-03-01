@@ -213,7 +213,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 }
 
 // Disconnect closes a database connection
-func (m *Manager) Disconnect(chatID, userID string) error {
+func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 	log.Printf("DBManager -> Disconnect -> Starting disconnection for chatID: %s", chatID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -236,6 +236,12 @@ func (m *Manager) Disconnect(chatID, userID string) error {
 		// Disconnect
 		if err := driver.Disconnect(conn); err != nil {
 			return fmt.Errorf("failed to disconnect: %v", err)
+		}
+
+		if deleteSchema {
+			log.Printf("DBManager -> Disconnect -> Deleting schema for chatID: %s", chatID)
+			// Delete the schema
+			m.schemaManager.ClearSchemaCache(chatID)
 		}
 
 		log.Printf("DBManager -> Disconnect -> Disconnected from chatID: %s", chatID)
@@ -1035,6 +1041,10 @@ func (m *Manager) GetSchemaWithExamples(ctx context.Context, chatID string, sele
 func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, selectedCollections []string) (string, error) {
 	log.Printf("DBManager -> RefreshSchemaWithExamples -> Starting for chatID: %s with selected collections: %v", chatID, selectedCollections)
 
+	// Create a new context with a longer timeout specifically for this operation
+	schemaCtx, cancel := context.WithTimeout(ctx, 60*time.Minute)
+	defer cancel()
+
 	// Get connection with read lock to ensure thread safety
 	m.mu.RLock()
 	conn, exists := m.connections[chatID]
@@ -1057,7 +1067,7 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 	log.Printf("DBManager -> RefreshSchemaWithExamples -> Cleared schema cache for chatID: %s", chatID)
 
 	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
+	if err := schemaCtx.Err(); err != nil {
 		log.Printf("DBManager -> RefreshSchemaWithExamples -> Context cancelled: %v", err)
 		return "", fmt.Errorf("operation cancelled: %v", err)
 	}
@@ -1073,28 +1083,28 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 		selectedTables = selectedCollections
 	}
 
-	// Fetch fresh schema directly
-	freshSchema, err := m.schemaManager.GetSchema(ctx, chatID, db, conn.Config.Type, selectedTables)
+	// Fetch fresh schema directly with the longer timeout context
+	freshSchema, err := m.schemaManager.GetSchema(schemaCtx, chatID, db, conn.Config.Type, selectedTables)
 	if err != nil {
 		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error fetching fresh schema: %v", err)
 		return "", fmt.Errorf("failed to fetch fresh schema: %v", err)
 	}
 
 	// Store the fresh schema
-	err = m.schemaManager.storeSchema(ctx, chatID, freshSchema, db, conn.Config.Type)
+	err = m.schemaManager.storeSchema(schemaCtx, chatID, freshSchema, db, conn.Config.Type)
 	if err != nil {
 		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error storing fresh schema: %v", err)
 		// Continue anyway, as we have the fresh schema
 	}
 
 	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
+	if err := schemaCtx.Err(); err != nil {
 		log.Printf("DBManager -> RefreshSchemaWithExamples -> Context cancelled after schema fetch: %v", err)
 		return "", fmt.Errorf("operation cancelled: %v", err)
 	}
 
 	// Format schema with examples and selected collections
-	formattedSchema, err := m.schemaManager.FormatSchemaWithExamplesAndCollections(ctx, chatID, db, conn.Config.Type, selectedCollections)
+	formattedSchema, err := m.schemaManager.FormatSchemaWithExamplesAndCollections(schemaCtx, chatID, db, conn.Config.Type, selectedCollections)
 	if err != nil {
 		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error formatting schema: %v", err)
 		return "", fmt.Errorf("failed to format schema with examples: %v", err)
