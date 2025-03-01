@@ -15,15 +15,17 @@ type Connection struct {
 }
 
 type Chat struct {
-	UserID     primitive.ObjectID `bson:"user_id" json:"user_id"`
-	Connection Connection         `bson:"connection" json:"connection"`
-	Base       `bson:",inline"`
+	UserID              primitive.ObjectID `bson:"user_id" json:"user_id"`
+	Connection          Connection         `bson:"connection" json:"connection"`
+	SelectedCollections string             `bson:"selected_collections" json:"selected_collections"` // "ALL" or comma-separated table names
+	Base                `bson:",inline"`
 }
 
 func NewChat(userID primitive.ObjectID, connection Connection) *Chat {
 	return &Chat{
-		UserID:     userID,
-		Connection: connection,
-		Base:       NewBase(),
+		UserID:              userID,
+		Connection:          connection,
+		SelectedCollections: "ALL", // Default to ALL tables
+		Base:                NewBase(),
 	}
 }

@@ -19,18 +19,17 @@ interface ChatWindowProps {
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: string) => Promise<void>;
-  onEditMessage
-
-  : (id: string, content: string) => void;
+  onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
   onEditConnection?: (id: string, connection: Connection) => Promise<{ success: boolean, error?: string }>;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
-  onCancelStream: () => Promise<void>;
+  onCancelStream: () => void;
   onRefreshSchema: () => Promise<void>;
   onCancelRefreshSchema: () => void;
   checkSSEConnection: () => Promise<void>;
+  onUpdateSelectedCollections?: (chatId: string, selectedCollections: string) => Promise<void>;
 }
 
 interface QueryState {
@@ -106,7 +105,8 @@ export default function ChatWindow({
   onCancelStream,
   onRefreshSchema,
   onCancelRefreshSchema,
-  checkSSEConnection
+  checkSSEConnection,
+  onUpdateSelectedCollections
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -786,6 +786,7 @@ export default function ChatWindow({
               const result = await onEditConnection?.(chat.id, data);
               return { success: result?.success || false, error: result?.error };
             }}
+            onUpdateSelectedCollections={onUpdateSelectedCollections}
           />
         </div>
       )}

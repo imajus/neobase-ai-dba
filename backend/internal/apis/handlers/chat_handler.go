@@ -473,7 +473,7 @@ func (h *ChatHandler) RefreshSchema(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
-	statusCode, err := h.chatService.RefreshSchema(c.Request.Context(), userID, chatID)
+	statusCode, err := h.chatService.RefreshSchema(c.Request.Context(), userID, chatID, true)
 	if err != nil {
 		c.JSON(int(statusCode), dtos.Response{
 			Success: false,
@@ -704,6 +704,27 @@ func (h *ChatHandler) EditQuery(c *gin.Context) {
 	}
 
 	c.JSON(int(status), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
+// GetTables retrieves all tables with their columns for a specific chat, marking which ones are selected
+func (h *ChatHandler) GetTables(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	response, statusCode, err := h.chatService.GetTables(c.Request.Context(), userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
 		Data:    response,
 	})

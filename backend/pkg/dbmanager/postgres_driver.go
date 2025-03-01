@@ -523,7 +523,7 @@ func processRows(rows *sql.Rows, startTime time.Time) ([]map[string]interface{},
 }
 
 // Improve the GetSchema method to properly detect all tables
-func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaInfo, error) {
+func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor, selectedTables []string) (*SchemaInfo, error) {
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
 		log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
@@ -535,14 +535,44 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 		return nil, fmt.Errorf("failed to get SQL DB connection")
 	}
 
-	// Get all tables in the database
-	tableQuery := `
-		SELECT tablename 
-		FROM pg_catalog.pg_tables 
-		WHERE schemaname = 'public';
-	`
+	// Get all tables in the database, filtered by selectedTables if provided
+	var tableQuery string
+	var args []interface{}
 
-	tableRows, err := sqlDB.QueryContext(ctx, tableQuery)
+	if len(selectedTables) > 0 && selectedTables[0] != "ALL" {
+		// Build a query with a WHERE IN clause for selected tables
+		placeholders := make([]string, len(selectedTables))
+		args = make([]interface{}, len(selectedTables))
+
+		for i, table := range selectedTables {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args[i] = table
+		}
+
+		tableQuery = fmt.Sprintf(`
+			SELECT tablename 
+			FROM pg_catalog.pg_tables 
+			WHERE schemaname = 'public'
+			AND tablename IN (%s);
+		`, strings.Join(placeholders, ","))
+	} else {
+		// Get all tables
+		tableQuery = `
+			SELECT tablename 
+			FROM pg_catalog.pg_tables 
+			WHERE schemaname = 'public';
+		`
+	}
+
+	var tableRows *sql.Rows
+	var err error
+
+	if len(args) > 0 {
+		tableRows, err = sqlDB.QueryContext(ctx, tableQuery, args...)
+	} else {
+		tableRows, err = sqlDB.QueryContext(ctx, tableQuery)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tables: %v", err)
 	}
@@ -553,6 +583,7 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 		log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
 		return nil, err
 	}
+
 	// Create a list of all tables
 	allTables := make([]string, 0)
 	for tableRows.Next() {
@@ -577,7 +608,7 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 	}
 
 	// Continue with the rest of the schema fetching...
-	tables, err := d.getTables(ctx, sqlDB)
+	tables, err := d.getTables(ctx, sqlDB, allTables)
 	if err != nil {
 		return nil, err
 	}
@@ -600,8 +631,9 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 		log.Printf("PostgresDriver -> GetSchema -> Context cancelled: %v", err)
 		return nil, err
 	}
+
 	// Continue with the rest of the schema fetching...
-	indexes, err := d.getIndexes(ctx, sqlDB)
+	indexes, err := d.getIndexes(ctx, sqlDB, allTables)
 	if err != nil {
 		return nil, err
 	}
@@ -612,7 +644,7 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor) (*SchemaI
 	}
 
 	// Get foreign keys
-	foreignKeys, err := d.getForeignKeys(ctx, sqlDB)
+	foreignKeys, err := d.getForeignKeys(ctx, sqlDB, allTables)
 	if err != nil {
 		return nil, err
 	}
@@ -703,60 +735,41 @@ func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, in
 }
 
 // Improve the getTables method to properly fetch column details
-func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]PostgresTable, error) {
+func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB, tables []string) (map[string]PostgresTable, error) {
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
 		log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
 		return nil, err
 	}
 
-	// First get a list of all tables
-	tableQuery := `
-		SELECT tablename 
-		FROM pg_catalog.pg_tables 
-		WHERE schemaname = 'public';
-	`
-
-	tableRows, err := db.QueryContext(ctx, tableQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query tables: %v", err)
-	}
-	defer tableRows.Close()
-
 	// Create a map to store all tables
-	tables := make(map[string]PostgresTable)
+	tablesMap := make(map[string]PostgresTable)
 	allTableNames := make([]string, 0)
 
 	// Initialize all tables first
-	for tableRows.Next() {
+	for _, tableName := range tables {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
 			log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
 			return nil, err
 		}
 
-		var tableName string
-		if err := tableRows.Scan(&tableName); err != nil {
-			return nil, fmt.Errorf("failed to scan table name: %v", err)
-		}
-
-		allTableNames = append(allTableNames, tableName)
-		tables[tableName] = PostgresTable{
+		tablesMap[tableName] = PostgresTable{
 			Name:        tableName,
 			Columns:     make(map[string]PostgresColumn),
 			Indexes:     make(map[string]PostgresIndex),
 			ForeignKeys: make(map[string]PostgresForeignKey),
 		}
+		allTableNames = append(allTableNames, tableName)
 	}
 
-	if err := tableRows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating table rows: %v", err)
+	if err := ctx.Err(); err != nil {
+		log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
+		return nil, err
 	}
-
-	log.Printf("PostgresDriver -> getTables -> Found %d tables in database: %v", len(tables), allTableNames)
 
 	// For each table, get columns with SUPER DETAILED logging
-	for tableName, table := range tables {
+	for tableName, table := range tablesMap {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
 			log.Printf("PostgresDriver -> getTables -> Context cancelled: %v", err)
@@ -962,7 +975,7 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 		log.Printf("PostgresDriver -> getTables -> Fetched %d foreign keys for table %s", fkCount, tableName)
 
 		// Update the table in the map
-		tables[tableName] = table
+		tablesMap[tableName] = table
 	}
 
 	// Verify all tables were processed
@@ -973,47 +986,112 @@ func (d *PostgresDriver) getTables(ctx context.Context, db *sql.DB) (map[string]
 			return nil, err
 		}
 
-		if _, exists := tables[tableName]; !exists {
+		if _, exists := tablesMap[tableName]; !exists {
 			log.Printf("PostgresDriver -> getTables -> Warning: Table %s exists but wasn't properly fetched", tableName)
-		} else if len(tables[tableName].Columns) == 0 {
+		} else if len(tablesMap[tableName].Columns) == 0 {
 			log.Printf("PostgresDriver -> getTables -> Warning: Table %s has no columns", tableName)
 		}
 	}
 
-	log.Printf("PostgresDriver -> getTables -> Successfully fetched %d tables: %v", len(tables), allTableNames)
+	log.Printf("PostgresDriver -> getTables -> Successfully fetched %d tables: %v", len(tablesMap), allTableNames)
 
-	return tables, nil
+	return tablesMap, nil
 }
 
-func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string][]PostgresIndex, error) {
+func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB, tables []string) (map[string][]PostgresIndex, error) {
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
 		log.Printf("PostgresDriver -> getIndexes -> Context cancelled: %v", err)
 		return nil, err
 	}
 
-	query := `
-		SELECT 
-			t.relname AS table_name,
-			i.relname AS index_name,
-			string_agg(a.attname, ',') AS column_names,
-			ix.indisunique AS is_unique
-		FROM pg_class t
-		JOIN pg_index ix ON t.oid = ix.indrelid
-		JOIN pg_class i ON i.oid = ix.indexrelid
-		JOIN pg_attribute a ON a.attrelid = t.oid
-		WHERE a.attnum = ANY(ix.indkey)
-		AND t.relkind = 'r'
-		GROUP BY t.relname, i.relname, ix.indisunique;
-	`
+	// Create a map to store indexes by table
+	indexes := make(map[string][]PostgresIndex)
 
-	rows, err := db.QueryContext(ctx, query)
+	// If no tables provided, return empty map
+	if len(tables) == 0 {
+		return indexes, nil
+	}
+
+	// Build query with table filter
+	var query string
+	var args []interface{}
+
+	if len(tables) == 1 {
+		// Simple case with one table
+		query = `
+			SELECT
+				t.relname as table_name,
+				i.relname as index_name,
+				array_to_string(array_agg(a.attname), ',') as column_names,
+				ix.indisunique as is_unique
+			FROM
+				pg_class t,
+				pg_class i,
+				pg_index ix,
+				pg_attribute a
+			WHERE
+				t.oid = ix.indrelid
+				and i.oid = ix.indexrelid
+				and a.attrelid = t.oid
+				and a.attnum = ANY(ix.indkey)
+				and t.relkind = 'r'
+				and t.relname = $1
+			GROUP BY
+				t.relname,
+				i.relname,
+				ix.indisunique
+			ORDER BY
+				t.relname,
+				i.relname;
+		`
+		args = []interface{}{tables[0]}
+	} else {
+		// Multiple tables case
+		placeholders := make([]string, len(tables))
+		args = make([]interface{}, len(tables))
+
+		for i, table := range tables {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args[i] = table
+		}
+
+		query = fmt.Sprintf(`
+			SELECT
+				t.relname as table_name,
+				i.relname as index_name,
+				array_to_string(array_agg(a.attname), ',') as column_names,
+				ix.indisunique as is_unique
+			FROM
+				pg_class t,
+				pg_class i,
+				pg_index ix,
+				pg_attribute a
+			WHERE
+				t.oid = ix.indrelid
+				and i.oid = ix.indexrelid
+				and a.attrelid = t.oid
+				and a.attnum = ANY(ix.indkey)
+				and t.relkind = 'r'
+				and t.relname IN (%s)
+			GROUP BY
+				t.relname,
+				i.relname,
+				ix.indisunique
+			ORDER BY
+				t.relname,
+				i.relname;
+		`, strings.Join(placeholders, ","))
+	}
+
+	// Execute query
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query indexes: %v", err)
 	}
 	defer rows.Close()
 
-	indexes := make(map[string][]PostgresIndex)
+	// Process results
 	for rows.Next() {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
@@ -1022,25 +1100,30 @@ func (d *PostgresDriver) getIndexes(ctx context.Context, db *sql.DB) (map[string
 		}
 
 		var (
-			index          PostgresIndex
-			columnNamesStr string
+			tableName, indexName, columnNames string
+			isUnique                          bool
 		)
 
-		if err := rows.Scan(
-			&index.TableName,
-			&index.Name,
-			&columnNamesStr,
-			&index.IsUnique,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan index row: %v", err)
+		if err := rows.Scan(&tableName, &indexName, &columnNames, &isUnique); err != nil {
+			return nil, fmt.Errorf("failed to scan index: %v", err)
 		}
 
-		index.Columns = strings.Split(columnNamesStr, ",")
+		// Create index
+		index := PostgresIndex{
+			Name:      indexName,
+			Columns:   strings.Split(columnNames, ","),
+			IsUnique:  isUnique,
+			TableName: tableName,
+		}
 
-		indexes[index.TableName] = append(indexes[index.TableName], index)
+		// Add to map
+		if _, exists := indexes[tableName]; !exists {
+			indexes[tableName] = make([]PostgresIndex, 0)
+		}
+		indexes[tableName] = append(indexes[tableName], index)
 	}
 
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating index rows: %v", err)
 	}
 
@@ -1085,36 +1168,86 @@ func (d *PostgresDriver) getViews(ctx context.Context, db *sql.DB) (map[string]P
 	return views, nil
 }
 
-func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[string]map[string]PostgresForeignKey, error) {
+func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB, tables []string) (map[string]map[string]PostgresForeignKey, error) {
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
 		log.Printf("PostgresDriver -> getForeignKeys -> Context cancelled: %v", err)
 		return nil, err
 	}
 
-	query := `
-		SELECT 
-			tc.table_name,
-			tc.constraint_name,
-			kcu.column_name,
-			ccu.table_name AS ref_table,
-			ccu.column_name AS ref_column,
-			rc.update_rule,
-			rc.delete_rule
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-		JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name
-		WHERE tc.constraint_type = 'FOREIGN KEY';
-	`
+	// Create a map to store foreign keys by table
+	foreignKeys := make(map[string]map[string]PostgresForeignKey)
 
-	rows, err := db.QueryContext(ctx, query)
+	// If no tables provided, return empty map
+	if len(tables) == 0 {
+		return foreignKeys, nil
+	}
+
+	// Build query with table filter
+	var query string
+	var args []interface{}
+
+	if len(tables) == 1 {
+		// Simple case with one table
+		query = `
+			SELECT
+				tc.table_name,
+				tc.constraint_name,
+				kcu.column_name,
+				ccu.table_name AS foreign_table_name,
+				ccu.column_name AS foreign_column_name,
+				rc.delete_rule,
+				rc.update_rule
+			FROM
+				information_schema.table_constraints AS tc
+				JOIN information_schema.key_column_usage AS kcu
+				  ON tc.constraint_name = kcu.constraint_name
+				JOIN information_schema.constraint_column_usage AS ccu
+				  ON ccu.constraint_name = tc.constraint_name
+				JOIN information_schema.referential_constraints AS rc
+				  ON rc.constraint_name = tc.constraint_name
+			WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = $1;
+		`
+		args = []interface{}{tables[0]}
+	} else {
+		// Multiple tables case
+		placeholders := make([]string, len(tables))
+		args = make([]interface{}, len(tables))
+
+		for i, table := range tables {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args[i] = table
+		}
+
+		query = fmt.Sprintf(`
+			SELECT
+				tc.table_name,
+				tc.constraint_name,
+				kcu.column_name,
+				ccu.table_name AS foreign_table_name,
+				ccu.column_name AS foreign_column_name,
+				rc.delete_rule,
+				rc.update_rule
+			FROM
+				information_schema.table_constraints AS tc
+				JOIN information_schema.key_column_usage AS kcu
+				  ON tc.constraint_name = kcu.constraint_name
+				JOIN information_schema.constraint_column_usage AS ccu
+				  ON ccu.constraint_name = tc.constraint_name
+				JOIN information_schema.referential_constraints AS rc
+				  ON rc.constraint_name = tc.constraint_name
+			WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name IN (%s);
+		`, strings.Join(placeholders, ","))
+	}
+
+	// Execute query
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query foreign keys: %v", err)
 	}
 	defer rows.Close()
 
-	fks := make(map[string]map[string]PostgresForeignKey)
+	// Process results
 	for rows.Next() {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
@@ -1122,26 +1255,37 @@ func (d *PostgresDriver) getForeignKeys(ctx context.Context, db *sql.DB) (map[st
 			return nil, err
 		}
 
-		var tableName, constraintName, columnName, refTable, refColumn, updateRule, deleteRule string
-		if err := rows.Scan(&tableName, &constraintName, &columnName, &refTable, &refColumn, &updateRule, &deleteRule); err != nil {
-			return nil, err
+		var (
+			tableName, constraintName, columnName, foreignTableName, foreignColumnName string
+			deleteRule, updateRule                                                     string
+		)
+
+		if err := rows.Scan(&tableName, &constraintName, &columnName, &foreignTableName, &foreignColumnName, &deleteRule, &updateRule); err != nil {
+			return nil, fmt.Errorf("failed to scan foreign key: %v", err)
 		}
 
-		if _, exists := fks[tableName]; !exists {
-			fks[tableName] = make(map[string]PostgresForeignKey)
-		}
-
-		fks[tableName][constraintName] = PostgresForeignKey{
+		// Create foreign key
+		fk := PostgresForeignKey{
 			Name:      constraintName,
 			Column:    columnName,
-			RefTable:  refTable,
-			RefColumn: refColumn,
-			OnUpdate:  updateRule,
+			RefTable:  foreignTableName,
+			RefColumn: foreignColumnName,
 			OnDelete:  deleteRule,
+			OnUpdate:  updateRule,
 		}
+
+		// Add to map
+		if _, exists := foreignKeys[tableName]; !exists {
+			foreignKeys[tableName] = make(map[string]PostgresForeignKey)
+		}
+		foreignKeys[tableName][constraintName] = fk
 	}
 
-	return fks, nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating foreign key rows: %v", err)
+	}
+
+	return foreignKeys, nil
 }
 
 // Fix the GetTableChecksum method to be more stable and consistent
@@ -1232,4 +1376,30 @@ func (d *PostgresDriver) GetTableChecksum(ctx context.Context, db DBExecutor, ta
 	// Combine all checksums
 	finalChecksum := fmt.Sprintf("%s:%s:%s", checksum, indexChecksum, fkChecksum)
 	return utils.MD5Hash(finalChecksum), nil
+}
+
+// Add FetchExampleRecords method to PostgresDriver
+func (d *PostgresDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, table string, limit int) ([]map[string]interface{}, error) {
+	// Ensure limit is reasonable
+	if limit <= 0 {
+		limit = 3 // Default to 3 records
+	} else if limit > 10 {
+		limit = 10 // Cap at 10 records to avoid large data transfers
+	}
+
+	// Build a simple query to fetch example records
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", table, limit)
+
+	var records []map[string]interface{}
+	err := db.QueryRows(query, &records)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+	}
+
+	// If no records found, return empty slice
+	if len(records) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	return records, nil
 }

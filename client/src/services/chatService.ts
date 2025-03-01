@@ -1,4 +1,4 @@
-import { Chat, Connection } from '../types/chat';
+import { Chat, Connection, TablesResponse } from '../types/chat';
 import { ExecuteQueryResponse, MessagesResponse, SendMessageResponse } from '../types/messages';
 import axios from './axiosConfig';
 
@@ -10,6 +10,12 @@ interface CreateChatResponse {
 }
 
 const chatService = {
+    // Add a cache for tables
+    tablesCache: {} as Record<string, {tables: any[], timestamp: number}>,
+    CACHE_TTL: 300000, // 5 minutes in milliseconds (increased from 1 minute)
+    // Track ongoing API requests to prevent duplicates
+    pendingRequests: {} as Record<string, Promise<TablesResponse>>,
+
     async createChat(connection: Connection): Promise<Chat> {
         try {
             const response = await axios.post<CreateChatResponse>(`${API_URL}/chats`, {
@@ -28,7 +34,7 @@ const chatService = {
     },
     async editChat(chatId: string, connection: Connection): Promise<Chat> {
         try {
-            const response = await axios.put<CreateChatResponse>(
+            const response = await axios.patch<CreateChatResponse>(
                 `${API_URL}/chats/${chatId}`,
                 {
                     connection: connection
@@ -258,6 +264,144 @@ const chatService = {
             return { success: true, data: response.data };
         } catch (error: any) {
             throw error.response?.data?.error || 'Failed to edit query';
+        }
+    },
+
+    async updateSelectedCollections(chatId: string, selectedCollections: string): Promise<Chat> {
+        try {
+            const response = await axios.patch<CreateChatResponse>(
+                `${API_URL}/chats/${chatId}`,
+                {
+                    selected_collections: selectedCollections
+                },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+
+            if (!response.data.success) {
+                throw new Error('Failed to update selected collections');
+            }
+
+            // Clear the cache for this chat
+            delete this.tablesCache[chatId];
+            // Clear any pending requests
+            delete this.pendingRequests[chatId];
+
+            return response.data.data;
+        } catch (error: any) {
+            console.error('Update selected collections error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to update selected collections');
+        }
+    },
+
+    // Add a method to get a single chat
+    async getChat(chatId: string): Promise<Chat> {
+        try {
+            const response = await axios.get<{success: boolean, data: Chat}>(
+                `${API_URL}/chats/${chatId}`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+
+            if (!response.data.success) {
+                throw new Error('Failed to get chat');
+            }
+
+            return response.data.data;
+        } catch (error: any) {
+            console.error('Get chat error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to get chat');
+        }
+    },
+
+    async getTables(chatId: string): Promise<TablesResponse> {
+        try {
+            console.log(`chatService.getTables called for chatId: ${chatId}`);
+            
+            // Check if there's already a pending request for this chat
+            if (this.pendingRequests[chatId] !== undefined) {
+                console.log(`chatService.getTables: Using pending request for chatId: ${chatId}`);
+                return await this.pendingRequests[chatId];
+            }
+            
+            // Check if we have a cached result that's still valid
+            const cachedResult = this.tablesCache[chatId];
+            const now = Date.now();
+            
+            if (cachedResult && (now - cachedResult.timestamp < this.CACHE_TTL)) {
+                console.log(`chatService.getTables: Using cached data for chatId: ${chatId}, cache age: ${(now - cachedResult.timestamp)/1000}s`);
+                return { tables: cachedResult.tables };
+            }
+            
+            console.log(`chatService.getTables: Cache miss for chatId: ${chatId}, fetching from API`);
+            
+            // Create a promise for the API request and store it
+            const requestPromise = (async () => {
+                try {
+                    // Create a timeout promise
+                    const timeoutPromise = new Promise<never>((_, reject) => {
+                        setTimeout(() => reject(new Error('Request timeout')), 120000); // 120 seconds timeout
+                    });
+                    
+                    // Create the actual request promise
+                    const fetchPromise = axios.get<{success: boolean, data: TablesResponse}>(
+                        `${API_URL}/chats/${chatId}/tables`,
+                        {
+                            withCredentials: true,
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            }
+                        }
+                    );
+                    
+                    // Race the timeout against the actual request
+                    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    
+                    if (!response.data.success) {
+                        throw new Error('Failed to get tables');
+                    }
+    
+                    // Cache the result
+                    this.tablesCache[chatId] = {
+                        tables: response.data.data.tables,
+                        timestamp: now
+                    };
+                    console.log(`chatService.getTables: Cached ${response.data.data.tables.length} tables for chatId: ${chatId}`);
+    
+                    return response.data.data;
+                } finally {
+                    // Clean up the pending request when done
+                    delete this.pendingRequests[chatId];
+                }
+            })();
+            
+            // Store the promise
+            this.pendingRequests[chatId] = requestPromise;
+            
+            // Return the promise result
+            return await requestPromise;
+        } catch (error: any) {
+            console.error('Get tables error:', error);
+            // Clean up the pending request on error
+            delete this.pendingRequests[chatId];
+            
+            // If we have a stale cache, return it rather than failing completely
+            const cachedResult = this.tablesCache[chatId];
+            if (cachedResult) {
+                console.log(`chatService.getTables: API request failed, using stale cache for chatId: ${chatId}`);
+                return { tables: cachedResult.tables };
+            }
+            
+            throw new Error(error.response?.data?.error || 'Failed to get tables');
         }
     }
 };

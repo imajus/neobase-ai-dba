@@ -1,0 +1,117 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+@layer base {
+  body {
+    font-family: '', sans-serif;
+    /**Can use Archivo**/
+    letter-spacing: 0.01em;
+  }
+}
+
+@layer components {
+  .neo-border {
+    @apply border-4 border-black rounded-xl;
+    box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  }
+
+  .neo-button {
+    @apply neo-border bg-black text-white px-4 py-2 font-bold text-base transition-all;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 1);
+    }
+
+    &:active {
+      transform: translateY(0px);
+      box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+    }
+  }
+
+  .neo-button:disabled {
+    @apply bg-gray-300 cursor-not-allowed;
+    transform: translateY(0);
+    box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  }
+
+  .neo-button-secondary {
+    @apply neo-border bg-white text-black px-4 py-2 font-bold text-base transition-all;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 1);
+    }
+
+    &:active {
+      transform: translateY(0px);
+      box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+    }
+  }
+
+  .neo-input:disabled {
+    @apply bg-gray-50 cursor-not-allowed;
+  }
+
+  .neo-input {
+    @apply neo-border bg-white px-4 py-2 text-base focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2;
+  }
+
+  /* Custom select styling */
+  select.neo-input {
+    @apply cursor-pointer bg-none;
+  }
+
+  select.neo-input option {
+    @apply py-2 px-4 min-h-[40px] flex items-center;
+  }
+
+  /* Remove default select arrow in modern browsers */
+  select.neo-input::-ms-expand {
+    display: none;
+  }
+
+  @supports (-webkit-appearance: none) or (-moz-appearance: none) {
+    select.neo-input {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+    }
+  }
+
+  .message-bubble {
+    @apply neo-border p-4 mb-4 break-words;
+  }
+
+  .message-bubble-user {
+    @apply message-bubble bg-white ml-auto w-fit max-w-[95%] md:max-w-[70%];
+  }
+
+  .message-bubble-ai {
+    @apply message-bubble bg-[#39FF14]/20 w-fit max-w-[95%] md:max-w-[75%];
+  }
+}
+
+@keyframes float {
+  0% {
+    transform: translateY(0px) translateX(0px) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-30px) translateX(30px) rotate(10deg);
+  }
+  50% {
+    transform: translateY(0px) translateX(60px) rotate(0deg);
+  }
+  75% {
+    transform: translateY(30px) translateX(30px) rotate(-10deg);
+  }
+  100% {
+    transform: translateY(0px) translateX(0px) rotate(0deg);
+  }
+}
+
+.animate-float {
+  animation: float infinite ease-in-out;
+}

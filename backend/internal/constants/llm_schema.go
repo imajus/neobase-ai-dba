@@ -15,6 +15,7 @@ type QueryInfo struct {
 	IsCritical             bool                      `json:"isCritical"`
 	CanRollback            bool                      `json:"canRollback"`
 	Explanation            string                    `json:"explanation"`
+	ExampleResultString    *string                   `json:"exampleResultString"`
 	ExampleResult          *[]map[string]interface{} `json:"exampleResult,omitempty"`
 	RollbackQuery          string                    `json:"rollbackQuery,omitempty"`
 	EstimateResponseTime   interface{}               `json:"estimateResponseTime"`

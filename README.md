@@ -49,45 +49,36 @@
 - **Styling**: Neo Brutalism design with custom Tailwind utilities
 
 
+
 ## Getting Started
 
-### Prerequisites
-
-- Go (v1.22+)
-- Node.js (v18+)
-- OpenAI API key
-- Google API key
-- Docker
-
+## How to setup
+Read [SETUP](SETUP) to learn how to setup NeoBase on your system.
 ## Usage
 
-1. **Setup Environment Variables**:
-   - Create a `.env` file in the root directory.
-   - Add your API keys and other environment variables.
-   - See `.env.example` for reference.
-
-2. **Create a new user in the app**:
+1. **Create a new user in the app**:
+   - Open the client app on `http://localhost:5173` in your browser.
    - Admin credentials are set via `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables.
    - Creating a new user requires an username, password and user signup secret.
-   - User signup secret is generated via Admin credenials by sending a POST request to `api/auth/generate-signup-secret`
+   - User signup secret is generated via Admin credenials by sending a POST request to `api/auth/generate-signup-secret` with admin username & password in the body
    - Use this secret to signup a new user from NeoBase UI.
 
-3. **Add a Database Connection**:
+2. **Add a Database Connection**:
    - Click "Add Connection" in the sidebar.
    - Choose & Enter your database credentials (e.g., host, port, username, password).
    - Click "Save" to add the connection.
 
-4. **Chat with Your Database**:
+3. **Chat with Your Database**:
    - Type natural language prompts in the chat interface (e.g., "Show me all users").
    - View the generated SQL, Other DBs query and results.
    - Paginated results that support large volume of data.
 
-5. **Manage Transactions**:
+4. **Manage Transactions**:
    - Run the query in transaction mode by clicking "Play" icon button in query.
    - You can also cancel the query by clicking "Cancel" icon button in query.
    - Perform rollbacks by clicking "History" icon button in query.
 
-6. **Optimize Queries**:
+5. **Optimize Queries**:
    - Get AI-driven suggestions to improve query performance.
 
 

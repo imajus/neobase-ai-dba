@@ -16,7 +16,7 @@ export default function DeleteConnectionModal({
 }: DeleteConnectionModalProps) {
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
-  const isConfirmValid = confirmText === 'delete';
+  const isConfirmValid = confirmText === connectionName;
 
   const handleDelete = async () => {
     if (!isConfirmValid) return;
@@ -55,14 +55,14 @@ export default function DeleteConnectionModal({
 
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Type <span className="font-mono bg-gray-100 px-2 py-1 rounded">delete</span> to confirm:
+              Type <span className="font-mono bg-gray-100 px-2 py-1 rounded">{connectionName}</span> to confirm:
             </label>
             <input
               type="text"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               className="neo-input w-full"
-              placeholder="Type 'delete' to confirm"
+              placeholder={`Type ${connectionName} to confirm`}
               autoFocus
               disabled={isDeleting}
             />

@@ -1,4 +1,5 @@
 import { Github } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 interface StarUsButtonProps {
     className?: string;
@@ -6,6 +7,33 @@ interface StarUsButtonProps {
 }
 
 export default function StarUsButton({ className = '', isMobile = false }: StarUsButtonProps) {
+    const [starCount, setStarCount] = useState<number | null>(null);
+
+    useEffect(() => {
+        const fetchStarCount = async () => {
+            try {
+                const response = await fetch(`${import.meta.env.VITE_API_URL}/github/stats`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch star count');
+                }
+                const data = await response.json();
+                setStarCount(data.stars);
+            } catch (error) {
+                console.error('Error fetching star count:', error);
+                setStarCount(1); // I Starred it manually :)
+            }
+        };
+
+        fetchStarCount();
+    }, []);
+
+    const formatStarCount = (count: number): string => {
+        if (count >= 1000) {
+            return `${(count / 1000).toFixed(1)}k`;
+        }
+        return count.toString();
+    };
+
     return (
         <a
             href="https://github.com/bhaskarblur/neobase-ai-dba"
@@ -39,7 +67,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                     rounded-full 
                     text-xs 
                     font-mono
-                ">5k</span>
+                ">{formatStarCount(starCount || 0)}</span>
             ) : (
                 <>
                     <span>Star Us</span>
@@ -50,7 +78,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                         rounded-full 
                         text-xs 
                         font-mono
-                    ">5k</span>
+                    ">{formatStarCount(starCount || 0)}</span>
                 </>
             )}
         </a>
