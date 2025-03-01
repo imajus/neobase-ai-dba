@@ -473,7 +473,7 @@ func (h *ChatHandler) RefreshSchema(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
-	statusCode, err := h.chatService.RefreshSchema(c.Request.Context(), userID, chatID)
+	statusCode, err := h.chatService.RefreshSchema(c.Request.Context(), userID, chatID, true)
 	if err != nil {
 		c.JSON(int(statusCode), dtos.Response{
 			Success: false,

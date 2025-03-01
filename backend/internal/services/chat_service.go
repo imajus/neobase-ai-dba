@@ -46,7 +46,7 @@ type ChatService interface {
 	RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error)
 	CancelQueryExecution(userID, chatID, messageID, queryID, streamID string)
 	ProcessMessage(ctx context.Context, userID, chatID string, streamID string) error
-	RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error)
+	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
 	// Db Manager Stream Handler
 	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
@@ -213,7 +213,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			defer cancel()
 
 			log.Printf("ChatService -> Update -> Starting schema refresh with 60-minute timeout")
-			_, err := s.RefreshSchema(ctx, userID, chatID)
+			_, err := s.RefreshSchema(ctx, userID, chatID, false)
 			if err != nil {
 				log.Printf("ChatService -> Update -> Error refreshing schema: %v", err)
 			}
@@ -2247,7 +2247,7 @@ func (s *chatService) processMessageInternal(msgCtx context.Context, userID, cha
 	return nil
 }
 
-func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
+func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error) {
 	log.Printf("ChatService -> RefreshSchema -> Starting for chatID: %s", chatID)
 
 	// Increase the timeout for the initial context to 60 minutes
@@ -2290,6 +2290,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 		}
 		log.Printf("ChatService -> RefreshSchema -> Selected collections: %v", selectedCollectionsSlice)
 
+		dataChan := make(chan error, 1)
 		go func() {
 			// Create a new context with a longer timeout specifically for the schema refresh operation
 			// Increase to 90 minutes to handle large schemas or slow database responses
@@ -2299,6 +2300,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 			userObjID, err := primitive.ObjectIDFromHex(userID)
 			if err != nil {
 				log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
+				dataChan <- err
 				return
 			}
 
@@ -2309,6 +2311,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 			schemaMsg, err := s.dbManager.RefreshSchemaWithExamples(schemaCtx, chatID, selectedCollectionsSlice)
 			if err != nil {
 				log.Printf("ChatService -> RefreshSchema -> Error refreshing schema with examples: %v", err)
+				dataChan <- err
 				return
 			}
 
@@ -2337,7 +2340,14 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
 			}
 			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
+			dataChan <- nil // Will be used to Synchronous refresh
 		}()
+
+		if sync {
+			log.Println("ChatService -> RefreshSchema -> Waiting for Synchronous refresh to complete")
+			<-dataChan
+			log.Println("ChatService -> RefreshSchema -> Synchronous refresh completed")
+		}
 		return http.StatusOK, nil
 	}
 }
