@@ -15,6 +15,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectAll, setSelectAll] = useState(true);
   const [isApiCallInProgress, setIsApiCallInProgress] = useState(false);
@@ -40,6 +41,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
         setIsApiCallInProgress(true);
         setIsLoading(true);
         setError(null);
+        setValidationError(null);
         
         console.log('SelectTablesModal: About to call getTables API for chat.id:', chat.id);
         // Get tables from the API
@@ -47,17 +49,15 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
         console.log('SelectTablesModal: Received tables response:', tablesResponse.tables.length, 'tables');
         setTables(tablesResponse.tables);
         
-        // Initialize selected tables based on chat.selected_collections
-        if (chat.selected_collections === 'ALL' || !chat.selected_collections) {
-          // If ALL or undefined, select all tables
-          setSelectedTables(tablesResponse.tables.map(table => table.name));
-          setSelectAll(true);
-        } else {
-          // Otherwise, select only the tables in the comma-separated list
-          const selected = chat.selected_collections.split(',');
-          setSelectedTables(selected);
-          setSelectAll(false);
-        }
+        // Initialize selected tables based on is_selected field
+        const selectedTableNames = tablesResponse.tables
+          .filter(table => table.is_selected)
+          .map(table => table.name);
+        
+        setSelectedTables(selectedTableNames);
+        
+        // Check if all tables are selected to set selectAll state correctly
+        setSelectAll(selectedTableNames.length === tablesResponse.tables.length);
       } catch (error: any) {
         console.error('Failed to load tables:', error);
         setError(error.message || 'Failed to load tables');
@@ -71,10 +71,18 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
   }, [chat.id]); // Only re-run when chat.id changes
 
   const toggleTable = (tableName: string) => {
+    setValidationError(null);
     setSelectedTables(prev => {
       if (prev.includes(tableName)) {
         // If removing a table, also uncheck "Select All"
         setSelectAll(false);
+        
+        // Prevent removing if it's the last selected table
+        if (prev.length === 1) {
+          setValidationError("At least one table must be selected");
+          return prev;
+        }
+        
         return prev.filter(name => name !== tableName);
       } else {
         // If all tables are now selected, check "Select All"
@@ -95,10 +103,11 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
   };
 
   const toggleSelectAll = () => {
+    setValidationError(null);
     if (selectAll) {
-      // Deselect all
-      setSelectedTables([]);
-      setSelectAll(false);
+      // Prevent deselecting all tables
+      setValidationError("At least one table must be selected");
+      return;
     } else {
       // Select all
       setSelectedTables(tables.map(table => table.name));
@@ -107,9 +116,16 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
   };
 
   const handleSave = async () => {
+    // Validate that at least one table is selected
+    if (selectedTables.length === 0) {
+      setValidationError("At least one table must be selected");
+      return;
+    }
+    
     try {
       setIsSaving(true);
       setError(null);
+      setValidationError(null);
       
       // Format selected tables as "ALL" or comma-separated list
       const formattedSelection = selectAll ? 'ALL' : selectedTables.join(',');
@@ -118,15 +134,17 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
       if (formattedSelection !== chat.selected_collections) {
         // Only save if the selection has changed
         await onSave(formattedSelection);
+        // Close the modal only on success
+        onClose();
       } else {
         console.log('Selection unchanged, skipping save');
+        // Close the modal even if no changes were made
+        onClose();
       }
-      
-      // Close the modal
-      onClose();
     } catch (error: any) {
       console.error('Failed to save selected tables:', error);
       setError(error.message || 'Failed to save selected tables');
+      // Don't close the modal on error
     } finally {
       setIsSaving(false);
     }
@@ -154,6 +172,15 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
               <div className="flex items-center gap-2 text-red-600">
                 <AlertCircle className="w-5 h-5" />
                 <p className="font-medium">{error}</p>
+              </div>
+            </div>
+          )}
+          
+          {validationError && (
+            <div className="p-4 bg-amber-50 border-2 border-amber-500 rounded-lg mb-4">
+              <div className="flex items-center gap-2 text-amber-600">
+                <AlertCircle className="w-5 h-5" />
+                <p className="font-medium">{validationError}</p>
               </div>
             </div>
           )}
@@ -257,7 +284,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
                           <label className="flex items-center gap-2 cursor-pointer flex-grow">
                             <input
                               type="checkbox"
-                              className="w-4 h-4 rounded-md border-2 border-black"
+                              className="w-4 h-4 rounded-md border-2 border-black checked:bg-green-500 checked:border-green-500 focus:ring-green-500 text-green-500"
                               checked={selectedTables.includes(table.name)}
                               onChange={() => toggleTable(table.name)}
                             />

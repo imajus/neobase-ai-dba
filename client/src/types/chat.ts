@@ -40,6 +40,7 @@ export interface ColumnInfo {
 export interface TableInfo {
     name: string;
     columns: ColumnInfo[];
+    is_selected: boolean;
 }
 
 export interface TablesResponse {

@@ -34,7 +34,7 @@ const chatService = {
     },
     async editChat(chatId: string, connection: Connection): Promise<Chat> {
         try {
-            const response = await axios.put<CreateChatResponse>(
+            const response = await axios.patch<CreateChatResponse>(
                 `${API_URL}/chats/${chatId}`,
                 {
                     connection: connection
@@ -269,7 +269,7 @@ const chatService = {
 
     async updateSelectedCollections(chatId: string, selectedCollections: string): Promise<Chat> {
         try {
-            const response = await axios.put<CreateChatResponse>(
+            const response = await axios.patch<CreateChatResponse>(
                 `${API_URL}/chats/${chatId}`,
                 {
                     selected_collections: selectedCollections
@@ -299,6 +299,30 @@ const chatService = {
         }
     },
 
+    // Add a method to get a single chat
+    async getChat(chatId: string): Promise<Chat> {
+        try {
+            const response = await axios.get<{success: boolean, data: Chat}>(
+                `${API_URL}/chats/${chatId}`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+
+            if (!response.data.success) {
+                throw new Error('Failed to get chat');
+            }
+
+            return response.data.data;
+        } catch (error: any) {
+            console.error('Get chat error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to get chat');
+        }
+    },
+
     async getTables(chatId: string): Promise<TablesResponse> {
         try {
             console.log(`chatService.getTables called for chatId: ${chatId}`);
@@ -325,7 +349,7 @@ const chatService = {
                 try {
                     // Create a timeout promise
                     const timeoutPromise = new Promise<never>((_, reject) => {
-                        setTimeout(() => reject(new Error('Request timeout')), 30000); // 30 seconds timeout
+                        setTimeout(() => reject(new Error('Request timeout')), 120000); // 120 seconds timeout
                     });
                     
                     // Create the actual request promise

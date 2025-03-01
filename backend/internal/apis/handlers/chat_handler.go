@@ -709,7 +709,7 @@ func (h *ChatHandler) EditQuery(c *gin.Context) {
 	})
 }
 
-// GetTables retrieves all tables with their columns for a specific chat
+// GetTables retrieves all tables with their columns for a specific chat, marking which ones are selected
 func (h *ChatHandler) GetTables(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")

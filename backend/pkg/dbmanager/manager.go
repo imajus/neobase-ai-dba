@@ -1056,6 +1056,43 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 	m.schemaManager.ClearSchemaCache(chatID)
 	log.Printf("DBManager -> RefreshSchemaWithExamples -> Cleared schema cache for chatID: %s", chatID)
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Context cancelled: %v", err)
+		return "", fmt.Errorf("operation cancelled: %v", err)
+	}
+
+	// Force a fresh schema fetch by directly calling GetSchema first
+	log.Printf("DBManager -> RefreshSchemaWithExamples -> Forcing fresh schema fetch for chatID: %s", chatID)
+
+	// Convert selectedCollections to the format expected by GetSchema
+	var selectedTables []string
+	if len(selectedCollections) == 0 || (len(selectedCollections) == 1 && selectedCollections[0] == "ALL") {
+		selectedTables = []string{"ALL"}
+	} else {
+		selectedTables = selectedCollections
+	}
+
+	// Fetch fresh schema directly
+	freshSchema, err := m.schemaManager.GetSchema(ctx, chatID, db, conn.Config.Type, selectedTables)
+	if err != nil {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error fetching fresh schema: %v", err)
+		return "", fmt.Errorf("failed to fetch fresh schema: %v", err)
+	}
+
+	// Store the fresh schema
+	err = m.schemaManager.storeSchema(ctx, chatID, freshSchema, db, conn.Config.Type)
+	if err != nil {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error storing fresh schema: %v", err)
+		// Continue anyway, as we have the fresh schema
+	}
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Context cancelled after schema fetch: %v", err)
+		return "", fmt.Errorf("operation cancelled: %v", err)
+	}
+
 	// Format schema with examples and selected collections
 	formattedSchema, err := m.schemaManager.FormatSchemaWithExamplesAndCollections(ctx, chatID, db, conn.Config.Type, selectedCollections)
 	if err != nil {
@@ -1063,6 +1100,6 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 		return "", fmt.Errorf("failed to format schema with examples: %v", err)
 	}
 
-	log.Printf("DBManager -> RefreshSchemaWithExamples -> Successfully refreshed schema for chatID: %s", chatID)
+	log.Printf("DBManager -> RefreshSchemaWithExamples -> Successfully refreshed schema for chatID: %s (schema length: %d)", chatID, len(formattedSchema))
 	return formattedSchema, nil
 }

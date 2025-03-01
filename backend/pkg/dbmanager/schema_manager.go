@@ -425,14 +425,32 @@ func (td TableDiff) isEmpty() bool {
 
 // Update storeSchema to properly set checksums
 func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema *SchemaInfo, db DBExecutor, dbType string) error {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("storeSchema -> context cancelled at start: %v", err)
+		return err
+	}
+
 	// Get table checksums first
 	checksums, err := sm.getTableChecksums(ctx, db, dbType)
 	if err != nil {
 		return fmt.Errorf("failed to get table checksums: %v", err)
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("storeSchema -> context cancelled after getting checksums: %v", err)
+		return err
+	}
+
 	// Create LLM-friendly schema with example records
 	llmSchema := sm.createLLMSchemaWithExamples(ctx, schema, dbType, db)
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("storeSchema -> context cancelled after creating LLM schema: %v", err)
+		return err
+	}
 
 	// Create storage object
 	storage := &SchemaStorage{
@@ -446,6 +464,12 @@ func (sm *SchemaManager) storeSchema(ctx context.Context, chatID string, schema 
 	sm.mu.Lock()
 	sm.schemaCache[chatID] = schema
 	sm.mu.Unlock()
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("storeSchema -> context cancelled before storing in Redis: %v", err)
+		return err
+	}
 
 	// Store in Redis
 	if err := sm.storageService.Store(ctx, chatID, storage); err != nil {
@@ -1083,6 +1107,15 @@ func (sm *SchemaManager) createLLMSchema(schema *SchemaInfo, dbType string) *LLM
 
 // Create LLM-friendly schema with example records
 func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema *SchemaInfo, dbType string, db DBExecutor) *LLMSchemaInfo {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("createLLMSchemaWithExamples -> context cancelled at start: %v", err)
+		return &LLMSchemaInfo{
+			Tables:        make(map[string]LLMTableInfo),
+			Relationships: make([]SchemaRelationship, 0),
+		}
+	}
+
 	var simplifier SchemaSimplifier
 	switch dbType {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
@@ -1105,8 +1138,20 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		// Continue without example records
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("createLLMSchemaWithExamples -> context cancelled after getting fetcher: %v", err)
+		return llmSchema
+	}
+
 	// Convert tables to LLM-friendly format
 	for tableName, table := range schema.Tables {
+		// Check for context cancellation periodically
+		if err := ctx.Err(); err != nil {
+			log.Printf("createLLMSchemaWithExamples -> context cancelled during table processing: %v", err)
+			return llmSchema
+		}
+
 		llmTable := LLMTableInfo{
 			Name:           tableName,
 			Description:    table.Comment,
@@ -1137,6 +1182,13 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 
 		// Fetch example records if fetcher is available
 		if fetcher != nil {
+			// Check for context cancellation before fetching examples
+			if err := ctx.Err(); err != nil {
+				log.Printf("createLLMSchemaWithExamples -> context cancelled before fetching examples for table %s: %v", tableName, err)
+				llmSchema.Tables[tableName] = llmTable
+				continue
+			}
+
 			exampleRecords, err := fetcher.FetchExampleRecords(ctx, db, tableName, 3) // Fetch 3 example records
 			if err != nil {
 				log.Printf("Failed to fetch example records for table %s: %v", tableName, err)
@@ -1146,6 +1198,12 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		}
 
 		llmSchema.Tables[tableName] = llmTable
+	}
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("createLLMSchemaWithExamples -> context cancelled before extracting relationships: %v", err)
+		return llmSchema
 	}
 
 	// Extract relationships
@@ -1560,6 +1618,12 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 	// Try to get from storage first
 	storage, err := sm.getStoredSchema(ctx, chatID)
 	if err == nil && storage != nil && storage.LLMSchema != nil {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			log.Printf("GetSchemaWithExamples -> context cancelled after getting stored schema: %v", err)
+			return nil, err
+		}
+
 		// Check if we have example records
 		hasExamples := false
 		for _, table := range storage.LLMSchema.Tables {
@@ -1574,15 +1638,33 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 		}
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetSchemaWithExamples -> context cancelled before fetching schema: %v", err)
+		return nil, err
+	}
+
 	// If not found or no examples, fetch fresh schema and store with examples
 	schema, err := sm.fetchSchema(ctx, db, dbType, selectedTables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %v", err)
 	}
 
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetSchemaWithExamples -> context cancelled after fetching schema: %v", err)
+		return nil, err
+	}
+
 	// Store schema with examples
 	if err := sm.storeSchema(ctx, chatID, schema, db, dbType); err != nil {
 		return nil, fmt.Errorf("failed to store schema: %v", err)
+	}
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("GetSchemaWithExamples -> context cancelled after storing schema: %v", err)
+		return nil, err
 	}
 
 	// Get the stored schema with examples

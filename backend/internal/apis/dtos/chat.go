@@ -24,8 +24,8 @@ type CreateChatRequest struct {
 }
 
 type UpdateChatRequest struct {
-	Connection          CreateConnectionRequest `json:"connection" binding:"required"`
-	SelectedCollections string                  `json:"selected_collections"` // "ALL" or comma-separated table names
+	Connection          *CreateConnectionRequest `json:"connection"`
+	SelectedCollections *string                  `json:"selected_collections"` // "ALL" or comma-separated table names
 }
 
 type ChatResponse struct {
@@ -44,8 +44,9 @@ type ChatListResponse struct {
 
 // TableInfo represents a table with its columns
 type TableInfo struct {
-	Name    string       `json:"name"`
-	Columns []ColumnInfo `json:"columns"`
+	Name       string       `json:"name"`
+	Columns    []ColumnInfo `json:"columns"`
+	IsSelected bool         `json:"is_selected"`
 }
 
 // ColumnInfo represents a column in a table

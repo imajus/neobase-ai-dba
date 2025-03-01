@@ -929,6 +929,8 @@ function AppContent() {
 
   // Add function to handle updating selected collections
   const handleUpdateSelectedCollections = async (chatId: string, selectedCollections: string): Promise<void> => {
+    let loadingToast: string | null = null;
+    
     try {
       // Find the chat to check if selected_collections have changed
       const chat = chats.find(c => c.id === chatId);
@@ -947,7 +949,7 @@ function AppContent() {
         return;
       }
       
-      const loadingToast = toast.loading('Updating selected tables...', {
+      loadingToast = toast.loading('Updating selected tables...', {
         style: {
           background: '#000',
           color: '#fff',
@@ -969,26 +971,35 @@ function AppContent() {
         setSelectedConnection(prev => prev ? { ...prev, selected_collections: selectedCollections } : prev);
       }
 
-      toast.dismiss(loadingToast);
-      toast.success('Tables updated successfully', {
+      if (loadingToast) {
+        toast.dismiss(loadingToast);
+      }
+      
+      // Close the modal if this was a newly created chat
+      if (newlyCreatedChat && newlyCreatedChat.id === chatId) {
+        setShowSelectTablesModal(false);
+        setNewlyCreatedChat(null);
+        await handleSelectConnection(chatId);
+      }
+      
+      return;
+    } catch (error: any) {
+      console.error('Failed to update selected tables:', error);
+      
+      if (loadingToast) {
+        toast.dismiss(loadingToast);
+      }
+      
+      toast.error(error.message || 'Failed to update tables selection', {
         style: {
           background: '#000',
           color: '#fff',
           borderRadius: '12px',
+          border: '4px solid #000',
         },
       });
-
-      // Close the modal
-      setShowSelectTablesModal(false);
-      setNewlyCreatedChat(null);
       
-      // If this was a newly created chat, select it
-      if (newlyCreatedChat && newlyCreatedChat.id === chatId) {
-        await handleSelectConnection(chatId);
-      }
-    } catch (error) {
-      console.error('Error updating selected collections:', error);
-      toast.error('Failed to update tables selection');
+      throw error; // Re-throw to allow the calling component to handle the error
     }
   };
 

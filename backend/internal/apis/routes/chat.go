@@ -21,7 +21,7 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.POST("", chatHandler.Create)
 		protected.GET("", chatHandler.List)
 		protected.GET("/:id", chatHandler.GetByID)
-		protected.PUT("/:id", chatHandler.Update)
+		protected.PATCH("/:id", chatHandler.Update)
 		protected.DELETE("/:id", chatHandler.Delete)
 
 		// Messages within a chat

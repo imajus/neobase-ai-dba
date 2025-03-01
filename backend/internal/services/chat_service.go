@@ -152,45 +152,68 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
 	}
 
-	// Cannot change the database type
-	if req.Connection.Type != chat.Connection.Type {
-		return nil, http.StatusBadRequest, fmt.Errorf("cannot change the database type")
-	}
+	if req.Connection != nil {
+		// Cannot change the database type
+		if req.Connection.Type != chat.Connection.Type {
+			return nil, http.StatusBadRequest, fmt.Errorf("cannot change the database type")
+		}
 
-	// Test connection without creating a persistent connection
-	err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
-		Type:     req.Connection.Type,
-		Host:     req.Connection.Host,
-		Port:     req.Connection.Port,
-		Username: &req.Connection.Username,
-		Password: &req.Connection.Password,
-		Database: req.Connection.Database,
-	})
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
-	}
-
-	// Update chat fields
-	if req.Connection != (dtos.CreateConnectionRequest{}) {
-		chat.Connection = models.Connection{
+		// Test connection without creating a persistent connection
+		err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 			Type:     req.Connection.Type,
 			Host:     req.Connection.Host,
 			Port:     req.Connection.Port,
 			Username: &req.Connection.Username,
 			Password: &req.Connection.Password,
 			Database: req.Connection.Database,
-			Base:     models.NewBase(),
+		})
+		if err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
+		}
+
+		// Update chat fields
+		if req.Connection != nil {
+			chat.Connection = models.Connection{
+				Type:     req.Connection.Type,
+				Host:     req.Connection.Host,
+				Port:     req.Connection.Port,
+				Username: &req.Connection.Username,
+				Password: &req.Connection.Password,
+				Database: req.Connection.Database,
+				Base:     models.NewBase(),
+			}
 		}
 	}
+	// Store the old selected collections value to check for changes
+	oldSelectedCollections := chat.SelectedCollections
+	// Flag to track if selected collections changed
+	selectedCollectionsChanged := false
 
 	// Update selected collections if provided
-	if req.SelectedCollections != "" {
-		chat.SelectedCollections = req.SelectedCollections
-		log.Printf("ChatService -> Update -> Updated selected collections to: %s", req.SelectedCollections)
+	if req.SelectedCollections != nil && *req.SelectedCollections != "" {
+		if oldSelectedCollections != *req.SelectedCollections {
+			selectedCollectionsChanged = true
+			log.Printf("ChatService -> Update -> Selected collections changed from '%s' to '%s'", oldSelectedCollections, *req.SelectedCollections)
+		}
+		chat.SelectedCollections = *req.SelectedCollections
+		log.Printf("ChatService -> Update -> Updated selected collections to: %s", *req.SelectedCollections)
 	}
 
 	if err := s.chatRepo.Update(chatObjID, chat); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update chat: %v", err)
+	}
+
+	// If selected collections changed, trigger a schema refresh
+	if selectedCollectionsChanged {
+		log.Printf("ChatService -> Update -> Triggering schema refresh due to selected collections change")
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			_, err := s.RefreshSchema(ctx, userID, chatID)
+			if err != nil {
+				log.Printf("ChatService -> Update -> Error refreshing schema: %v", err)
+			}
+		}()
 	}
 
 	return s.buildChatResponse(chat), http.StatusOK, nil
@@ -1032,8 +1055,7 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 			ChatID: chatObjID,
 			Role:   string(MessageTypeSystem),
 			Content: map[string]interface{}{
-				"schema_update":        schemaMsg,
-				"selected_collections": chat.SelectedCollections,
+				"schema_update": schemaMsg,
 			},
 		}
 
@@ -2222,9 +2244,10 @@ func (s *chatService) processMessageInternal(msgCtx context.Context, userID, cha
 }
 
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) (uint32, error) {
-	log.Println("ChatService -> RefreshSchema")
+	log.Printf("ChatService -> RefreshSchema -> Starting for chatID: %s", chatID)
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	// Increase the timeout for the initial context
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	select {
@@ -2264,10 +2287,40 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 		log.Printf("ChatService -> RefreshSchema -> Selected collections: %v", selectedCollectionsSlice)
 
 		go func() {
+			// Create a new context with a longer timeout specifically for the schema refresh operation
+			schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 60*time.Minute)
+			defer schemaCancel()
+
 			userObjID, err := primitive.ObjectIDFromHex(userID)
 			if err != nil {
 				log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
 				return
+			}
+
+			// Force a fresh schema fetch by using a new context with a longer timeout
+			log.Printf("ChatService -> RefreshSchema -> Forcing fresh schema fetch for chatID: %s", chatID)
+
+			// Use the method to get schema with examples and pass selected collections
+			schemaMsg, err := s.dbManager.RefreshSchemaWithExamples(schemaCtx, chatID, selectedCollectionsSlice)
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Error refreshing schema with examples: %v", err)
+				return
+			}
+
+			if schemaMsg == "" {
+				log.Printf("ChatService -> RefreshSchema -> Warning: Empty schema message returned")
+				schemaMsg = "Schema refresh completed, but no schema information was returned. Please check your database connection and selected tables."
+			}
+
+			log.Printf("ChatService -> RefreshSchema -> schemaMsg length: %d", len(schemaMsg))
+			llmMsg := &models.LLMMessage{
+				Base:   models.NewBase(),
+				UserID: userObjID,
+				ChatID: chatObjID,
+				Role:   string(MessageTypeSystem),
+				Content: map[string]interface{}{
+					"schema_update": schemaMsg,
+				},
 			}
 
 			// Clear previous system message from LLM
@@ -2275,24 +2328,6 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string) 
 				log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
 			}
 
-			// Use the new method to get schema with examples and pass selected collections
-			schemaMsg, err := s.dbManager.RefreshSchemaWithExamples(ctx, chatID, selectedCollectionsSlice)
-			if err != nil {
-				log.Printf("ChatService -> RefreshSchema -> Error refreshing schema with examples: %v", err)
-				return
-			}
-
-			log.Printf("ChatService -> RefreshSchema -> schemaMsg: %s", schemaMsg)
-			llmMsg := &models.LLMMessage{
-				Base:   models.NewBase(),
-				UserID: userObjID,
-				ChatID: chatObjID,
-				Role:   string(MessageTypeSystem),
-				Content: map[string]interface{}{
-					"schema_update":        schemaMsg,
-					"selected_collections": chat.SelectedCollections,
-				},
-			}
 			if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
 				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
 			}
@@ -2478,84 +2513,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 
 // New method for getting tables
 func (s *chatService) GetTables(ctx context.Context, userID, chatID string) (*dtos.TablesResponse, uint32, error) {
-	log.Printf("ChatService -> GetTables -> Starting for chatID: %s", chatID)
-
-	// Get database connection
-	dbConn, err := s.dbManager.GetConnection(chatID)
-	if err != nil {
-		log.Printf("ChatService -> GetTables -> Failed to get database connection: %v", err)
-		return nil, http.StatusNotFound, fmt.Errorf("connection not found")
-	}
-
-	// Get connection info
-	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
-	if !exists {
-		log.Printf("ChatService -> GetTables -> Connection not found for chatID: %s", chatID)
-		return nil, http.StatusNotFound, fmt.Errorf("connection not found")
-	}
-
-	// Get chat to get selected collections
-	chatObjID, err := primitive.ObjectIDFromHex(chatID)
-	if err != nil {
-		log.Printf("ChatService -> GetTables -> Error getting chatID: %v", err)
-		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
-	}
-
-	chat, err := s.chatRepo.FindByID(chatObjID)
-	if err != nil {
-		log.Printf("ChatService -> GetTables -> Error finding chat: %v", err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
-	}
-
-	if chat == nil {
-		log.Printf("ChatService -> GetTables -> Chat not found for chatID: %s", chatID)
-		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
-	}
-
-	// Convert the selectedCollections string to a slice
-	var selectedCollectionsSlice []string
-	if chat.SelectedCollections != "ALL" && chat.SelectedCollections != "" {
-		selectedCollectionsSlice = strings.Split(chat.SelectedCollections, ",")
-	}
-	log.Printf("ChatService -> GetTables -> Selected collections: %v", selectedCollectionsSlice)
-
-	// Get schema manager
-	schemaManager := s.dbManager.GetSchemaManager()
-
-	// Get schema from database using selected collections
-	schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type, selectedCollectionsSlice)
-	if err != nil {
-		log.Printf("ChatService -> GetTables -> Error getting schema: %v", err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get schema: %v", err)
-	}
-
-	// Convert schema tables to TableInfo objects
-	var tables []dtos.TableInfo
-	for tableName, tableSchema := range schema.Tables {
-		tableInfo := dtos.TableInfo{
-			Name:    tableName,
-			Columns: make([]dtos.ColumnInfo, 0, len(tableSchema.Columns)),
-		}
-
-		for columnName, columnInfo := range tableSchema.Columns {
-			tableInfo.Columns = append(tableInfo.Columns, dtos.ColumnInfo{
-				Name:       columnName,
-				Type:       columnInfo.Type,
-				IsNullable: columnInfo.IsNullable,
-			})
-		}
-
-		tables = append(tables, tableInfo)
-	}
-
-	// Sort tables by name for consistent output
-	sort.Slice(tables, func(i, j int) bool {
-		return tables[i].Name < tables[j].Name
-	})
-
-	return &dtos.TablesResponse{
-		Tables: tables,
-	}, http.StatusOK, nil
+	return s.GetAllTables(ctx, userID, chatID)
 }
 
 // GetSelectedCollections retrieves the selected collections for a chat
@@ -2589,4 +2547,102 @@ func (s *chatService) GetSelectedCollections(chatID string) (string, error) {
 	}
 
 	return chat.SelectedCollections, nil
+}
+
+// New method for getting all tables (for UI display)
+func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (*dtos.TablesResponse, uint32, error) {
+	log.Printf("ChatService -> GetAllTables -> Starting for chatID: %s", chatID)
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		return nil, http.StatusRequestTimeout, fmt.Errorf("request timed out")
+	default:
+		// Get database connection
+		dbConn, err := s.dbManager.GetConnection(chatID)
+		if err != nil {
+			log.Printf("ChatService -> GetAllTables -> Failed to get database connection: %v", err)
+			return nil, http.StatusNotFound, fmt.Errorf("connection not found")
+		}
+
+		// Get connection info
+		connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+		if !exists {
+			log.Printf("ChatService -> GetAllTables -> Connection not found for chatID: %s", chatID)
+			return nil, http.StatusNotFound, fmt.Errorf("connection not found")
+		}
+
+		// Get chat to get selected collections
+		chatObjID, err := primitive.ObjectIDFromHex(chatID)
+		if err != nil {
+			log.Printf("ChatService -> GetAllTables -> Error getting chatID: %v", err)
+			return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+		}
+
+		chat, err := s.chatRepo.FindByID(chatObjID)
+		if err != nil {
+			log.Printf("ChatService -> GetAllTables -> Error finding chat: %v", err)
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+		}
+
+		if chat == nil {
+			log.Printf("ChatService -> GetAllTables -> Chat not found for chatID: %s", chatID)
+			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+		}
+
+		// Convert the selectedCollections string to a slice
+		var selectedCollectionsSlice []string
+		if chat.SelectedCollections != "ALL" && chat.SelectedCollections != "" {
+			selectedCollectionsSlice = strings.Split(chat.SelectedCollections, ",")
+		}
+		log.Printf("ChatService -> GetAllTables -> Selected collections: %v", selectedCollectionsSlice)
+
+		// Create a map for quick lookup of selected tables
+		selectedTablesMap := make(map[string]bool)
+		for _, tableName := range selectedCollectionsSlice {
+			selectedTablesMap[tableName] = true
+		}
+		isAllSelected := chat.SelectedCollections == "ALL" || chat.SelectedCollections == ""
+
+		// Get schema manager
+		schemaManager := s.dbManager.GetSchemaManager()
+
+		// Get schema from database - pass empty slice to get ALL tables
+		schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type, []string{})
+		if err != nil {
+			log.Printf("ChatService -> GetAllTables -> Error getting schema: %v", err)
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to get schema: %v", err)
+		}
+
+		// Convert schema tables to TableInfo objects
+		var tables []dtos.TableInfo
+		for tableName, tableSchema := range schema.Tables {
+			tableInfo := dtos.TableInfo{
+				Name:       tableName,
+				Columns:    make([]dtos.ColumnInfo, 0, len(tableSchema.Columns)),
+				IsSelected: isAllSelected || selectedTablesMap[tableName],
+			}
+
+			for columnName, columnInfo := range tableSchema.Columns {
+				tableInfo.Columns = append(tableInfo.Columns, dtos.ColumnInfo{
+					Name:       columnName,
+					Type:       columnInfo.Type,
+					IsNullable: columnInfo.IsNullable,
+				})
+			}
+
+			tables = append(tables, tableInfo)
+		}
+
+		// Sort tables by name for consistent output
+		sort.Slice(tables, func(i, j int) bool {
+			return tables[i].Name < tables[j].Name
+		})
+
+		return &dtos.TablesResponse{
+			Tables: tables,
+		}, http.StatusOK, nil
+	}
 }
