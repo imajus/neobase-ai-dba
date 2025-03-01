@@ -12,6 +12,7 @@ export interface Chat {
     id: string;
     user_id: string;
     connection: Connection;
+    selected_collections?: string; // "ALL" or comma-separated table names
     created_at: string;
     updated_at: string;
 }
@@ -27,4 +28,20 @@ export interface ChatsResponse {
 export interface CreateChatResponse {
     success: boolean;
     data: Chat;
+}
+
+// Table and column information
+export interface ColumnInfo {
+    name: string;
+    type: string;
+    is_nullable: boolean;
+}
+
+export interface TableInfo {
+    name: string;
+    columns: ColumnInfo[];
+}
+
+export interface TablesResponse {
+    tables: TableInfo[];
 } 

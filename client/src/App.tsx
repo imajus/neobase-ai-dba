@@ -10,6 +10,7 @@ import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
 import ConnectionModal from './components/modals/ConnectionModal';
+import SelectTablesModal from './components/modals/SelectTablesModal';
 import { StreamProvider, useStream } from './contexts/StreamContext';
 import { UserProvider, useUser } from './contexts/UserContext';
 import authService from './services/authService';
@@ -25,6 +26,7 @@ function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<Chat>();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -40,6 +42,7 @@ function AppContent() {
   const { user, setUser } = useUser();
   const [refreshSchemaController, setRefreshSchemaController] = useState<AbortController | null>(null);
   const [isSSEReconnecting, setIsSSEReconnecting] = useState(false);
+  const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
   // Check auth status on mount
   useEffect(() => {
     checkAuth();
@@ -173,6 +176,11 @@ function AppContent() {
       setChats(prev => [...prev, newChat]);
       setSuccessMessage('Connection added successfully!');
       setShowConnectionModal(false);
+      
+      // Set the newly created chat and show the select tables modal
+      setNewlyCreatedChat(newChat);
+      setShowSelectTablesModal(true);
+      
       return { success: true };
     } catch (error: any) {
       console.error('Failed to add connection:', error);
@@ -919,6 +927,71 @@ function AppContent() {
     }
   };
 
+  // Add function to handle updating selected collections
+  const handleUpdateSelectedCollections = async (chatId: string, selectedCollections: string): Promise<void> => {
+    try {
+      // Find the chat to check if selected_collections have changed
+      const chat = chats.find(c => c.id === chatId);
+      
+      // If the selected collections haven't changed, don't make the API call
+      if (chat && chat.selected_collections === selectedCollections) {
+        console.log('Selected collections unchanged, skipping API call');
+        
+        // Close the modal if this was a newly created chat
+        if (newlyCreatedChat && newlyCreatedChat.id === chatId) {
+          setShowSelectTablesModal(false);
+          setNewlyCreatedChat(null);
+          await handleSelectConnection(chatId);
+        }
+        
+        return;
+      }
+      
+      const loadingToast = toast.loading('Updating selected tables...', {
+        style: {
+          background: '#000',
+          color: '#fff',
+          borderRadius: '12px',
+          border: '4px solid #000',
+        },
+      });
+
+      // Update the selected collections
+      const updatedChat = await chatService.updateSelectedCollections(chatId, selectedCollections);
+      
+      // Update the chat in the local state
+      setChats(prev => prev.map(chat => 
+        chat.id === chatId ? { ...chat, selected_collections: selectedCollections } : chat
+      ));
+      
+      // If this is the selected connection, update it
+      if (selectedConnection?.id === chatId) {
+        setSelectedConnection(prev => prev ? { ...prev, selected_collections: selectedCollections } : prev);
+      }
+
+      toast.dismiss(loadingToast);
+      toast.success('Tables updated successfully', {
+        style: {
+          background: '#000',
+          color: '#fff',
+          borderRadius: '12px',
+        },
+      });
+
+      // Close the modal
+      setShowSelectTablesModal(false);
+      setNewlyCreatedChat(null);
+      
+      // If this was a newly created chat, select it
+      if (newlyCreatedChat && newlyCreatedChat.id === chatId) {
+        await handleSelectConnection(chatId);
+      }
+    } catch (error) {
+      console.error('Error updating selected collections:', error);
+      toast.error('Failed to update tables selection');
+    }
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center bg-white h-screen">Loading...</div>; // Or a proper loading component
   }
@@ -983,6 +1056,7 @@ function AppContent() {
           onCancelStream={handleCancelStream}
           onRefreshSchema={handleRefreshSchema}
           onCancelRefreshSchema={handleCancelRefreshSchema}
+          onUpdateSelectedCollections={(chatId, selectedCollections) => handleUpdateSelectedCollections(chatId, selectedCollections)}
         />
       ) : (
         <div className={`
@@ -1122,8 +1196,24 @@ function AppContent() {
         <ConnectionModal
           onClose={() => setShowConnectionModal(false)}
           onSubmit={handleAddConnection}
+          onUpdateSelectedCollections={handleUpdateSelectedCollections}
         />
       )}
+
+      {/* Add SelectTablesModal for newly created connections */}
+      {showSelectTablesModal && newlyCreatedChat && (
+        <SelectTablesModal
+          chat={newlyCreatedChat}
+          onClose={() => {
+            setShowSelectTablesModal(false);
+            setNewlyCreatedChat(null);
+            // Select the newly created chat
+            handleSelectConnection(newlyCreatedChat.id);
+          }}
+          onSave={(selectedCollections) => handleUpdateSelectedCollections(newlyCreatedChat.id, selectedCollections)}
+        />
+      )}
+
       <Toaster
         position="bottom-center"
         reverseOrder={false}
