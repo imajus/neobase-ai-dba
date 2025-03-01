@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -629,6 +630,24 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 		return fmt.Errorf("connection not found")
 	}
 
+	// Get selected collections from the chat service if available
+	var selectedTables []string
+	if m.streamHandler != nil {
+		// Try to get selected collections from the chat service
+		selectedCollections, err := m.streamHandler.GetSelectedCollections(chatID)
+		if err == nil && selectedCollections != "ALL" && selectedCollections != "" {
+			selectedTables = strings.Split(selectedCollections, ",")
+			log.Printf("DBManager -> doSchemaCheck -> Using selected collections for chat %s: %v", chatID, selectedTables)
+		} else {
+			// Default to ALL if there's an error or no specific collections
+			selectedTables = []string{"ALL"}
+			log.Printf("DBManager -> doSchemaCheck -> Using ALL tables for chat %s", chatID)
+		}
+	} else {
+		// Default to ALL if stream handler is not available
+		selectedTables = []string{"ALL"}
+	}
+
 	// Force clear any cached schema to ensure we get fresh data
 	m.schemaManager.ClearSchemaCache(chatID)
 
@@ -636,7 +655,8 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(ctx, chatID, conn, dbConn.Config.Type)
+	// Pass selectedTables instead of hardcoded "ALL"
+	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(ctx, chatID, conn, dbConn.Config.Type, selectedTables)
 	if err != nil {
 		return fmt.Errorf("schema check failed: %v", err)
 	}
@@ -945,4 +965,104 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	}
 
 	return nil
+}
+
+// FormatSchemaWithExamples formats the schema with example records for LLM
+func (m *Manager) FormatSchemaWithExamples(ctx context.Context, chatID string, selectedCollections []string) (string, error) {
+	log.Printf("DBManager -> FormatSchemaWithExamples -> Starting for chatID: %s with selected collections: %v", chatID, selectedCollections)
+
+	// Get connection with read lock to ensure thread safety
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		log.Printf("DBManager -> FormatSchemaWithExamples -> Connection not found for chatID: %s", chatID)
+		return "", fmt.Errorf("connection not found for chat ID: %s", chatID)
+	}
+
+	// Get database executor
+	db, err := m.GetConnection(chatID)
+	if err != nil {
+		log.Printf("DBManager -> FormatSchemaWithExamples -> Error getting executor: %v", err)
+		return "", fmt.Errorf("failed to get database executor: %v", err)
+	}
+
+	// Use schema manager to format schema with examples and selected collections
+	formattedSchema, err := m.schemaManager.FormatSchemaWithExamplesAndCollections(ctx, chatID, db, conn.Config.Type, selectedCollections)
+	if err != nil {
+		log.Printf("DBManager -> FormatSchemaWithExamples -> Error formatting schema: %v", err)
+		return "", fmt.Errorf("failed to format schema with examples: %v", err)
+	}
+
+	log.Printf("DBManager -> FormatSchemaWithExamples -> Successfully formatted schema for chatID: %s", chatID)
+	return formattedSchema, nil
+}
+
+// GetSchemaWithExamples gets the schema with example records
+func (m *Manager) GetSchemaWithExamples(ctx context.Context, chatID string, selectedCollections []string) (*SchemaStorage, error) {
+	log.Printf("DBManager -> GetSchemaWithExamples -> Starting for chatID: %s with selected collections: %v", chatID, selectedCollections)
+
+	// Get connection with read lock to ensure thread safety
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		log.Printf("DBManager -> GetSchemaWithExamples -> Connection not found for chatID: %s", chatID)
+		return nil, fmt.Errorf("connection not found for chat ID: %s", chatID)
+	}
+
+	// Get database executor
+	db, err := m.GetConnection(chatID)
+	if err != nil {
+		log.Printf("DBManager -> GetSchemaWithExamples -> Error getting executor: %v", err)
+		return nil, fmt.Errorf("failed to get database executor: %v", err)
+	}
+
+	// Use schema manager to get schema with examples
+	storage, err := m.schemaManager.GetSchemaWithExamples(ctx, chatID, db, conn.Config.Type, selectedCollections)
+	if err != nil {
+		log.Printf("DBManager -> GetSchemaWithExamples -> Error getting schema: %v", err)
+		return nil, fmt.Errorf("failed to get schema with examples: %v", err)
+	}
+
+	log.Printf("DBManager -> GetSchemaWithExamples -> Successfully retrieved schema for chatID: %s", chatID)
+	return storage, nil
+}
+
+// RefreshSchemaWithExamples refreshes the schema and returns it with example records
+func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, selectedCollections []string) (string, error) {
+	log.Printf("DBManager -> RefreshSchemaWithExamples -> Starting for chatID: %s with selected collections: %v", chatID, selectedCollections)
+
+	// Get connection with read lock to ensure thread safety
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	if !exists {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Connection not found for chatID: %s", chatID)
+		return "", fmt.Errorf("connection not found for chat ID: %s", chatID)
+	}
+
+	// Get database executor
+	db, err := m.GetConnection(chatID)
+	if err != nil {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error getting executor: %v", err)
+		return "", fmt.Errorf("failed to get database executor: %v", err)
+	}
+
+	// Clear schema cache to force refresh
+	m.schemaManager.ClearSchemaCache(chatID)
+	log.Printf("DBManager -> RefreshSchemaWithExamples -> Cleared schema cache for chatID: %s", chatID)
+
+	// Format schema with examples and selected collections
+	formattedSchema, err := m.schemaManager.FormatSchemaWithExamplesAndCollections(ctx, chatID, db, conn.Config.Type, selectedCollections)
+	if err != nil {
+		log.Printf("DBManager -> RefreshSchemaWithExamples -> Error formatting schema: %v", err)
+		return "", fmt.Errorf("failed to format schema with examples: %v", err)
+	}
+
+	log.Printf("DBManager -> RefreshSchemaWithExamples -> Successfully refreshed schema for chatID: %s", chatID)
+	return formattedSchema, nil
 }

@@ -313,3 +313,29 @@ func (f *PostgresSchemaFetcher) GetTableChecksum(ctx context.Context, table stri
 	// Calculate checksum
 	return fmt.Sprintf("%x", md5.Sum([]byte(fullDefinition))), nil
 }
+
+// Add FetchExampleRecords method to PostgresSchemaFetcher
+func (f *PostgresSchemaFetcher) FetchExampleRecords(ctx context.Context, db DBExecutor, table string, limit int) ([]map[string]interface{}, error) {
+	// Ensure limit is reasonable
+	if limit <= 0 {
+		limit = 3 // Default to 3 records
+	} else if limit > 10 {
+		limit = 10 // Cap at 10 records to avoid large data transfers
+	}
+
+	// Build a simple query to fetch example records
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", table, limit)
+
+	var records []map[string]interface{}
+	err := db.QueryRows(query, &records)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+	}
+
+	// If no records found, return empty slice
+	if len(records) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	return records, nil
+}

@@ -24,18 +24,38 @@ type CreateChatRequest struct {
 }
 
 type UpdateChatRequest struct {
-	Connection CreateConnectionRequest `json:"connection" binding:"required"`
+	Connection          CreateConnectionRequest `json:"connection" binding:"required"`
+	SelectedCollections string                  `json:"selected_collections"` // "ALL" or comma-separated table names
 }
 
 type ChatResponse struct {
-	ID         string             `json:"id"`
-	UserID     string             `json:"user_id"`
-	Connection ConnectionResponse `json:"connection"`
-	CreatedAt  string             `json:"created_at"`
-	UpdatedAt  string             `json:"updated_at"`
+	ID                  string             `json:"id"`
+	UserID              string             `json:"user_id"`
+	Connection          ConnectionResponse `json:"connection"`
+	SelectedCollections string             `json:"selected_collections"`
+	CreatedAt           string             `json:"created_at"`
+	UpdatedAt           string             `json:"updated_at"`
 }
 
 type ChatListResponse struct {
 	Chats []ChatResponse `json:"chats"`
 	Total int64          `json:"total"`
+}
+
+// TableInfo represents a table with its columns
+type TableInfo struct {
+	Name    string       `json:"name"`
+	Columns []ColumnInfo `json:"columns"`
+}
+
+// ColumnInfo represents a column in a table
+type ColumnInfo struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	IsNullable bool   `json:"is_nullable"`
+}
+
+// TablesResponse represents the response for the get tables API
+type TablesResponse struct {
+	Tables []TableInfo `json:"tables"`
 }

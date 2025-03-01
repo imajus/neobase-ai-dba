@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -15,6 +16,7 @@ type DBExecutor interface {
 	Raw(sql string, values ...interface{}) error
 	Exec(sql string, values ...interface{}) error
 	Query(sql string, dest interface{}, values ...interface{}) error
+	QueryRows(sql string, dest *[]map[string]interface{}, values ...interface{}) error
 	Close() error
 	GetDB() *sql.DB
 	GetSchema(ctx context.Context) (*SchemaInfo, error)
@@ -63,26 +65,10 @@ func (w *PostgresWrapper) GetDB() *sql.DB {
 
 // GetSchema fetches the current database schema
 func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
+	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
 		log.Printf("PostgresWrapper -> GetSchema -> Context cancelled: %v", err)
 		return nil, err
-	}
-	if err := w.updateUsage(); err != nil {
-		return nil, fmt.Errorf("failed to update usage: %v", err)
-	}
-
-	sqlDB, err := w.db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get SQL DB: %v", err)
-	}
-
-	// Set a reasonable timeout for the connection
-	if err := sqlDB.PingContext(ctx); err != nil {
-		if errors.Is(err, context.Canceled) {
-			log.Printf("Database ping cancelled by context")
-			return nil, err
-		}
-		return nil, fmt.Errorf("failed to ping database: %v", err)
 	}
 
 	driver, exists := w.manager.drivers["postgresql"]
@@ -95,7 +81,26 @@ func (w *PostgresWrapper) GetSchema(ctx context.Context) (*SchemaInfo, error) {
 	}
 
 	if fetcher, ok := driver.(SchemaFetcher); ok {
-		schema, err := fetcher.GetSchema(ctx, w)
+		// Get selected collections from the chat service if available
+		var selectedTables []string
+		if w.manager.streamHandler != nil {
+			// Try to get selected collections from the chat service
+			selectedCollections, err := w.manager.streamHandler.GetSelectedCollections(w.chatID)
+			if err == nil && selectedCollections != "ALL" && selectedCollections != "" {
+				selectedTables = strings.Split(selectedCollections, ",")
+				log.Printf("PostgresWrapper -> GetSchema -> Using selected collections for chat %s: %v", w.chatID, selectedTables)
+			} else {
+				// Default to ALL if there's an error or no specific collections
+				selectedTables = []string{"ALL"}
+				log.Printf("PostgresWrapper -> GetSchema -> Using ALL tables for chat %s", w.chatID)
+			}
+		} else {
+			// Default to ALL if stream handler is not available
+			selectedTables = []string{"ALL"}
+		}
+
+		// Pass the selected tables to get the schema
+		schema, err := fetcher.GetSchema(ctx, w, selectedTables)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				log.Printf("Schema fetch cancelled by context")
@@ -153,6 +158,14 @@ func (w *PostgresWrapper) Exec(sql string, values ...interface{}) error {
 
 // Query executes a SQL query and scans the result into dest
 func (w *PostgresWrapper) Query(sql string, dest interface{}, values ...interface{}) error {
+	if err := w.updateUsage(); err != nil {
+		return fmt.Errorf("failed to update usage: %v", err)
+	}
+	return w.db.Raw(sql, values...).Scan(dest).Error
+}
+
+// QueryRows executes a SQL query and scans the result into dest
+func (w *PostgresWrapper) QueryRows(sql string, dest *[]map[string]interface{}, values ...interface{}) error {
 	if err := w.updateUsage(); err != nil {
 		return fmt.Errorf("failed to update usage: %v", err)
 	}

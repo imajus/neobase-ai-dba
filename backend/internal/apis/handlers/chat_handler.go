@@ -708,3 +708,24 @@ func (h *ChatHandler) EditQuery(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+// GetTables retrieves all tables with their columns for a specific chat
+func (h *ChatHandler) GetTables(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	response, statusCode, err := h.chatService.GetTables(c.Request.Context(), userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}

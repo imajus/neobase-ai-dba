@@ -57,6 +57,7 @@ type SSEEvent struct {
 type StreamHandler interface {
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 	HandleSchemaChange(userID, chatID, streamID string, diff *SchemaDiff)
+	GetSelectedCollections(chatID string) (string, error)
 }
 
 // QueryExecutionResult represents the result of a query execution
