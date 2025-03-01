@@ -18,22 +18,22 @@ const VideoSection = () => {
   };
 
   return (
-    <section className="py-32 md:py-36 lg:py-36 relative overflow-hidden bg-[#FFDB58]/5">
+    <section className="py-16 sm:py-16 md:py-24 lg:py-36 relative overflow-hidden bg-[#FFDB58]/5 mb-16 sm:mb-24 md:mb-32 lg:mb-36">
       <FloatingBackground count={15} opacity={0.03} />
-      <div className="container mx-auto px-6 md:px-8 relative">
-        <h2 className="text-4xl md:text-5xl lg:text-5xl font-bold text-center mb-20">
+      <div className="container mx-auto px-2 sm:px-6 md:px-8 relative">
+        <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-center mb-6 sm:mb-10 md:mb-16">
           See NeoBase in <span className="text-yellow-500">Action</span>
         </h2>
         
         <div className="relative">
           {/* Video Container */}
           <div className="max-w-5xl mx-auto relative z-10">
-            <div className="neo-border bg-white p-4 hover:shadow-xl transition-all duration-300" style={{ transform: 'rotate(-1deg)' }}>
+            <div className="neo-border bg-white p-1 sm:p-2 md:p-4 hover:shadow-xl transition-all duration-300" style={{ transform: 'rotate(-0.5deg)' }}>
               {/* Video */}
-              <div className="relative overflow-hidden neo-border" style={{ minHeight: '560px' }}>
+              <div className="relative overflow-hidden neo-border min-h-[350px] sm:min-h-[350px] md:min-h-[450px] lg:min-h-[560px]">
                 <video 
                   ref={videoRef}
-                  className="w-full h-auto"
+                  className="w-full h-full object-cover absolute inset-0"
                   poster="/video-poster.png"
                 >
                   <source src="/demo.mp4" type="video/mp4" />
@@ -43,13 +43,13 @@ const VideoSection = () => {
                 {/* Play/Pause Button */}
                 <button 
                   onClick={togglePlayPause}
-                  className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#FFDB58] hover:bg-[#FFDB58]/90 text-black neo-border rounded-full p-6 transition-all"
+                  className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#FFDB58] hover:bg-[#FFDB58]/90 text-black neo-border rounded-full p-4 sm:p-5 md:p-6 transition-all"
                   aria-label={isPlaying ? "Pause video" : "Play video"}
                 >
                   {isPlaying ? (
-                    <Pause className="w-10 h-10" />
+                    <Pause className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10" />
                   ) : (
-                    <Play className="w-10 h-10 ml-1" />
+                    <Play className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 ml-0.5 sm:ml-1" />
                   )}
                 </button>
               </div>
@@ -65,21 +65,21 @@ const VideoSection = () => {
                 <path d="M120 50 L0 50" stroke="black" strokeWidth="6" fill="none" strokeLinecap="round"/>
                 <polygon points="0,50 25,35 25,65" fill="black"/>
               </svg>
-              <div className="neo-border bg-[#FFDB58] px-6 py-3 font-bold text-xl text-center ml-6 whitespace-nowrap">
+              <div className="neo-border bg-[#FFDB58] px-4 sm:px-6 py-2 sm:py-3 font-bold text-lg md:text-xl text-center ml-4 sm:ml-6 whitespace-nowrap">
                 Visualize & Export Results
               </div>
             </div>
           </div>
           
           {/* Bottom Feature */}
-          <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-[60%] z-0 hidden md:block">
+          <div className=" absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-[60%] z-0 hidden md:block md:mb-4">
             <div className="flex flex-col items-center">
               <svg width="100" height="120" viewBox="0 0 100 120" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M50 120 L50 0" stroke="black" strokeWidth="6" fill="none" strokeLinecap="round"/>
                 <polygon points="50,0 35,25 65,25" fill="black"/>
               </svg>
-              <div className="neo-border bg-[#FFDB58] px-6 py-3 font-bold text-xl text-center mt-6 whitespace-nowrap">
-              Talk to Your Database Naturally
+              <div className="neo-border bg-[#FFDB58] px-4 sm:px-6 py-2 sm:py-3 font-bold text-lg md:text-xl text-center mt-4 sm:mt-6 whitespace-nowrap">
+                Talk to Your Database Naturally
               </div>
             </div>
           </div>
@@ -87,7 +87,7 @@ const VideoSection = () => {
           {/* Left Feature */}
           <div className="absolute left-0 top-1/2 transform -translate-x-[20%] -translate-y-1/2 z-0 hidden md:block">
             <div className="flex items-center">
-              <div className="neo-border bg-[#FFDB58] px-6 py-3 font-bold text-xl text-center mr-6 whitespace-nowrap">
+              <div className="neo-border bg-[#FFDB58] px-4 sm:px-6 py-2 sm:py-3 font-bold text-lg md:text-xl text-center mr-4 sm:mr-6 whitespace-nowrap">
                 AI-Driven Operations
               </div>
               <svg width="120" height="100" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -98,15 +98,15 @@ const VideoSection = () => {
           </div>
           
           {/* Mobile Features (simplified) */}
-          <div className="md:hidden space-y-6 mt-12">
-            <div className="neo-border bg-[#FFDB58] px-6 py-3 font-bold text-lg text-center">
+          <div className="md:hidden space-y-3 mt-6 sm:mt-8">
+            <div className="neo-border bg-[#FFDB58] px-4 py-2 sm:py-3 font-bold text-base sm:text-lg text-center mx-2 sm:mx-4">
               AI-Driven Operations
             </div>
-            <div className="neo-border bg-[#FFDB58] px-6 py-3 font-bold text-lg text-center">
+            <div className="neo-border bg-[#FFDB58] px-4 py-2 sm:py-3 font-bold text-base sm:text-lg text-center mx-2 sm:mx-4">
               Visualize & Export Results
             </div>
-            <div className="neo-border bg-[#FFDB58] px-6 py-3 font-bold text-lg text-center">
-            Talk to Your Database Naturally
+            <div className="neo-border bg-[#FFDB58] px-4 py-2 sm:py-3 font-bold text-base sm:text-lg text-center mx-2 sm:mx-4">
+              Talk to Your Database Naturally
             </div>
           </div>
         </div>

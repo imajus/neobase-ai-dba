@@ -5,88 +5,94 @@ import FloatingBackground from './FloatingBackground';
 const CompactFeaturesSection: React.FC = () => {
   const features = [
     {
-      icon: <MessageSquare className="w-8 h-8" />,
+      icon: <MessageSquare className="w-6 h-6 md:w-8 md:h-8" />,
       title: "AI-Powered Conversations",
       description: "Ask questions, get answers, and manage your database with natural language.",
       width: "md:col-span-2 lg:col-span-2",
       transform: "rotate(-1deg)",
-      importance: "primary"
+      importance: "primary",
+      bgColor: "bg-[#FFDB58]/20"
     },
     {
-      icon: <Database className="w-6 h-6" />,
+      icon: <Database className="w-5 h-5 md:w-6 md:h-6" />,
       title: "Multi-Database Support",
       description: "Connect to PostgreSQL, YugabyteDB, MySQL, MongoDB, Redis, Neo4j and more.",
       width: "md:col-span-1 lg:col-span-1",
       transform: "rotate(1deg)",
-      importance: "secondary"
+      importance: "secondary",
+      bgColor: "bg-blue-100/50"
     },
     {
-      icon: <Zap className="w-7 h-7" />,
+      icon: <Zap className="w-5 h-5 md:w-7 md:h-7" />,
       title: "Query Optimization & Suggestions",
       description: "Get AI-driven suggestions to improve database performance.",
       width: "md:col-span-1 lg:col-span-1",
       transform: "rotate(-0.5deg)",
-      importance: "secondary"
+      importance: "secondary",
+      bgColor: "bg-green-100/50"
     },
     {
-      icon: <Shield className="w-8 h-8" />,
+      icon: <Shield className="w-6 h-6 md:w-8 md:h-8" />,
       title: "Self-Hosted & Open Source",
       description: "NeoBase gives you the ultimate control. Choose the LLM client of your choice & deploy on your own infrastructure. No data leaves your infrastructure unless you want it to.",
       width: "md:col-span-2 lg:col-span-2",
       transform: "rotate(0.7deg)",
-      importance: "secondary"
+      importance: "secondary",
+      bgColor: "bg-purple-100/50"
     },
     {
-      icon: <Server className="w-6 h-6" />,
+      icon: <Server className="w-5 h-5 md:w-6 md:h-6" />,
       title: "Query Execution & Transaction Management",
       description: "Execute queries, rollback if needed, and visualize large volumes of data with ease.",
       width: "md:col-span-2 lg:col-span-2",
       transform: "rotate(-0.8deg)",
-      importance: "primary"
+      importance: "primary",
+      bgColor: "bg-orange-100/50"
     },
     {
-      icon: <Boxes className="w-6 h-6" />,
+      icon: <Boxes className="w-5 h-5 md:w-6 md:h-6" />,
       title: "Smart Schema Management",
       description: "NeoBase manages your database schema for you, while giving you the flexibility to control it.",
       width: "md:col-span-1 lg:col-span-1",
       transform: "rotate(0.5deg)",
-      importance: "secondary"
+      importance: "secondary",
+      bgColor: "bg-red-100/50"
     }
   ];
 
   return (
-    <section id="features" className="py-20 md:py-24 bg-[#FFDB58]/5 relative overflow-hidden">
+    <section id="features" className="py-12 sm:py-16 md:py-20 lg:py-24 bg-[#FFDB58]/5 relative overflow-hidden">
       <FloatingBackground count={10} opacity={0.03} />
       
-      <div className="container mx-auto px-6 md:px-8 max-w-7xl">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">
+      <div className="container mx-auto px-4 sm:px-6 md:px-8 max-w-7xl">
+        <div className="text-center mb-8 md:mb-12">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
             <span className="text-yellow-500">Features</span> Your Data deserves
           </h2>
-          <p className="text-lg text-gray-700 max-w-3xl mx-auto">
+          <p className="text-base sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
             NeoBase makes database management simple and intuitive with these powerful features.
           </p>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-6 md:gap-8 lg:gap-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-5 md:gap-6 lg:gap-8">
           {features.map((feature, index) => (
             <div 
               key={index} 
-              className={`neo-border bg-white p-5 hover:shadow-lg transition-all duration-300 ${feature.width}`}
+              className={`neo-border bg-white p-3 sm:p-4 md:p-5 hover:shadow-lg transition-all duration-300 ${feature.width}`}
               style={{ 
                 transform: feature.transform,
                 zIndex: feature.importance === "primary" ? 10 : feature.importance === "secondary" ? 5 : 1
               }}
             >
               <div className={`flex ${feature.importance === "primary" ? "flex-col items-start" : "items-start"}`}>
-                <div className={`bg-[#FFDB58]/20 p-3 rounded-lg ${feature.importance === "primary" ? "mb-4" : "mr-4"} ${index % 2 === 0 ? 'self-start' : 'self-center'}`}>
+                <div className={`${feature.bgColor} p-2 sm:p-3 rounded-lg ${feature.importance === "primary" ? "mb-3 md:mb-4" : "mr-3 md:mr-4"} ${index % 2 === 0 ? 'self-start' : 'self-center'}`}>
                   {feature.icon}
                 </div>
                 <div>
-                  <h3 className={`font-bold mb-2 ${feature.importance === "primary" ? "text-xl" : feature.importance === "secondary" ? "text-lg" : "text-base"}`}>
+                  <h3 className={`font-bold mb-1 sm:mb-2 ${feature.importance === "primary" ? "text-lg sm:text-xl" : feature.importance === "secondary" ? "text-base sm:text-lg" : "text-sm sm:text-base"}`}>
                     {feature.title}
                   </h3>
-                  <p className={`text-gray-600 ${feature.importance === "primary" ? "text-base" : "text-sm"}`}>
+                  <p className={`text-gray-600 ${feature.importance === "primary" ? "text-sm sm:text-base" : "text-xs sm:text-sm"}`}>
                     {feature.description}
                   </p>
                 </div>
@@ -95,14 +101,14 @@ const CompactFeaturesSection: React.FC = () => {
           ))}
         </div>
         
-        <div className="mt-16 text-center">
+        <div className="mt-8 sm:mt-12 md:mt-16 text-center">
           <a 
             href="https://github.com/bhaskarblur/neobase-ai-dba" 
             target="_blank" 
             rel="noopener noreferrer" 
-            className="neo-button inline-flex items-center justify-center gap-2 py-3 px-8 text-lg"
+            className="neo-button inline-flex items-center justify-center gap-2 py-2 px-6 sm:py-3 sm:px-8 text-base sm:text-lg"
           >
-            <span className="flex items-center gap-4"><Rocket className="w-5 h-5" /> Try NeoBase</span>
+            <span className="flex items-center gap-2 sm:gap-4"><Rocket className="w-4 h-4 sm:w-5 sm:h-5" /> Try NeoBase</span>
           </a>
         </div>
       </div>

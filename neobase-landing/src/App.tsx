@@ -11,7 +11,7 @@ function App() {
   return (
     <div className="min-h-screen bg-[#FFDB58]/10 overflow-hidden">
       <Navbar />
-      <main>
+      <main className="flex flex-col space-y-8 md:space-y-0">
         <HeroSection />
         <VideoSection />
         <SupportedTechnologiesSection />
