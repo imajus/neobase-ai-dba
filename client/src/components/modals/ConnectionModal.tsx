@@ -40,12 +40,12 @@ export default function ConnectionModal({
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
-  const [autoExecuteQuery, setAutoExecuteQuery] = useState(initialData?.auto_execute_query || false);
+  const [autoExecuteQuery, setAutoExecuteQuery] = useState<boolean>(initialData?.auto_execute_query || true);
 
   // Update autoExecuteQuery when initialData changes
   useEffect(() => {
     if (initialData) {
-      setAutoExecuteQuery(initialData.auto_execute_query || false);
+      setAutoExecuteQuery(initialData.auto_execute_query || true);
     }
   }, [initialData]);
 
@@ -443,7 +443,7 @@ DATABASE_PASSWORD=your_password`}
               <div className="flex items-center justify-between">
                 <div>
                   <label className="block font-bold mb-1 text-lg">Auto Fetch Results</label>
-                  <p className="text-gray-600 text-sm">Automatically fetches results from the database upon a user request. However, the critical queries still need to be executed manually.</p>
+                  <p className="text-gray-600 text-sm">Automatically fetches results from the database upon a user request. However, the critical queries still need to be executed manually by the user.</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input 
