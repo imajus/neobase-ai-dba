@@ -43,6 +43,12 @@ function AppContent() {
   const [refreshSchemaController, setRefreshSchemaController] = useState<AbortController | null>(null);
   const [isSSEReconnecting, setIsSSEReconnecting] = useState(false);
   const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
+  
+  // Debug useEffect for isSSEReconnecting state changes
+  useEffect(() => {
+    console.log('isSSEReconnecting state changed to:', isSSEReconnecting);
+  }, [isSSEReconnecting]);
+  
   // Check auth status on mount
   useEffect(() => {
     checkAuth();
@@ -75,6 +81,7 @@ function AppContent() {
     duration: 4000,
     icon: '⚠️',
   };
+
 
   const checkAuth = async () => {
     try {
@@ -170,9 +177,9 @@ function AppContent() {
     }
   };
 
-  const handleAddConnection = async (connection: Connection): Promise<{ success: boolean, error?: string }> => {
+  const handleAddConnection = async (connection: Connection, autoExecuteQuery: boolean = false): Promise<{ success: boolean, error?: string }> => {
     try {
-      const newChat = await chatService.createChat(connection);
+      const newChat = await chatService.createChat(connection, autoExecuteQuery);
       setChats(prev => [...prev, newChat]);
       setSuccessMessage('Connection added successfully!');
       setShowConnectionModal(false);
@@ -275,7 +282,7 @@ function AppContent() {
     }
   };
 
-  const handleEditConnection = async (id: string, data: Connection): Promise<{ success: boolean; error?: string }> => {
+  const handleEditConnection = async (id: string, data: Connection, autoExecuteQuery: boolean): Promise<{ success: boolean; error?: string }> => {
     const loadingToast = toast.loading('Updating connection...', {
       style: {
         background: '#000',
@@ -287,11 +294,16 @@ function AppContent() {
 
     try {
       // Update the connection
-      const response = await chatService.editChat(id, data);
+      const response = await chatService.editChat(id, data, autoExecuteQuery);
 
       console.log("handleEditConnection response", response);
       if (response) {
-
+        // Only disconnect & reconnect if any properties from the connection are changed
+        if (selectedConnection?.connection.type !== data.type ||
+            selectedConnection?.connection.host !== data.host ||
+            selectedConnection?.connection.port !== data.port ||
+            selectedConnection?.connection.username !== data.username ||
+            selectedConnection?.connection.database !== data.database) {
         // First disconnect the current connection
         await axios.post(
           `${import.meta.env.VITE_API_URL}/chats/${id}/disconnect`,
@@ -305,16 +317,6 @@ function AppContent() {
             }
           }
         );
-        // Update local state
-        setChats(prev => prev.map(chat => {
-          if (chat.id === id) {
-            return {
-              ...chat,
-              connection: data
-            };
-          }
-          return chat;
-        }));
 
         // Reconnect with new connection details
         await axios.post(
@@ -329,7 +331,23 @@ function AppContent() {
             }
           }
         );
+      }
+              // Update local state
+              setChats(prev => prev.map(chat => {
+                if (chat.id === id) {
+                  return {
+                    ...chat,
+                    connection: data,
+                    auto_execute_query: autoExecuteQuery
+                  };
+                }
+                return chat;
+              }));
 
+        // Update the selected connection if it's the one being edited
+        if (selectedConnection?.id === id) {
+          setSelectedConnection(chats.find(c => c.id === id));
+        }
         // Update connection status
         handleConnectionStatusChange(id, true, 'edit-connection');
 
@@ -449,6 +467,11 @@ function AppContent() {
       sse.onopen = () => {
         console.log('SSE connection opened successfully');
         setIsSSEReconnecting(true);
+        // The console.log below will still show the old value because setState is asynchronous
+        // Use a timeout to allow the state to update before checking
+        setTimeout(() => {
+          console.log('SSE connection opened successfully -> isSSEReconnecting (after update)', true);
+        }, 0);
       };
 
       sse.onmessage = (event) => {
@@ -473,8 +496,6 @@ function AppContent() {
           console.log('SSE connection error -> isSSEReconnecting', isSSEReconnecting);
           // If false, that means the connection was not tried to be reconnected by SSE-open
           if (!isSSEReconnecting) {
-            setIsSSEReconnecting(false);
-
             handleConnectionStatusChange(chatId, false, 'sse-error');
             // Don't close the connection on every error
             if (sse.readyState === EventSource.CLOSED) {
@@ -485,7 +506,7 @@ function AppContent() {
             console.log('SSE connection error -> isSSEReconnecting is true, making it false');
             setIsSSEReconnecting(false);
           }
-        }, 2000);
+        }, 100); // Increase timeout to ensure state has updated
       };
 
       setEventSource(sse);
@@ -1003,6 +1024,27 @@ function AppContent() {
     }
   };
 
+  const handleUpdateAutoExecuteQuery = async (chatId: string, autoExecuteQuery: boolean): Promise<void> => {
+    try {
+      const updatedChat = await chatService.updateAutoExecuteQuery(chatId, autoExecuteQuery);
+      
+      // Update the chat in the state
+      setChats(prev => prev.map(chat => 
+        updatedChat.id === chatId ? { ...chat, auto_execute_query: autoExecuteQuery } : chat
+      ));
+      
+      // If this is the selected connection, update it too
+      if (selectedConnection?.id === chatId) {
+        setSelectedConnection(prev => prev ? { ...prev, auto_execute_query: autoExecuteQuery } : prev);
+      }
+      
+      toast.success('Auto execute query setting updated!', toastStyle);
+    } catch (error: any) {
+      console.error('Failed to update auto execute query setting:', error);
+      toast.error(error.message, errorToast);
+    }
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center bg-white h-screen">Loading...</div>; // Or a proper loading component
   }
@@ -1208,6 +1250,30 @@ function AppContent() {
           onClose={() => setShowConnectionModal(false)}
           onSubmit={handleAddConnection}
           onUpdateSelectedCollections={handleUpdateSelectedCollections}
+          onUpdateAutoExecuteQuery={handleUpdateAutoExecuteQuery}
+          initialData={selectedConnection}
+          onEdit={async (connection) => {
+            try {
+              const updatedChat = await chatService.editChat(selectedConnection!.id, connection);
+              
+              // Update the chat in the state
+              setChats(prev => prev.map(chat => 
+                chat.id === updatedChat.id ? { ...updatedChat } : chat
+              ));
+
+              // Update the selected connection if it's the one being edited
+              if (selectedConnection?.id === updatedChat.id) {
+                setSelectedConnection(updatedChat);
+              }
+              
+              toast.success('Connection updated successfully!', toastStyle);
+              return { success: true };
+            } catch (error: any) {
+              console.error('Failed to update connection:', error);
+              toast.error(error.message, errorToast);
+              return { success: false, error: error.message };
+            }
+          }}
         />
       )}
 

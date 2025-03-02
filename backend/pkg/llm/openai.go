@@ -65,7 +65,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 		Content: systemPrompt,
 	})
 
-	log.Printf("OPENAI -> GenerateResponse -> messages: %v", messages)
+	// log.Printf("OPENAI -> GenerateResponse -> messages: %v", messages)
 
 	for _, msg := range messages {
 		content := ""

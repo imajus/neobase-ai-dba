@@ -33,7 +33,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Use EXPLAIN-friendly syntax for PostgreSQL.  
    - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
    - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
-   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
@@ -55,7 +55,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
        “tables”: “users,orders”,
@@ -99,7 +99,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Use EXPLAIN-friendly syntax for YugabyteDB.
    - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
    - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
-   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
    - Respond strictly in JSON matching the schema below.  
@@ -121,7 +121,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
        “tables”: “users,orders”,
@@ -178,7 +178,7 @@ const OpenAIPostgresLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
                            }
                        }
                    },
@@ -267,7 +267,7 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original SELECT query with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
                            }
                        }
                    },

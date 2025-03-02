@@ -34,7 +34,7 @@ type ChatService interface {
 	GetByID(userID, chatID string) (*dtos.ChatResponse, uint32, error)
 	List(userID string, page, pageSize int) (*dtos.ChatListResponse, uint32, error)
 	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error)
-	UpdateMessage(userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
+	UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
 	SetStreamHandler(handler StreamHandler)
@@ -122,7 +122,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	}
 
 	// Create chat with connection
-	chat := models.NewChat(userObjID, connection)
+	chat := models.NewChat(userObjID, connection, req.AutoExecuteQuery)
 	if err := s.chatRepo.Create(chat); err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
@@ -184,6 +184,12 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			}
 		}
 	}
+
+	if req.AutoExecuteQuery != nil {
+		log.Printf("ChatService -> Update -> AutoExecuteQuery: %v", *req.AutoExecuteQuery)
+		chat.AutoExecuteQuery = *req.AutoExecuteQuery
+	}
+
 	// Store the old selected collections value to check for changes
 	oldSelectedCollections := chat.SelectedCollections
 	// Flag to track if selected collections changed
@@ -322,7 +328,6 @@ const (
 	MessageTypeSystem    MessageType = "system"
 )
 
-// Update CreateMessage to use a separate context for LLM processing
 func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error) {
 	// Validate chat exists and user has access
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
@@ -371,9 +376,17 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to save LLM message: %v", err)
 	}
 
-	// Start processing the message asynchronously
-	if err := s.ProcessMessage(ctx, userID, chatID, streamID); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.AutoExecuteQuery)
+	// If auto execute query is true, we need to process LLM response & run query automatically
+	if chat.AutoExecuteQuery {
+		if err := s.ProcessLLMResponseAndRunQuery(ctx, userID, chatID, msg.ID.Hex(), streamID); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+		}
+	} else {
+		// Start processing the message asynchronously
+		if err := s.ProcessMessage(ctx, userID, chatID, streamID); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+		}
 	}
 
 	// Return the actual message ID
@@ -386,8 +399,8 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	}, http.StatusOK, nil
 }
 
-// Update processLLMResponse to handle the new context
-func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, streamID string) {
+// processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
+func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, streamID string, synchronous bool, allowSSEUpdates bool) (*dtos.MessageResponse, error) {
 	log.Printf("processLLMResponse -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
 	// Create cancellable context from the background context
@@ -397,13 +410,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		s.handleError(ctx, chatID, err)
-		return
+		return nil, err
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		s.handleError(ctx, chatID, err)
-		return
+		return nil, err
 	}
 
 	// Store cancel function
@@ -418,34 +431,38 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		s.processesMu.Unlock()
 	}()
 
-	// Send initial processing message
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "ai-response-step",
-		Data:  "NeoBase is analyzing your request..",
-	})
+	if !synchronous || allowSSEUpdates {
+		// Send initial processing message
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response-step",
+			Data:  "NeoBase is analyzing your request..",
+		})
+	}
 
 	// Get connection info
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
 	if !exists {
 		s.handleError(ctx, chatID, fmt.Errorf("connection info not found"))
-		return
+		return nil, fmt.Errorf("connection info not found")
 	}
 
 	// Fetch all the messages from the LLM
 	messages, err := s.llmRepo.GetByChatID(chatObjID)
 	if err != nil {
 		s.handleError(ctx, chatID, err)
-		return
+		return nil, err
 	}
 
 	// Helper function to check cancellation
 	checkCancellation := func() bool {
 		select {
 		case <-ctx.Done():
-			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-				Event: "response-cancelled",
-				Data:  "Operation cancelled by user",
-			})
+			if !synchronous || allowSSEUpdates {
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "response-cancelled",
+					Data:  "Operation cancelled by user",
+				})
+			}
 			return true
 		default:
 			return false
@@ -454,44 +471,50 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 
 	// Check cancellation before expensive operations
 	if checkCancellation() {
-		return
+		return nil, fmt.Errorf("operation cancelled")
 	}
 
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "ai-response-step",
-		Data:  "Fetching relevant data points & structure for the query..",
-	})
+	if !synchronous || allowSSEUpdates {
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response-step",
+			Data:  "Fetching relevant data points & structure for the query..",
+		})
 
-	// Send initial processing message
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "ai-response-step",
-		Data:  "Generating an optimized query & example results for the request..",
-	})
+		// Send initial processing message
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response-step",
+			Data:  "Generating an optimized query & example results for the request..",
+		})
+	}
 	if checkCancellation() {
-		return
+		return nil, fmt.Errorf("operation cancelled")
 	}
 
 	// Generate LLM response
 	response, err := s.llmClient.GenerateResponse(ctx, messages, connInfo.Config.Type)
 	if err != nil {
-		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "ai-response-error",
-			Data:  map[string]string{"error": err.Error()},
-		})
-		return
+		if !synchronous || allowSSEUpdates {
+			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+				Event: "ai-response-error",
+				Data:  map[string]string{"error": err.Error()},
+			})
+		}
+		return nil, fmt.Errorf("failed to generate LLM response: %v", err)
 	}
 
 	log.Printf("processLLMResponse -> response: %s", response)
 
 	if checkCancellation() {
-		return
+		return nil, fmt.Errorf("operation cancelled")
 	}
 
 	// Send initial processing message
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "ai-response-step",
-		Data:  "Analyzing the criticality of the query & if roll back is possible..",
-	})
+	if !synchronous || allowSSEUpdates {
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response-step",
+			Data:  "Analyzing the criticality of the query & if roll back is possible..",
+		})
+	}
 
 	var jsonResponse map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
@@ -600,11 +623,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 	chatResponseMsg := models.NewMessage(userObjID, chatObjID, string(MessageTypeAssistant), assistantMessage, &queries)
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
 		log.Printf("processLLMResponse -> Error saving chat response message: %v", err)
-		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "error",
-			Data:  map[string]string{"error": err.Error()},
-		})
-		return
+		return nil, err
 	}
 
 	formattedJsonResponse := map[string]interface{}{
@@ -622,63 +641,35 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 		log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
 	}
 
-	// Send final response
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "ai-response",
-		Data: &dtos.MessageResponse{
-			ID:        chatResponseMsg.ID.Hex(),
-			ChatID:    chatResponseMsg.ChatID.Hex(),
-			Content:   chatResponseMsg.Content,
-			Queries:   dtos.ToQueryDto(chatResponseMsg.Queries),
-			Type:      chatResponseMsg.Type,
-			CreatedAt: chatResponseMsg.CreatedAt.Format(time.RFC3339),
-		},
-	})
-}
-
-// Rename formatSchemaUpdate to formatSchemaDiff and update its signature
-func (s *chatService) formatSchemaDiff(diff *dbmanager.SchemaDiff) string {
-	var msg strings.Builder
-	msg.WriteString("Database schema has been updated:\n")
-
-	if len(diff.AddedTables) > 0 {
-		msg.WriteString("\nNew tables:\n")
-		for _, t := range diff.AddedTables {
-			msg.WriteString("- " + t + "\n")
-		}
+	if !synchronous {
+		// Send final response
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response",
+			Data: &dtos.MessageResponse{
+				ID:        chatResponseMsg.ID.Hex(),
+				ChatID:    chatResponseMsg.ChatID.Hex(),
+				Content:   chatResponseMsg.Content,
+				Queries:   dtos.ToQueryDto(chatResponseMsg.Queries),
+				Type:      chatResponseMsg.Type,
+				CreatedAt: chatResponseMsg.CreatedAt.Format(time.RFC3339),
+			},
+		})
 	}
-
-	if len(diff.RemovedTables) > 0 {
-		msg.WriteString("\nRemoved tables:\n")
-		for _, t := range diff.RemovedTables {
-			msg.WriteString("- " + t + "\n")
-		}
-	}
-
-	if len(diff.ModifiedTables) > 0 {
-		msg.WriteString("\nModified tables:\n")
-		for table, changes := range diff.ModifiedTables {
-			msg.WriteString(fmt.Sprintf("- %s:\n", table))
-			if len(changes.AddedColumns) > 0 {
-				msg.WriteString("  Added columns: " + strings.Join(changes.AddedColumns, ", ") + "\n")
-			}
-			if len(changes.RemovedColumns) > 0 {
-				msg.WriteString("  Removed columns: " + strings.Join(changes.RemovedColumns, ", ") + "\n")
-			}
-			if len(changes.ModifiedColumns) > 0 {
-				msg.WriteString("  Modified columns: " + strings.Join(changes.ModifiedColumns, ", ") + "\n")
-			}
-		}
-	}
-
-	return msg.String()
+	return &dtos.MessageResponse{
+		ID:        chatResponseMsg.ID.Hex(),
+		ChatID:    chatResponseMsg.ChatID.Hex(),
+		Content:   chatResponseMsg.Content,
+		Queries:   dtos.ToQueryDto(chatResponseMsg.Queries),
+		Type:      chatResponseMsg.Type,
+		CreatedAt: chatResponseMsg.CreatedAt.Format(time.RFC3339),
+	}, nil
 }
 
 func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
 }
 
-func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error) {
+func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error) {
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
@@ -707,6 +698,11 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 		return nil, http.StatusBadRequest, fmt.Errorf("message does not belong to chat")
 	}
 
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+
 	log.Printf("UpdateMessage -> content: %+v", req.Content)
 	// Update message content, This is a user message
 	message.Content = req.Content
@@ -732,9 +728,16 @@ func (s *chatService) UpdateMessage(userID, chatID, messageID string, streamID s
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update LLM message: %v", err)
 	}
 
-	// Start processing the message asynchronously
-	if err := s.ProcessMessage(context.Background(), userID, chatID, streamID); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+	// If auto execute query is true, we need to process LLM response & run query automatically
+	if chat.AutoExecuteQuery {
+		if err := s.ProcessLLMResponseAndRunQuery(ctx, userID, chatID, messageID, streamID); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+		}
+	} else {
+		// Start processing the message asynchronously
+		if err := s.ProcessMessage(ctx, userID, chatID, streamID); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+		}
 	}
 	return s.buildMessageResponse(message), http.StatusOK, nil
 }
@@ -828,6 +831,7 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			Database: chat.Connection.Database,
 		},
 		SelectedCollections: chat.SelectedCollections,
+		AutoExecuteQuery:    chat.AutoExecuteQuery,
 		CreatedAt:           chat.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:           chat.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -1260,21 +1264,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			}
 		}()
 
-		// Send event about query execution failure
-		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
-			Event: "query-execution-failed",
-			Data: map[string]interface{}{
-				"chat_id":        chatID,
-				"message_id":     msg.ID.Hex(),
-				"query_id":       query.ID.Hex(),
-				"execution_time": query.ExecutionTime,
-				"error": &dtos.QueryError{
-					Code:    queryErr.Code,
-					Message: queryErr.Message,
-					Details: queryErr.Details,
-				},
-			},
-		})
 		return &dtos.QueryExecutionResponse{
 			ChatID:            chatID,
 			MessageID:         msg.ID.Hex(),
@@ -1496,22 +1485,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			}
 		}
 	}()
-
-	// Send stream event
-	s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
-		Event: "query-results",
-		Data: map[string]interface{}{
-			"chat_id":             chatID,
-			"message_id":          msg.ID.Hex(),
-			"query_id":            query.ID.Hex(),
-			"is_executed":         query.IsExecuted,
-			"is_rolled_back":      query.IsRolledBack,
-			"execution_time":      *query.ExecutionTime,
-			"execution_result":    formattedResultJSON,
-			"total_records_count": totalRecordsCount,
-			"error":               query.Error,
-		},
-	})
 
 	return &dtos.QueryExecutionResponse{
 		ChatID:            chatID,
@@ -2146,6 +2119,11 @@ func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string)
 		return nil, nil, fmt.Errorf("message does not belong to this chat")
 	}
 
+	log.Printf("ChatService -> verifyQueryOwnership -> msgObjID: %+v", msgObjID)
+	log.Printf("ChatService -> verifyQueryOwnership -> queryObjID: %+v", queryObjID)
+	log.Printf("ChatService -> verifyQueryOwnership -> msg.ChatID: %+v", msg.ChatID)
+
+	log.Printf("ChatService -> verifyQueryOwnership -> msg: %+v", msg)
 	// Find query in message
 	var targetQuery *models.Query
 	if msg.Queries != nil {
@@ -2161,6 +2139,92 @@ func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string)
 	}
 
 	return msg, targetQuery, nil
+}
+
+// ProcessLLMResponseAndRunQuery processes the LLM response & runs the query automatically, updates SSE stream
+func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID, chatID string, messageID, streamID string) error {
+	msgCtx, cancel := context.WithCancel(context.Background())
+
+	log.Printf("ProcessLLMResponseAndRunQuery -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
+
+	s.processesMu.Lock()
+	s.activeProcesses[streamID] = cancel
+	s.processesMu.Unlock()
+
+	// Use the parent context (ctx) for SSE connection
+	// Use llmCtx for LLM processing
+	go func() {
+		defer func() {
+			s.processesMu.Lock()
+			delete(s.activeProcesses, streamID)
+			s.processesMu.Unlock()
+		}()
+
+		msgResp, err := s.processLLMResponse(msgCtx, userID, chatID, streamID, true, true)
+		if err != nil {
+			log.Printf("Error processing LLM response: %v", err)
+			return
+		}
+		log.Printf("ProcessLLMResponseAndRunQuery -> msgResp: %v", msgResp)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		select {
+		case <-ctx.Done():
+			log.Printf("Query execution timed out")
+			return
+		default:
+			log.Printf("ProcessLLMResponseAndRunQuery -> msgResp.Queries: %v", msgResp.Queries)
+			if msgResp.Queries != nil {
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  "Executing the needful query now.",
+				})
+				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
+				for i, query := range *msgResp.Queries {
+					if query.Query != "" && !query.IsCritical {
+						executionResult, _, queryErr := s.ExecuteQuery(ctx, userID, chatID, &dtos.ExecuteQueryRequest{
+							MessageID: msgResp.ID,
+							QueryID:   query.ID,
+							StreamID:  streamID,
+						})
+						if queryErr != nil {
+							log.Printf("Error executing query: %v", queryErr)
+							// Send existing msgResp so far
+							s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+								Event: "ai-response",
+								Data:  msgResp,
+							})
+							return
+						}
+						log.Printf("ProcessLLMResponseAndRunQuery -> Query executed successfully: %v", executionResult)
+						query.IsExecuted = true
+						query.ExecutionTime = executionResult.ExecutionTime
+						query.ExecutionResult = executionResult.ExecutionResult.(map[string]interface{})
+						query.Error = executionResult.Error
+						if query.Pagination != nil && executionResult.TotalRecordsCount != nil {
+							query.Pagination.TotalRecordsCount = *executionResult.TotalRecordsCount
+						}
+					}
+					tempQueries[i] = query
+				}
+				msgResp.Queries = &tempQueries
+				log.Printf("ProcessLLMResponseAndRunQuery -> Queries updated in LLM response: %v", msgResp.Queries)
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response",
+					Data:  msgResp,
+				})
+				return
+			} else {
+				log.Printf("No queries found in LLM response, returning ai response")
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response",
+					Data:  msgResp,
+				})
+				return
+			}
+		}
+	}()
+	return nil
 }
 
 // Update the ProcessMessage method to use a separate context for LLM processing
@@ -2241,7 +2305,7 @@ func (s *chatService) processMessageInternal(msgCtx context.Context, userID, cha
 		return fmt.Errorf("sse connection closed")
 	default:
 		// LLM processing will be handled in this method
-		s.processLLMResponse(msgCtx, userID, chatID, streamID)
+		s.processLLMResponse(msgCtx, userID, chatID, streamID, false, true)
 	}
 
 	return nil
