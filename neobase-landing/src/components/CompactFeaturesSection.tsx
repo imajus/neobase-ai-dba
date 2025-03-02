@@ -66,10 +66,10 @@ const CompactFeaturesSection: React.FC = () => {
       
       <div className="container mx-auto px-4 sm:px-6 md:px-8 max-w-7xl">
         <div className="text-center mb-8 md:mb-12">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
+          <h2 className="text-3xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
             <span className="text-yellow-500">Features</span> Your Data deserves
           </h2>
-          <p className="text-base sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
+          <p className="text-lg sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
             NeoBase makes database management simple and intuitive with these powerful features.
           </p>
         </div>
@@ -78,21 +78,21 @@ const CompactFeaturesSection: React.FC = () => {
           {features.map((feature, index) => (
             <div 
               key={index} 
-              className={`neo-border bg-white p-3 sm:p-4 md:p-5 hover:shadow-lg transition-all duration-300 ${feature.width}`}
+              className={`neo-border bg-white p-4 sm:p-4 md:p-5 hover:shadow-lg transition-all duration-300 ${feature.width}`}
               style={{ 
                 transform: feature.transform,
                 zIndex: feature.importance === "primary" ? 10 : feature.importance === "secondary" ? 5 : 1
               }}
             >
               <div className={`flex ${feature.importance === "primary" ? "flex-col items-start" : "items-start"}`}>
-                <div className={`${feature.bgColor} p-2 sm:p-3 rounded-lg ${feature.importance === "primary" ? "mb-3 md:mb-4" : "mr-3 md:mr-4"} ${index % 2 === 0 ? 'self-start' : 'self-center'}`}>
+                <div className={`${feature.bgColor} p-3 sm:p-3 rounded-lg ${feature.importance === "primary" ? "mb-3 md:mb-4" : "mr-3 md:mr-4"} ${index % 2 === 0 ? 'self-start' : 'self-center'}`}>
                   {feature.icon}
                 </div>
                 <div>
-                  <h3 className={`font-bold mb-1 sm:mb-2 ${feature.importance === "primary" ? "text-lg sm:text-xl" : feature.importance === "secondary" ? "text-base sm:text-lg" : "text-sm sm:text-base"}`}>
+                  <h3 className={`font-bold mb-2 sm:mb-2 ${feature.importance === "primary" ? "text-xl sm:text-xl" : feature.importance === "secondary" ? "text-lg sm:text-lg" : "text-base sm:text-base"}`}>
                     {feature.title}
                   </h3>
-                  <p className={`text-gray-600 ${feature.importance === "primary" ? "text-sm sm:text-base" : "text-xs sm:text-sm"}`}>
+                  <p className={`text-gray-600 ${feature.importance === "primary" ? "text-base sm:text-base" : "text-sm sm:text-sm"}`}>
                     {feature.description}
                   </p>
                 </div>
@@ -106,9 +106,9 @@ const CompactFeaturesSection: React.FC = () => {
             href="https://github.com/bhaskarblur/neobase-ai-dba" 
             target="_blank" 
             rel="noopener noreferrer" 
-            className="neo-button inline-flex items-center justify-center gap-2 py-2 px-6 sm:py-3 sm:px-8 text-base sm:text-lg"
+            className="neo-button inline-flex items-center justify-center gap-2 py-3 px-6 sm:py-3 sm:px-8 text-lg sm:text-lg"
           >
-            <span className="flex items-center gap-2 sm:gap-4"><Rocket className="w-4 h-4 sm:w-5 sm:h-5" /> Try NeoBase</span>
+            <span className="flex items-center gap-2 sm:gap-4"><Rocket className="w-5 h-5 sm:w-5 sm:h-5" /> Try NeoBase</span>
           </a>
         </div>
       </div>

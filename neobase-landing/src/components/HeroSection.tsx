@@ -11,14 +11,14 @@ const HeroSection = () => {
         <div className="flex flex-col md:flex-row items-center">
           {/* Left Side - Hero Text */}
           <div className="md:w-1/2 space-y-4 sm:space-y-5 md:space-y-6 md:pr-8 z-10">
-            <div className="inline-block neo-border bg-[#FFDB58] px-3 sm:px-4 py-1.5 sm:py-2 font-bold text-xs sm:text-sm">
+            <div className="inline-block neo-border bg-[#FFDB58] px-3 sm:px-4 py-1.5 sm:py-2 font-bold text-sm sm:text-sm">
               #Open Source,  #AI Database Assistant
             </div>
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight">
+            <h1 className="text-4xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight">
               Where there's a Database.<br />
               <span className="text-yellow-500">There's <span className="text-green-500">NeoBase!</span></span>
             </h1>
-            <p className="text-base sm:text-lg md:text-xl text-gray-700">
+            <p className="text-lg sm:text-lg md:text-xl text-gray-700">
               NeoBase connects to your database & let's you talk to your data. No boring dashboards anymore, just you & your data.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4 sm:pt-6">

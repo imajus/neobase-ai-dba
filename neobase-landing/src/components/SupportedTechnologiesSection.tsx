@@ -29,9 +29,9 @@ const SupportedTechnologiesSection: React.FC = () => {
   const TechnologyChip = ({ tech }: { tech: Technology }) => (
     <div className="neo-border bg-white px-3 sm:px-4 py-2 sm:py-3 flex items-center gap-2 sm:gap-3 transition-all hover:shadow-lg">
       <div className={`${tech.isSupported ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'} p-1 sm:p-1.5 rounded-full`}>
-        {tech.isSupported ? <Check size={14} className="sm:w-4 sm:h-4" /> : <Clock size={14} className="sm:w-4 sm:h-4" />}
+        {tech.isSupported ? <Check size={16} className="sm:w-4 sm:h-4" /> : <Clock size={16} className="sm:w-4 sm:h-4" />}
       </div>
-      <span className="font-bold text-sm sm:text-base">{tech.name}</span>
+      <span className="font-bold text-base sm:text-base">{tech.name}</span>
     </div>
   );
 
@@ -92,10 +92,10 @@ const SupportedTechnologiesSection: React.FC = () => {
       
       <div className="container mx-auto px-4 sm:px-6 md:px-8 max-w-7xl">
         <div className="text-center mb-8 sm:mb-12 md:mb-16">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
+          <h2 className="text-3xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
             Supported <span className="text-green-500">Technologies</span>
           </h2>
-          <p className="text-base sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
+          <p className="text-lg sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
             NeoBase works with a variety of databases and LLM clients, with more being added regularly.
           </p>
         </div>
@@ -131,7 +131,7 @@ const SupportedTechnologiesSection: React.FC = () => {
         </div>
 
         <div className="mt-6 sm:mt-8 text-center">
-          <p className="text-sm sm:text-base text-gray-600 italic">
+          <p className="text-base sm:text-base text-gray-600 italic">
             Don't see your database or LLM client? <a href="https://github.com/bhaskarblur/neobase-ai-dba/issues" className="text-green-600 hover:text-green-700 underline font-medium">Raise a request</a>
           </p>
         </div>
