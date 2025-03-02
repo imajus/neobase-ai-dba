@@ -1,3 +1,4 @@
+version: '3'
 services:
   neobase-mongodb:
     image: mongo:latest
@@ -84,17 +85,20 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   neobase-example-clickhouse:
-    image: yandex/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:latest
     container_name: neobase-example-clickhouse
     restart: always
     ports:
       - 8123:8123
+      - 9000:9000
     environment:
-      CLICKHOUSE_USER: clickhouse
-      CLICKHOUSE_PASSWORD: clickhouse
-      CLICKHOUSE_DATABASE: testdb
+      - CLICKHOUSE_DB=testdb
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse-init:/docker-entrypoint-initdb.d
 
   neobase-example-mysql:
     image: mysql:latest

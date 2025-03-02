@@ -30,6 +30,7 @@ interface ChatWindowProps {
   onCancelRefreshSchema: () => void;
   checkSSEConnection: () => Promise<void>;
   onUpdateSelectedCollections?: (chatId: string, selectedCollections: string) => Promise<void>;
+  onEditConnectionFromChatWindow?: () => void;
 }
 
 interface QueryState {
@@ -106,7 +107,8 @@ export default function ChatWindow({
   onRefreshSchema,
   onCancelRefreshSchema,
   checkSSEConnection,
-  onUpdateSelectedCollections
+  onUpdateSelectedCollections,
+  onEditConnectionFromChatWindow
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -593,7 +595,13 @@ export default function ChatWindow({
         isConnecting={isConnecting}
         isConnected={isConnected}
         onClearChat={() => setShowClearConfirm(true)}
-        onEditConnection={() => setShowEditConnection(true)}
+        onEditConnection={() => {
+          if (onEditConnectionFromChatWindow) {
+            onEditConnectionFromChatWindow();
+          } else {
+            setShowEditConnection(true);
+          }
+        }}
         onShowCloseConfirm={() => setShowCloseConfirm(true)}
         onReconnect={handleReconnect}
         setShowRefreshSchema={() => setShowRefreshSchema(true)}

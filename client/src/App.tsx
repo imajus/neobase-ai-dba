@@ -26,6 +26,7 @@ function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [isEditingConnection, setIsEditingConnection] = useState(false);
   const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<Chat>();
@@ -1045,6 +1046,11 @@ function AppContent() {
     }
   };
 
+  const handleEditConnectionFromChatWindow = () => {
+    setIsEditingConnection(true);
+    setShowConnectionModal(true);
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center bg-white h-screen">Loading...</div>; // Or a proper loading component
   }
@@ -1083,7 +1089,10 @@ function AppContent() {
         connections={chats}
         isLoadingConnections={isLoadingChats}
         onSelectConnection={handleSelectConnection}
-        onAddConnection={() => setShowConnectionModal(true)}
+        onAddConnection={() => {
+          setIsEditingConnection(false);
+          setShowConnectionModal(true);
+        }}
         onLogout={handleLogout}
         selectedConnection={selectedConnection}
         onDeleteConnection={handleDeleteConnection}
@@ -1110,6 +1119,7 @@ function AppContent() {
           onRefreshSchema={handleRefreshSchema}
           onCancelRefreshSchema={handleCancelRefreshSchema}
           onUpdateSelectedCollections={(chatId, selectedCollections) => handleUpdateSelectedCollections(chatId, selectedCollections)}
+          onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
         />
       ) : (
         <div className={`
@@ -1247,12 +1257,15 @@ function AppContent() {
 
       {showConnectionModal && (
         <ConnectionModal
-          onClose={() => setShowConnectionModal(false)}
+          onClose={() => {
+            setShowConnectionModal(false);
+            setIsEditingConnection(false);
+          }}
           onSubmit={handleAddConnection}
           onUpdateSelectedCollections={handleUpdateSelectedCollections}
           onUpdateAutoExecuteQuery={handleUpdateAutoExecuteQuery}
-          initialData={selectedConnection}
-          onEdit={async (connection) => {
+          initialData={isEditingConnection ? selectedConnection : undefined}
+          onEdit={isEditingConnection ? async (connection) => {
             try {
               const updatedChat = await chatService.editChat(selectedConnection!.id, connection);
               
@@ -1260,7 +1273,7 @@ function AppContent() {
               setChats(prev => prev.map(chat => 
                 chat.id === updatedChat.id ? { ...updatedChat } : chat
               ));
-
+              
               // Update the selected connection if it's the one being edited
               if (selectedConnection?.id === updatedChat.id) {
                 setSelectedConnection(updatedChat);
@@ -1273,7 +1286,7 @@ function AppContent() {
               toast.error(error.message, errorToast);
               return { success: false, error: error.message };
             }
-          }}
+          } : undefined}
         />
       )}
 

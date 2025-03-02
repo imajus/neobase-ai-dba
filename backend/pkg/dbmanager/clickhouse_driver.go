@@ -76,19 +76,23 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 	}
 
 	// Build DSN (Data Source Name)
+	// Use the native format for ClickHouse DSN
 	var dsn string
 	if config.Username != nil && *config.Username != "" {
 		if config.Password != nil && *config.Password != "" {
-			dsn = fmt.Sprintf("tcp://%s:%s?database=%s&username=%s&password=%s&read_timeout=10&write_timeout=20",
-				config.Host, config.Port, config.Database, *config.Username, *config.Password)
+			dsn = fmt.Sprintf("clickhouse://%s:%s@%s:%s/%s?dial_timeout=10s&max_execution_time=60",
+				*config.Username, *config.Password, config.Host, config.Port, config.Database)
 		} else {
-			dsn = fmt.Sprintf("tcp://%s:%s?database=%s&username=%s&read_timeout=10&write_timeout=20",
-				config.Host, config.Port, config.Database, *config.Username)
+			dsn = fmt.Sprintf("clickhouse://%s@%s:%s/%s?dial_timeout=10s&max_execution_time=60",
+				*config.Username, config.Host, config.Port, config.Database)
 		}
 	} else {
-		dsn = fmt.Sprintf("tcp://%s:%s?database=%s&read_timeout=10&write_timeout=20",
+		dsn = fmt.Sprintf("clickhouse://%s:%s/%s?dial_timeout=10s&max_execution_time=60",
 			config.Host, config.Port, config.Database)
 	}
+
+	log.Printf("ClickHouseDriver -> Connect -> Connecting with DSN format: %s",
+		strings.Replace(dsn, *config.Password, "******", -1))
 
 	// Configure GORM logger
 	gormLogger := logger.New(
@@ -106,6 +110,7 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 		Logger: gormLogger,
 	})
 	if err != nil {
+		log.Printf("ClickHouseDriver -> Connect -> Connection failed: %v", err)
 		return nil, fmt.Errorf("failed to connect to ClickHouse: %v", err)
 	}
 
@@ -119,6 +124,14 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetMaxOpenConns(20)
 	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	// Test the connection with a simple query
+	var result int
+	if err := db.Raw("SELECT 1").Scan(&result).Error; err != nil {
+		log.Printf("ClickHouseDriver -> Connect -> Connection test failed: %v", err)
+		return nil, fmt.Errorf("connection test failed: %v", err)
+	}
+	log.Printf("ClickHouseDriver -> Connect -> Connection established successfully")
 
 	// Create connection object
 	conn := &Connection{
@@ -152,26 +165,59 @@ func (d *ClickHouseDriver) Ping(conn *Connection) error {
 		return fmt.Errorf("no active connection to ping")
 	}
 
+	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
+		log.Printf("ClickHouseDriver -> Ping -> Failed to get database connection: %v", err)
 		return fmt.Errorf("failed to get database connection: %v", err)
 	}
 
-	return sqlDB.Ping()
+	// First try standard ping
+	if err := sqlDB.Ping(); err != nil {
+		log.Printf("ClickHouseDriver -> Ping -> Standard ping failed: %v", err)
+		return fmt.Errorf("ping failed: %v", err)
+	}
+
+	// Also execute a simple query to ensure the connection is fully functional
+	var result int
+	if err := conn.DB.Raw("SELECT 1").Scan(&result).Error; err != nil {
+		log.Printf("ClickHouseDriver -> Ping -> Query test failed: %v", err)
+		return fmt.Errorf("connection test query failed: %v", err)
+	}
+
+	log.Printf("ClickHouseDriver -> Ping -> Connection is healthy")
+	return nil
 }
 
 // IsAlive checks if the ClickHouse connection is still valid
 func (d *ClickHouseDriver) IsAlive(conn *Connection) bool {
 	if conn == nil || conn.DB == nil {
+		log.Printf("ClickHouseDriver -> IsAlive -> No connection or DB object")
 		return false
 	}
 
+	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
+		log.Printf("ClickHouseDriver -> IsAlive -> Failed to get database connection: %v", err)
 		return false
 	}
 
-	return sqlDB.Ping() == nil
+	// First try standard ping
+	if err := sqlDB.Ping(); err != nil {
+		log.Printf("ClickHouseDriver -> IsAlive -> Standard ping failed: %v", err)
+		return false
+	}
+
+	// Also execute a simple query to ensure the connection is fully functional
+	var result int
+	if err := conn.DB.Raw("SELECT 1").Scan(&result).Error; err != nil {
+		log.Printf("ClickHouseDriver -> IsAlive -> Query test failed: %v", err)
+		return false
+	}
+
+	log.Printf("ClickHouseDriver -> IsAlive -> Connection is healthy")
+	return true
 }
 
 // ExecuteQuery executes a SQL query on the ClickHouse database
