@@ -93,6 +93,18 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		return &PostgresDriver{}
 	})
 
+	// Add MySQL schema fetcher registration
+	m.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
+		return NewMySQLSchemaFetcher(db)
+	})
+
+	// Add ClickHouse schema fetcher registration
+	m.RegisterFetcher("clickhouse", func(db DBExecutor) SchemaFetcher {
+		return NewClickHouseSchemaFetcher(db)
+	})
+
+	m.registerDefaultDrivers()
+
 	return m, nil
 }
 
@@ -322,6 +334,10 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 	switch conn.Config.Type {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB: // Use same wrapper for both
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
+	case constants.DatabaseTypeMySQL:
+		return NewMySQLWrapper(conn.DB, m, chatID), nil
+	case constants.DatabaseTypeClickhouse:
+		return NewClickHouseWrapper(conn.DB, m, chatID), nil
 	// Add cases for other database types
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", conn.Config.Type)
@@ -664,6 +680,18 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 	// Pass selectedTables instead of hardcoded "ALL"
 	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(ctx, chatID, conn, dbConn.Config.Type, selectedTables)
 	if err != nil {
+		// Check if this is a first-time schema storage error, which we can ignore
+		if strings.Contains(err.Error(), "first-time schema storage") || strings.Contains(err.Error(), "key does not exist") {
+			log.Printf("DBManager -> doSchemaCheck -> First-time schema storage for chat %s (expected behavior)", chatID)
+			return nil
+		}
+
+		// Check if this is a schema fetcher not found error, which means we need to register the fetcher
+		if strings.Contains(err.Error(), "schema fetcher not found") || strings.Contains(err.Error(), "no schema fetcher registered") {
+			log.Printf("DBManager -> doSchemaCheck -> Schema fetcher not found for type %s. This is likely a configuration issue.", dbConn.Config.Type)
+			return nil
+		}
+
 		return fmt.Errorf("schema check failed: %v", err)
 	}
 
@@ -905,7 +933,17 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 					}
 				}
 			case constants.DatabaseTypeMySQL:
-				// To be done
+				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
+					if conn.OnSchemaChange != nil {
+						conn.OnSchemaChange(conn.ChatID)
+					}
+				}
+			case constants.DatabaseTypeClickhouse:
+				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
+					if conn.OnSchemaChange != nil {
+						conn.OnSchemaChange(conn.ChatID)
+					}
+				}
 			}
 		}()
 
@@ -946,6 +984,22 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		err = db.Ping()
 		if err != nil {
 			return fmt.Errorf("failed to connect to MySQL: %v", err)
+		}
+
+	case constants.DatabaseTypeClickhouse:
+		dsn := fmt.Sprintf(
+			"clickhouse://%s:%s@%s:%s/%s",
+			*config.Username, *config.Password, config.Host, config.Port, config.Database,
+		)
+		db, err := sql.Open("clickhouse", dsn)
+		if err != nil {
+			return fmt.Errorf("failed to create ClickHouse connection: %v", err)
+		}
+		defer db.Close()
+
+		err = db.Ping()
+		if err != nil {
+			return fmt.Errorf("failed to connect to ClickHouse: %v", err)
 		}
 
 	case constants.DatabaseTypeMongoDB:
@@ -1113,4 +1167,18 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 
 	log.Printf("DBManager -> RefreshSchemaWithExamples -> Successfully refreshed schema for chatID: %s (schema length: %d)", chatID, len(formattedSchema))
 	return formattedSchema, nil
+}
+
+func (m *Manager) registerDefaultDrivers() {
+	// Register PostgreSQL driver
+	m.RegisterDriver("postgresql", NewPostgresDriver())
+
+	// Register YugabyteDB driver (uses PostgreSQL driver)
+	m.RegisterDriver("yugabytedb", NewPostgresDriver())
+
+	// Register MySQL driver
+	m.RegisterDriver("mysql", NewMySQLDriver())
+
+	// Register ClickHouse driver
+	m.RegisterDriver("clickhouse", NewClickHouseDriver())
 }

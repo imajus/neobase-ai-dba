@@ -22,7 +22,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
   const [searchQuery, setSearchQuery] = useState('');
 
   // Filter tables based on search query
-  const filteredTables = tables.filter(table => 
+  const filteredTables = tables?.filter(table => 
     table.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -46,18 +46,17 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
         console.log('SelectTablesModal: About to call getTables API for chat.id:', chat.id);
         // Get tables from the API
         const tablesResponse = await chatService.getTables(chat.id);
-        console.log('SelectTablesModal: Received tables response:', tablesResponse.tables.length, 'tables');
-        setTables(tablesResponse.tables);
+        console.log('SelectTablesModal: Received tables response:', tablesResponse.tables?.length, 'tables');
+        setTables(tablesResponse.tables || []);
         
         // Initialize selected tables based on is_selected field
-        const selectedTableNames = tablesResponse.tables
-          .filter(table => table.is_selected)
-          .map(table => table.name);
+        const selectedTableNames = tablesResponse.tables?.filter((table: TableInfo) => table.is_selected)
+          .map((table: TableInfo) => table.name);
         
         setSelectedTables(selectedTableNames);
         
         // Check if all tables are selected to set selectAll state correctly
-        setSelectAll(selectedTableNames.length === tablesResponse.tables.length);
+        setSelectAll(selectedTableNames?.length === tablesResponse.tables?.length);
       } catch (error: any) {
         console.error('Failed to load tables:', error);
         setError(error.message || 'Failed to load tables');
@@ -87,7 +86,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
       } else {
         // If all tables are now selected, check "Select All"
         const newSelected = [...prev, tableName];
-        if (newSelected.length === tables.length) {
+        if (newSelected.length === tables?.length) {
           setSelectAll(true);
         }
         return newSelected;
@@ -110,14 +109,14 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
       return;
     } else {
       // Select all
-      setSelectedTables(tables.map(table => table.name));
+      setSelectedTables(tables?.map(table => table.name) || []);
       setSelectAll(true);
     }
   };
 
   const handleSave = async () => {
     // Validate that at least one table is selected
-    if (selectedTables.length === 0) {
+    if (selectedTables?.length === 0) {
       setValidationError("At least one table must be selected");
       return;
     }
@@ -217,14 +216,14 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
                   <h3 className="font-bold text-lg">Individual Tables/Collections</h3>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-gray-600">
-                      {selectAll ? 'All' : `${selectedTables.length}/${tables.length}`} selected
+                      {selectAll ? 'All' : `${selectedTables?.length}/${tables?.length}`} selected
                     </span>
                     <button
                       type="button"
                       onClick={() => {
                         const allExpanded = Object.values(expandedTables).every(v => v);
                         const newExpandedState = !allExpanded;
-                        const newExpandedTables = tables.reduce((acc, table) => {
+                        const newExpandedTables = tables?.reduce((acc, table) => {
                           acc[table.name] = newExpandedState;
                           return acc;
                         }, {} as Record<string, boolean>);

@@ -80,6 +80,8 @@ func Initialize() {
 		// Register database drivers
 		manager.RegisterDriver(constants.DatabaseTypePostgreSQL, dbmanager.NewPostgresDriver())
 		manager.RegisterDriver(constants.DatabaseTypeYugabyteDB, dbmanager.NewPostgresDriver()) // Use same driver for both
+		manager.RegisterDriver(constants.DatabaseTypeMySQL, dbmanager.NewMySQLDriver())
+		manager.RegisterDriver(constants.DatabaseTypeClickhouse, dbmanager.NewClickHouseDriver())
 		return manager, nil
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)
@@ -131,6 +133,11 @@ func Initialize() {
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL),
 					},
+					{
+						DBType:       constants.DatabaseTypeClickhouse,
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeClickhouse),
+					},
 				},
 			})
 			if err != nil {
@@ -154,6 +161,16 @@ func Initialize() {
 						DBType:       constants.DatabaseTypeYugabyteDB,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeYugabyteDB),
 						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeYugabyteDB),
+					},
+					{
+						DBType:       constants.DatabaseTypeMySQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMySQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeClickhouse,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeClickhouse),
 					},
 				},
 			})

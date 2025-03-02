@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"neobase-ai/pkg/redis"
+	"strings"
 )
 
 type SchemaStorageService struct {
@@ -63,8 +64,16 @@ func (s *SchemaStorageService) Retrieve(ctx context.Context, chatID string) (*Sc
 	log.Printf("SchemaStorageService -> Retrieve -> Retrieving schema for chatID: %s", chatID)
 
 	key := fmt.Sprintf("%s%s", schemaKeyPrefix, chatID)
+	log.Printf("Getting Redis key: %s", key)
 	encryptedData, err := s.redisRepo.Get(key, ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "key does not exist") || strings.Contains(err.Error(), "redis: nil") {
+			log.Printf("Redis key not found: %s (this is normal for first-time access)", key)
+			log.Printf("SchemaStorageService -> Retrieve -> No schema found for chatID %s (expected for first-time schema storage)", chatID)
+			return nil, fmt.Errorf("key does not exist: %s", key)
+		} else {
+			log.Printf("SchemaStorageService -> Retrieve -> Error retrieving schema from Redis: %v", err)
+		}
 		return nil, fmt.Errorf("failed to get schema from Redis: %v", err)
 	}
 

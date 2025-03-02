@@ -35,6 +35,7 @@ type Query struct {
 	ExampleResult          *string            `bson:"example_result,omitempty" json:"example_result,omitempty"`     // JSON string
 	ExecutionResult        *string            `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
 	IsEdited               bool               `bson:"is_edited" json:"is_edited"`                                   // if the query has been edited
+	Metadata               *string            `bson:"metadata,omitempty" json:"metadata,omitempty"`                 // JSON string for database-specific metadata (e.g., ClickHouse engine type)
 }
 
 type QueryError struct {

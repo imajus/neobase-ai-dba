@@ -147,6 +147,7 @@ type SchemaManager struct {
 	storageService *SchemaStorageService
 	dbManager      *Manager
 	fetcherMap     map[string]func(DBExecutor) SchemaFetcher
+	simplifiers    map[string]SchemaSimplifier
 }
 
 func NewSchemaManager(redisRepo redis.IRedisRepositories, encryptionKey string, dbManager *Manager) (*SchemaManager, error) {
@@ -160,10 +161,14 @@ func NewSchemaManager(redisRepo redis.IRedisRepositories, encryptionKey string, 
 		storageService: storageService,
 		dbManager:      dbManager,
 		fetcherMap:     make(map[string]func(DBExecutor) SchemaFetcher),
+		simplifiers:    make(map[string]SchemaSimplifier),
 	}
 
 	// Register default fetchers
 	manager.registerDefaultFetchers()
+
+	// Register default simplifiers
+	manager.registerDefaultSimplifiers()
 
 	return manager, nil
 }
@@ -281,11 +286,16 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 	// Try to get stored schema
 	storedSchema, err := sm.getStoredSchema(ctx, chatID)
 	if err != nil {
-		log.Printf("SchemaManager -> CheckSchemaChanges -> No stored schema found: %v", err)
+		// This is a first-time schema storage scenario or there was an error retrieving the schema
+		if strings.Contains(err.Error(), "first-time schema storage") || strings.Contains(err.Error(), "key does not exist") {
+			log.Printf("SchemaManager -> CheckSchemaChanges -> First-time schema storage for chatID: %s", chatID)
+		} else {
+			log.Printf("SchemaManager -> CheckSchemaChanges -> Error retrieving stored schema: %v", err)
+		}
 
-		// First time - store current schema
+		// First time - store current schema without any comparison
 		if err := sm.storeSchema(ctx, chatID, currentSchema, db, dbType); err != nil {
-			return nil, true, err
+			return nil, false, fmt.Errorf("failed to store schema: %v", err)
 		}
 
 		// Return special diff for first time with full schema
@@ -549,8 +559,72 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 		}
 		return checksums, nil
 	case constants.DatabaseTypeMySQL:
-		// TODO: Implement MySQL checksum calculation
+		// Implement MySQL checksum calculation
 		checksums := make(map[string]string)
+
+		// Get schema directly from the database
+		schema, err := db.GetSchema(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema: %v", err)
+		}
+
+		// Calculate checksums for each table
+		for tableName, table := range schema.Tables {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("getTableChecksums -> context cancelled: %v", err)
+				return nil, err
+			}
+
+			// Convert table definition to string for checksum
+			tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
+				tableName,
+				table.Columns,
+				table.Indexes,
+				table.ForeignKeys,
+				table.Constraints,
+			)
+
+			// Calculate checksum using crypto/md5
+			hasher := md5.New()
+			hasher.Write([]byte(tableStr))
+			checksum := hex.EncodeToString(hasher.Sum(nil))
+			checksums[tableName] = checksum
+		}
+		return checksums, nil
+	case constants.DatabaseTypeClickhouse:
+		// Implement ClickHouse checksum calculation
+		checksums := make(map[string]string)
+
+		// Get schema directly from the database
+		schema, err := db.GetSchema(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema: %v", err)
+		}
+
+		// Calculate checksums for each table
+		for tableName, table := range schema.Tables {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("getTableChecksums -> context cancelled: %v", err)
+				return nil, err
+			}
+
+			// Convert table definition to string for checksum
+			tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
+				tableName,
+				table.Columns,
+				table.Indexes,
+				table.ForeignKeys,
+				table.Constraints,
+			)
+
+			// Calculate checksum using crypto/md5
+			hasher := md5.New()
+			hasher.Write([]byte(tableStr))
+			checksum := hex.EncodeToString(hasher.Sum(nil))
+			checksums[tableName] = checksum
+		}
 		return checksums, nil
 	}
 
@@ -586,7 +660,24 @@ func (sm *SchemaManager) getStoredSchema(ctx context.Context, chatID string) (*S
 		return nil, err
 	}
 
-	return sm.storageService.Retrieve(ctx, chatID)
+	schema, err := sm.storageService.Retrieve(ctx, chatID)
+	if err != nil {
+		// Check if this is a "key does not exist" error, which is expected for first-time schema storage
+		if strings.Contains(err.Error(), "key does not exist") {
+			log.Printf("getStoredSchema -> No schema found for chatID %s (first-time schema storage)", chatID)
+			return nil, fmt.Errorf("no stored schema found (first-time schema storage)")
+		}
+		// For other errors, return as is
+		return nil, err
+	}
+
+	// Validate the schema
+	if schema == nil || schema.FullSchema == nil || len(schema.FullSchema.Tables) == 0 {
+		log.Printf("getStoredSchema -> Invalid or empty schema found for chatID %s (treating as first-time schema storage)", chatID)
+		return nil, fmt.Errorf("invalid or empty schema found (first-time schema storage)")
+	}
+
+	return schema, nil
 }
 
 // Add type-specific schema simplification
@@ -649,49 +740,6 @@ func (s *PostgresSimplifier) GetColumnConstraints(col ColumnInfo, table TableSch
 	return constraints
 }
 
-type MySQLSimplifier struct{}
-
-func (s *MySQLSimplifier) SimplifyDataType(dbType string) string {
-	switch strings.ToLower(dbType) {
-	case "int", "bigint", "tinyint", "smallint":
-		return "number"
-	case "varchar", "text", "char":
-		return "text"
-	default:
-		return dbType
-	}
-}
-
-func (s *MySQLSimplifier) GetColumnConstraints(col ColumnInfo, table TableSchema) []string {
-	constraints := make([]string, 0)
-
-	if !col.IsNullable {
-		constraints = append(constraints, "NOT NULL")
-	}
-
-	if col.DefaultValue != "" {
-		constraints = append(constraints, fmt.Sprintf("DEFAULT %s", col.DefaultValue))
-	}
-
-	// Check if column is part of any unique index
-	for _, idx := range table.Indexes {
-		if idx.IsUnique && len(idx.Columns) == 1 && idx.Columns[0] == col.Name {
-			constraints = append(constraints, "UNIQUE")
-			break
-		}
-	}
-
-	// Check if column is a foreign key
-	for _, fk := range table.ForeignKeys {
-		if fk.ColumnName == col.Name {
-			constraints = append(constraints, fmt.Sprintf("FOREIGN KEY REFERENCES %s(%s)", fk.RefTable, fk.RefColumn))
-			break
-		}
-	}
-
-	return constraints
-}
-
 func (sm *SchemaManager) isColumnIndexed(colName string, indexes map[string]IndexInfo) bool {
 	for _, idx := range indexes {
 		for _, col := range idx.Columns {
@@ -720,11 +768,12 @@ func (sm *SchemaManager) isColumnUnique(tableName, colName string, schema *Schem
 // Ensure both simplifiers implement the interface
 var (
 	_ SchemaSimplifier = (*PostgresSimplifier)(nil)
-	_ SchemaSimplifier = (*MySQLSimplifier)(nil)
 )
 
 // FormatSchemaForLLM formats the schema into a LLM-friendly string
 func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
+	log.Printf("FormatSchemaForLLM -> Starting with %d tables", len(schema.Tables))
+
 	var result strings.Builder
 	result.WriteString("Current Database Schema:\n\n")
 
@@ -734,10 +783,14 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 		tableNames = append(tableNames, tableName)
 	}
 	sort.Strings(tableNames)
+	log.Printf("FormatSchemaForLLM -> Sorted %d table names", len(tableNames))
 
 	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
 		table := schema.Tables[tableName]
+		log.Printf("FormatSchemaForLLM -> Formatting table: %s with %d columns",
+			tableName, len(table.Columns))
+
 		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
 		if table.Comment != "" {
 			result.WriteString(fmt.Sprintf("Description: %s\n", table.Comment))
@@ -749,9 +802,17 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			columnNames = append(columnNames, columnName)
 		}
 		sort.Strings(columnNames)
+		log.Printf("FormatSchemaForLLM -> Table %s has %d columns", tableName, len(columnNames))
+
+		// Check if we have any columns
+		if len(columnNames) == 0 {
+			log.Printf("FormatSchemaForLLM -> Warning: No columns found for table %s", tableName)
+		}
 
 		for _, columnName := range columnNames {
 			column := table.Columns[columnName]
+			log.Printf("FormatSchemaForLLM -> Formatting column: %s of type %s", columnName, column.Type)
+
 			nullable := "NOT NULL"
 			if column.IsNullable {
 				nullable = "NULL"
@@ -763,14 +824,24 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			))
 
 			// Check if column is primary key by looking at indexes
+			isPrimaryKey := false
+			isUnique := false
 			for _, idx := range table.Indexes {
 				if len(idx.Columns) == 1 && idx.Columns[0] == columnName {
 					if strings.Contains(strings.ToLower(idx.Name), "pkey") {
-						result.WriteString(" PRIMARY KEY")
+						isPrimaryKey = true
 					} else if idx.IsUnique {
-						result.WriteString(" UNIQUE")
+						isUnique = true
 					}
 				}
+			}
+
+			if isPrimaryKey {
+				result.WriteString(" PRIMARY KEY")
+				log.Printf("FormatSchemaForLLM -> Column %s is a PRIMARY KEY", columnName)
+			} else if isUnique {
+				result.WriteString(" UNIQUE")
+				log.Printf("FormatSchemaForLLM -> Column %s has a UNIQUE constraint", columnName)
 			}
 
 			if column.DefaultValue != "" {
@@ -790,11 +861,14 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 		result.WriteString("\n")
 	}
 
+	log.Printf("FormatSchemaForLLM -> Completed formatting schema with %d tables", len(tableNames))
 	return result.String()
 }
 
 // FormatSchemaForLLMWithExamples formats the schema into a LLM-friendly string with example records
 func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) string {
+	log.Printf("FormatSchemaForLLMWithExamples -> Starting with %d tables", len(storage.LLMSchema.Tables))
+
 	var result strings.Builder
 	result.WriteString("Current Database Schema:\n\n")
 
@@ -804,10 +878,14 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 		tableNames = append(tableNames, tableName)
 	}
 	sort.Strings(tableNames)
+	log.Printf("FormatSchemaForLLMWithExamples -> Sorted %d table names", len(tableNames))
 
 	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
 		table := storage.LLMSchema.Tables[tableName]
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting table: %s with %d columns and %d example records",
+			tableName, len(table.Columns), len(table.ExampleRecords))
+
 		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
 		if table.Description != "" {
 			result.WriteString(fmt.Sprintf("Description: %s\n", table.Description))
@@ -817,6 +895,11 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 		sort.Slice(table.Columns, func(i, j int) bool {
 			return table.Columns[i].Name < table.Columns[j].Name
 		})
+
+		// Check if we have any columns
+		if len(table.Columns) == 0 {
+			log.Printf("FormatSchemaForLLMWithExamples -> Warning: No columns found for table %s", tableName)
+		}
 
 		for _, column := range table.Columns {
 			nullable := "NOT NULL"
@@ -842,37 +925,6 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			result.WriteString("\n")
 		}
 
-		// Add foreign key information
-		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.ForeignKeys) > 0 {
-			result.WriteString("\nForeign Keys:\n")
-
-			// Sort foreign keys for consistent output
-			fkNames := make([]string, 0, len(fullTable.ForeignKeys))
-			for fkName := range fullTable.ForeignKeys {
-				fkNames = append(fkNames, fkName)
-			}
-			sort.Strings(fkNames)
-
-			for _, fkName := range fkNames {
-				fk := fullTable.ForeignKeys[fkName]
-				result.WriteString(fmt.Sprintf("  - %s: %s references %s(%s)",
-					fkName,
-					fk.ColumnName,
-					fk.RefTable,
-					fk.RefColumn))
-
-				if fk.OnDelete != "NO ACTION" {
-					result.WriteString(fmt.Sprintf(" ON DELETE %s", fk.OnDelete))
-				}
-
-				if fk.OnUpdate != "NO ACTION" {
-					result.WriteString(fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate))
-				}
-
-				result.WriteString("\n")
-			}
-		}
-
 		// Add index information
 		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.Indexes) > 0 {
 			result.WriteString("\nIndexes:\n")
@@ -883,6 +935,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 				indexNames = append(indexNames, indexName)
 			}
 			sort.Strings(indexNames)
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d indexes for table %s", len(indexNames), tableName)
 
 			for _, indexName := range indexNames {
 				index := fullTable.Indexes[indexName]
@@ -907,6 +960,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 				constraintNames = append(constraintNames, constraintName)
 			}
 			sort.Strings(constraintNames)
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d constraints for table %s", len(constraintNames), tableName)
 
 			for _, constraintName := range constraintNames {
 				constraint := fullTable.Constraints[constraintName]
@@ -917,11 +971,46 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			}
 		}
 
+		// Add foreign key information
+		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.ForeignKeys) > 0 {
+			result.WriteString("\nForeign Keys:\n")
+
+			// Sort foreign keys for consistent output
+			fkNames := make([]string, 0, len(fullTable.ForeignKeys))
+			for fkName := range fullTable.ForeignKeys {
+				fkNames = append(fkNames, fkName)
+			}
+			sort.Strings(fkNames)
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d foreign keys for table %s", len(fkNames), tableName)
+
+			for _, fkName := range fkNames {
+				fk := fullTable.ForeignKeys[fkName]
+				result.WriteString(fmt.Sprintf("  - %s: %s references %s(%s)",
+					fkName,
+					fk.ColumnName,
+					fk.RefTable,
+					fk.RefColumn))
+
+				if fk.OnDelete != "NO ACTION" {
+					result.WriteString(fmt.Sprintf(" ON DELETE %s", fk.OnDelete))
+				}
+
+				if fk.OnUpdate != "NO ACTION" {
+					result.WriteString(fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate))
+				}
+
+				result.WriteString("\n")
+			}
+		}
+
 		// Add row count information
 		result.WriteString(fmt.Sprintf("\nRow Count: %d\n", table.RowCount))
 
 		// Add example records if available
 		if len(table.ExampleRecords) > 0 {
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d example records for table %s",
+				len(table.ExampleRecords), tableName)
+
 			result.WriteString("\nExample Records:\n")
 
 			// Get column names for header
@@ -930,12 +1019,18 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 				columnNames[i] = col.Name
 			}
 
+			// Debug column names
+			log.Printf("FormatSchemaForLLMWithExamples -> Column names for table %s: %v", tableName, columnNames)
+
 			// Format as a simple table
 			for i, record := range table.ExampleRecords {
+				log.Printf("FormatSchemaForLLMWithExamples -> Formatting record %d: %+v", i, record)
+
 				result.WriteString(fmt.Sprintf("Record %d:\n", i+1))
 
-				for _, colName := range columnNames {
-					if val, ok := record[colName]; ok {
+				// If we have no columns defined but have records, use the record keys as column names
+				if len(columnNames) == 0 {
+					for key, val := range record {
 						// Format the value based on its type
 						var valStr string
 						if val == nil {
@@ -948,11 +1043,32 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 								valStr = fmt.Sprintf("%v", v)
 							}
 						}
-						result.WriteString(fmt.Sprintf("  %s: %s\n", colName, valStr))
+						result.WriteString(fmt.Sprintf("  %s: %s\n", key, valStr))
+					}
+				} else {
+					// Use the defined column names
+					for _, colName := range columnNames {
+						if val, ok := record[colName]; ok {
+							// Format the value based on its type
+							var valStr string
+							if val == nil {
+								valStr = "NULL"
+							} else {
+								switch v := val.(type) {
+								case string:
+									valStr = fmt.Sprintf("\"%s\"", v)
+								default:
+									valStr = fmt.Sprintf("%v", v)
+								}
+							}
+							result.WriteString(fmt.Sprintf("  %s: %s\n", colName, valStr))
+						}
 					}
 				}
 				result.WriteString("\n")
 			}
+		} else {
+			log.Printf("FormatSchemaForLLMWithExamples -> No example records for table %s", tableName)
 		}
 
 		result.WriteString("\n")
@@ -968,6 +1084,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			viewNames = append(viewNames, viewName)
 		}
 		sort.Strings(viewNames)
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d views", len(viewNames))
 
 		for _, viewName := range viewNames {
 			view := storage.FullSchema.Views[viewName]
@@ -986,6 +1103,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			sequenceNames = append(sequenceNames, sequenceName)
 		}
 		sort.Strings(sequenceNames)
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d sequences", len(sequenceNames))
 
 		for _, sequenceName := range sequenceNames {
 			sequence := storage.FullSchema.Sequences[sequenceName]
@@ -1013,6 +1131,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			enumNames = append(enumNames, enumName)
 		}
 		sort.Strings(enumNames)
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d enums", len(enumNames))
 
 		for _, enumName := range enumNames {
 			enum := storage.FullSchema.Enums[enumName]
@@ -1023,18 +1142,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 		result.WriteString("\n")
 	}
 
-	// Add relationships
-	if len(storage.LLMSchema.Relationships) > 0 {
-		result.WriteString("Relationships:\n")
-		for _, rel := range storage.LLMSchema.Relationships {
-			result.WriteString(fmt.Sprintf("  - %s %s %s", rel.FromTable, rel.Type, rel.ToTable))
-			if rel.Through != "" {
-				result.WriteString(fmt.Sprintf(" through %s", rel.Through))
-			}
-			result.WriteString("\n")
-		}
-	}
-
+	log.Printf("FormatSchemaForLLMWithExamples -> Completed formatting schema with %d tables", len(tableNames))
 	return result.String()
 }
 
@@ -1212,49 +1320,97 @@ type ConstraintInfo struct {
 
 // Create LLM-friendly schema
 func (sm *SchemaManager) createLLMSchema(schema *SchemaInfo, dbType string) *LLMSchemaInfo {
-	var simplifier SchemaSimplifier
-	switch dbType {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
-		simplifier = &PostgresSimplifier{}
-	case constants.DatabaseTypeMySQL:
-		simplifier = &MySQLSimplifier{}
-	default:
-		simplifier = &PostgresSimplifier{} // Default to PostgreSQL
-	}
-
 	llmSchema := &LLMSchemaInfo{
 		Tables:        make(map[string]LLMTableInfo),
 		Relationships: make([]SchemaRelationship, 0),
 	}
 
-	// Convert tables to LLM-friendly format
+	// Get the appropriate simplifier for this database type
+	simplifier := sm.getSimplifier(dbType)
+
+	// Process tables
 	for tableName, table := range schema.Tables {
 		llmTable := LLMTableInfo{
 			Name:           tableName,
 			Description:    table.Comment,
-			Columns:        make([]LLMColumnInfo, 0),
+			Columns:        make([]LLMColumnInfo, 0, len(table.Columns)),
 			RowCount:       table.RowCount,
-			ExampleRecords: []map[string]interface{}{}, // Placeholder for example records
+			ExampleRecords: nil,
 		}
 
-		// Find primary key if it exists
-		for idxName, idx := range table.Indexes {
-			if strings.Contains(strings.ToLower(idxName), "pkey") && idx.IsUnique && len(idx.Columns) == 1 {
-				llmTable.PrimaryKey = idx.Columns[0]
-				break
-			}
-		}
-
-		// Convert columns with simplified types
+		// Process columns using the appropriate simplifier
 		for _, col := range table.Columns {
+			simplifiedType := simplifier.SimplifyDataType(col.Type)
+
 			llmCol := LLMColumnInfo{
 				Name:        col.Name,
-				Type:        simplifier.SimplifyDataType(col.Type),
+				Type:        simplifiedType,
 				Description: col.Comment,
 				IsNullable:  col.IsNullable,
 				IsIndexed:   sm.isColumnIndexed(col.Name, table.Indexes),
 			}
 			llmTable.Columns = append(llmTable.Columns, llmCol)
+		}
+
+		// Find primary key
+		for _, constraint := range table.Constraints {
+			if constraint.Type == "PRIMARY KEY" && len(constraint.Columns) > 0 {
+				llmTable.PrimaryKey = strings.Join(constraint.Columns, ", ")
+				break
+			}
+		}
+
+		// Add ClickHouse-specific information if applicable
+		if dbType == constants.DatabaseTypeClickhouse && table.Comment != "" {
+			// Parse the comment for ClickHouse-specific information
+			comment := table.Comment
+
+			// Extract engine information
+			if strings.Contains(strings.ToLower(comment), "engine=") {
+				engineStart := strings.Index(strings.ToLower(comment), "engine=") + 7
+				engineEnd := len(comment)
+				if spaceIdx := strings.Index(comment[engineStart:], " "); spaceIdx != -1 {
+					engineEnd = engineStart + spaceIdx
+				}
+				engineInfo := comment[engineStart:engineEnd]
+				if engineInfo != "" {
+					llmTable.Description += fmt.Sprintf(" [Engine: %s]", engineInfo)
+				}
+			}
+
+			// Extract partition key information
+			if strings.Contains(strings.ToLower(comment), "partition by") {
+				partitionStart := strings.Index(strings.ToLower(comment), "partition by") + 12
+				partitionEnd := len(comment)
+				for _, keyword := range []string{"order by", "primary key", "sample by", "settings"} {
+					if keywordIdx := strings.Index(strings.ToLower(comment[partitionStart:]), keyword); keywordIdx != -1 {
+						if partitionStart+keywordIdx < partitionEnd {
+							partitionEnd = partitionStart + keywordIdx
+						}
+					}
+				}
+				partitionKey := strings.TrimSpace(comment[partitionStart:partitionEnd])
+				if partitionKey != "" {
+					llmTable.Description += fmt.Sprintf(" [Partition Key: %s]", partitionKey)
+				}
+			}
+
+			// Extract order by key information
+			if strings.Contains(strings.ToLower(comment), "order by") {
+				orderStart := strings.Index(strings.ToLower(comment), "order by") + 8
+				orderEnd := len(comment)
+				for _, keyword := range []string{"partition by", "primary key", "sample by", "settings"} {
+					if keywordIdx := strings.Index(strings.ToLower(comment[orderStart:]), keyword); keywordIdx != -1 {
+						if orderStart+keywordIdx < orderEnd {
+							orderEnd = orderStart + keywordIdx
+						}
+					}
+				}
+				orderByKey := strings.TrimSpace(comment[orderStart:orderEnd])
+				if orderByKey != "" {
+					llmTable.Description += fmt.Sprintf(" [Order By: %s]", orderByKey)
+				}
+			}
 		}
 
 		llmSchema.Tables[tableName] = llmTable
@@ -1266,7 +1422,6 @@ func (sm *SchemaManager) createLLMSchema(schema *SchemaInfo, dbType string) *LLM
 	return llmSchema
 }
 
-// Create LLM-friendly schema with example records
 func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema *SchemaInfo, dbType string, db DBExecutor) *LLMSchemaInfo {
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
@@ -1277,26 +1432,23 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		}
 	}
 
-	var simplifier SchemaSimplifier
-	switch dbType {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
-		simplifier = &PostgresSimplifier{}
-	case constants.DatabaseTypeMySQL:
-		simplifier = &MySQLSimplifier{}
-	default:
-		simplifier = &PostgresSimplifier{} // Default to PostgreSQL
-	}
+	log.Printf("createLLMSchemaWithExamples -> Starting for dbType: %s with %d tables", dbType, len(schema.Tables))
 
 	llmSchema := &LLMSchemaInfo{
 		Tables:        make(map[string]LLMTableInfo),
 		Relationships: make([]SchemaRelationship, 0),
 	}
 
+	// Get the appropriate simplifier for this database type
+	simplifier := sm.getSimplifier(dbType)
+
 	// Get fetcher for the database type
 	fetcher, err := sm.getFetcher(dbType, db)
 	if err != nil {
-		log.Printf("Failed to get schema fetcher: %v", err)
+		log.Printf("createLLMSchemaWithExamples -> Failed to get schema fetcher: %v", err)
 		// Continue without example records
+	} else {
+		log.Printf("createLLMSchemaWithExamples -> Successfully got schema fetcher for dbType: %s", dbType)
 	}
 
 	// Check for context cancellation
@@ -1305,7 +1457,7 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		return llmSchema
 	}
 
-	// Convert tables to LLM-friendly format
+	// Process tables
 	for tableName, table := range schema.Tables {
 		// Check for context cancellation periodically
 		if err := ctx.Err(); err != nil {
@@ -1313,62 +1465,69 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 			return llmSchema
 		}
 
+		log.Printf("createLLMSchemaWithExamples -> Processing table: %s with %d columns", tableName, len(table.Columns))
+
 		llmTable := LLMTableInfo{
 			Name:           tableName,
 			Description:    table.Comment,
-			Columns:        make([]LLMColumnInfo, 0),
+			Columns:        make([]LLMColumnInfo, 0, len(table.Columns)),
 			RowCount:       table.RowCount,
-			ExampleRecords: []map[string]interface{}{},
+			ExampleRecords: nil,
 		}
 
-		// Find primary key if it exists
-		for idxName, idx := range table.Indexes {
-			if strings.Contains(strings.ToLower(idxName), "pkey") && idx.IsUnique && len(idx.Columns) == 1 {
-				llmTable.PrimaryKey = idx.Columns[0]
-				break
-			}
-		}
+		// Process columns using the appropriate simplifier
+		for colName, col := range table.Columns {
+			log.Printf("createLLMSchemaWithExamples -> Processing column: %s of type %s", colName, col.Type)
+			simplifiedType := simplifier.SimplifyDataType(col.Type)
 
-		// Convert columns with simplified types
-		for _, col := range table.Columns {
 			llmCol := LLMColumnInfo{
 				Name:        col.Name,
-				Type:        simplifier.SimplifyDataType(col.Type),
+				Type:        simplifiedType,
 				Description: col.Comment,
 				IsNullable:  col.IsNullable,
 				IsIndexed:   sm.isColumnIndexed(col.Name, table.Indexes),
 			}
 			llmTable.Columns = append(llmTable.Columns, llmCol)
+			log.Printf("createLLMSchemaWithExamples -> Added column: %s of simplified type %s", col.Name, simplifiedType)
+		}
+
+		// Find primary key
+		for constraintName, constraint := range table.Constraints {
+			if constraint.Type == "PRIMARY KEY" && len(constraint.Columns) > 0 {
+				llmTable.PrimaryKey = strings.Join(constraint.Columns, ", ")
+				log.Printf("createLLMSchemaWithExamples -> Found primary key constraint %s with columns: %s",
+					constraintName, llmTable.PrimaryKey)
+				break
+			}
 		}
 
 		// Fetch example records if fetcher is available
 		if fetcher != nil {
-			// Check for context cancellation before fetching examples
-			if err := ctx.Err(); err != nil {
-				log.Printf("createLLMSchemaWithExamples -> context cancelled before fetching examples for table %s: %v", tableName, err)
-				llmSchema.Tables[tableName] = llmTable
-				continue
-			}
-
-			exampleRecords, err := fetcher.FetchExampleRecords(ctx, db, tableName, 3) // Fetch 3 example records
+			log.Printf("createLLMSchemaWithExamples -> Fetching example records for table: %s", tableName)
+			examples, err := fetcher.FetchExampleRecords(ctx, db, tableName, 3)
 			if err != nil {
-				log.Printf("Failed to fetch example records for table %s: %v", tableName, err)
+				log.Printf("createLLMSchemaWithExamples -> Failed to fetch example records for table %s: %v", tableName, err)
 			} else {
-				llmTable.ExampleRecords = exampleRecords
+				log.Printf("createLLMSchemaWithExamples -> Successfully fetched %d example records for table %s", len(examples), tableName)
+				llmTable.ExampleRecords = examples
+
+				// Debug the example records
+				for i, record := range examples {
+					log.Printf("createLLMSchemaWithExamples -> Example record %d for table %s: %+v", i, tableName, record)
+				}
 			}
+		} else {
+			log.Printf("createLLMSchemaWithExamples -> No fetcher available, skipping example records for table: %s", tableName)
 		}
 
 		llmSchema.Tables[tableName] = llmTable
-	}
-
-	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
-		log.Printf("createLLMSchemaWithExamples -> context cancelled before extracting relationships: %v", err)
-		return llmSchema
+		log.Printf("createLLMSchemaWithExamples -> Added table %s to LLM schema with %d columns and %d example records",
+			tableName, len(llmTable.Columns), len(llmTable.ExampleRecords))
 	}
 
 	// Extract relationships
 	llmSchema.Relationships = sm.extractRelationships(schema)
+	log.Printf("createLLMSchemaWithExamples -> Extracted %d relationships", len(llmSchema.Relationships))
 
 	return llmSchema
 }
@@ -1431,19 +1590,25 @@ func (sm *SchemaManager) compressSchema(storage *SchemaStorage) ([]byte, error) 
 
 // Add method to register default fetchers
 func (sm *SchemaManager) registerDefaultFetchers() {
-	// Register PostgreSQL fetcher
+	// Register PostgreSQL schema fetcher
 	sm.RegisterFetcher("postgresql", func(db DBExecutor) SchemaFetcher {
 		return &PostgresDriver{}
 	})
 
+	// Register YugabyteDB schema fetcher (uses PostgreSQL fetcher)
 	sm.RegisterFetcher("yugabytedb", func(db DBExecutor) SchemaFetcher {
 		return &PostgresDriver{}
 	})
 
-	// Register MySQL fetcher when implemented
-	// sm.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
-	//     return &MySQLDriver{}
-	// })
+	// Register MySQL schema fetcher
+	sm.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
+		return NewMySQLSchemaFetcher(db)
+	})
+
+	// Register ClickHouse schema fetcher
+	sm.RegisterFetcher("clickhouse", func(db DBExecutor) SchemaFetcher {
+		return NewClickHouseSchemaFetcher(db)
+	})
 }
 
 // Update the CompareSchemasDetailed function to be more precise
@@ -1778,7 +1943,15 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 
 	// Try to get from storage first
 	storage, err := sm.getStoredSchema(ctx, chatID)
-	if err == nil && storage != nil && storage.LLMSchema != nil {
+	if err != nil {
+		// If this is a first-time schema storage scenario, we'll continue to fetch the schema
+		if strings.Contains(err.Error(), "first-time schema storage") {
+			log.Printf("GetSchemaWithExamples -> First-time schema storage for chatID: %s, will fetch schema", chatID)
+		} else {
+			log.Printf("GetSchemaWithExamples -> Error retrieving stored schema: %v, will fetch schema", err)
+		}
+		// Continue to fetch the schema
+	} else if storage != nil && storage.LLMSchema != nil {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
 			log.Printf("GetSchemaWithExamples -> context cancelled after getting stored schema: %v", err)
@@ -1831,6 +2004,11 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 	// Get the stored schema with examples
 	storage, err = sm.getStoredSchema(ctx, chatID)
 	if err != nil {
+		// Check if this is a first-time schema storage scenario
+		if strings.Contains(err.Error(), "first-time schema storage") {
+			log.Printf("GetSchemaWithExamples -> First-time schema storage for chatID: %s", chatID)
+			return nil, fmt.Errorf("first-time schema storage, please try again: %v", err)
+		}
 		return nil, fmt.Errorf("failed to get stored schema: %v", err)
 	}
 
@@ -1839,53 +2017,47 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 
 // FormatSchemaWithExamplesAndCollections formats the schema with example records for LLM with selected collections
 func (sm *SchemaManager) FormatSchemaWithExamplesAndCollections(ctx context.Context, chatID string, db DBExecutor, dbType string, selectedCollections []string) (string, error) {
-	// If selectedCollections is "ALL" or empty, fetch all tables
-	var selectedTables []string
-	if len(selectedCollections) == 0 || (len(selectedCollections) == 1 && selectedCollections[0] == "ALL") {
-		selectedTables = []string{"ALL"}
-	} else {
-		selectedTables = selectedCollections
-	}
-
-	storage, err := sm.GetSchemaWithExamples(ctx, chatID, db, dbType, selectedTables)
+	// Get schema with examples
+	storage, err := sm.GetSchemaWithExamples(ctx, chatID, db, dbType, selectedCollections)
 	if err != nil {
 		return "", fmt.Errorf("failed to get schema with examples: %v", err)
 	}
 
-	// Filter the schema to only include selected collections if provided
-	if len(selectedCollections) > 0 && selectedCollections[0] != "ALL" {
-		filteredStorage := &SchemaStorage{
-			FullSchema: storage.FullSchema,
-			LLMSchema: &LLMSchemaInfo{
-				Tables:        make(map[string]LLMTableInfo),
-				Relationships: make([]SchemaRelationship, 0),
-			},
-			TableChecksums: storage.TableChecksums,
-			UpdatedAt:      storage.UpdatedAt,
-		}
-
-		// Create a map for quick lookup of selected collections
-		selectedMap := make(map[string]bool)
-		for _, collection := range selectedCollections {
-			selectedMap[collection] = true
-		}
-
-		// Filter tables
-		for tableName, tableInfo := range storage.LLMSchema.Tables {
-			if selectedMap[tableName] {
-				filteredStorage.LLMSchema.Tables[tableName] = tableInfo
-			}
-		}
-
-		// Filter relationships
-		for _, relationship := range storage.LLMSchema.Relationships {
-			if selectedMap[relationship.FromTable] && selectedMap[relationship.ToTable] {
-				filteredStorage.LLMSchema.Relationships = append(filteredStorage.LLMSchema.Relationships, relationship)
-			}
-		}
-
-		return sm.FormatSchemaForLLMWithExamples(filteredStorage), nil
-	}
-
+	// Format the schema for LLM
 	return sm.FormatSchemaForLLMWithExamples(storage), nil
+}
+
+// Add a method to register simplifiers
+func (sm *SchemaManager) RegisterSimplifier(dbType string, simplifier SchemaSimplifier) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.simplifiers[dbType] = simplifier
+}
+
+// Add a method to get the appropriate simplifier
+func (sm *SchemaManager) getSimplifier(dbType string) SchemaSimplifier {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	simplifier, exists := sm.simplifiers[dbType]
+	if !exists {
+		// Default to PostgreSQL simplifier if no specific one is found
+		return &PostgresSimplifier{}
+	}
+	return simplifier
+}
+
+// Add a method to register default simplifiers
+func (sm *SchemaManager) registerDefaultSimplifiers() {
+	// Register PostgreSQL simplifier
+	sm.RegisterSimplifier("postgresql", &PostgresSimplifier{})
+
+	// Register YugabyteDB simplifier (uses PostgreSQL simplifier)
+	sm.RegisterSimplifier("yugabytedb", &PostgresSimplifier{})
+
+	// Register MySQL simplifier
+	sm.RegisterSimplifier("mysql", &MySQLSimplifier{})
+
+	// Register ClickHouse simplifier
+	sm.RegisterSimplifier("clickhouse", &ClickHouseSimplifier{})
 }
