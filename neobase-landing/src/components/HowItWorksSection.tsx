@@ -48,7 +48,7 @@ const HowItWorksSection: React.FC = () => {
                 <div 
                   key={index} 
                   className="flex gap-3 md:gap-4 neo-border p-3 sm:p-4 md:p-5 bg-white hover:shadow-md transition-all duration-300"
-                  style={{ transform: `rotate(${index % 2 === 0 ? '-0.3deg' : '0.3deg'})` }}
+                  style={{ transform: `rotate(${index % 2 === 0 ? '-0.4deg' : '0.4deg'})` }}
                 >
                   <div className="flex-shrink-0 bg-[#FFDB58]/20 p-2 md:p-3 rounded-lg self-start">
                     {step.icon}
@@ -71,7 +71,7 @@ const HowItWorksSection: React.FC = () => {
                   rel="noopener noreferrer" 
                   className="neo-button inline-flex items-center justify-center gap-2 py-2 px-6 md:py-3 md:px-8 text-base md:text-lg"
                 >
-                  <span className="flex items-center gap-2 md:gap-4"><Server className="w-4 h-4 md:w-5 md:h-5" /> Setup yours</span>
+                  <span className="flex items-center gap-2 md:gap-4"><Server className="w-4 h-4 md:w-5 md:h-5" /> Setup Yours</span>
                 </a>
               </div>
             </div>
