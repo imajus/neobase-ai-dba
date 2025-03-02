@@ -83,11 +83,39 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  neobase-example-clickhouse:
+    image: yandex/clickhouse-server:latest
+    container_name: neobase-example-clickhouse
+    restart: always
+    ports:
+      - 8123:8123
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_DATABASE: testdb
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+  neobase-example-mysql:
+    image: mysql:latest
+    container_name: neobase-example-mysql
+    restart: always
+    ports:
+      - 3306:3306
+    environment:
+      MYSQL_USER: mysql
+      MYSQL_PASSWORD: mysql
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: testdb
+    volumes:
+      - mysql-data:/var/lib/mysql
+
 volumes:
   neobase-mongodb-data:
   neobase-redis-data:
   postgres-data:
-
+  clickhouse-data:
+  mysql-data:
 
 networks:
   neobase-network:

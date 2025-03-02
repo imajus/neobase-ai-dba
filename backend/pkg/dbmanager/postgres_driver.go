@@ -287,6 +287,12 @@ func splitStatements(query string) []string {
 
 func (d *PostgresDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
 	log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Starting transaction")
+
+	if conn == nil || conn.DB == nil {
+		log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx: Connection or DB is nil")
+		return nil
+	}
+
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
 		log.Printf("PostgreSQL/YugabyteDB Driver -> BeginTx -> Failed to get SQL connection: %v", err)

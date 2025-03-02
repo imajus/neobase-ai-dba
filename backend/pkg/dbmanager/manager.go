@@ -93,6 +93,8 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		return &PostgresDriver{}
 	})
 
+	m.registerDefaultDrivers()
+
 	return m, nil
 }
 
@@ -322,6 +324,10 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 	switch conn.Config.Type {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB: // Use same wrapper for both
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
+	case constants.DatabaseTypeMySQL:
+		return NewMySQLWrapper(conn.DB, m, chatID), nil
+	case constants.DatabaseTypeClickhouse:
+		return NewClickHouseWrapper(conn.DB, m, chatID), nil
 	// Add cases for other database types
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", conn.Config.Type)
@@ -905,7 +911,17 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 					}
 				}
 			case constants.DatabaseTypeMySQL:
-				// To be done
+				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
+					if conn.OnSchemaChange != nil {
+						conn.OnSchemaChange(conn.ChatID)
+					}
+				}
+			case constants.DatabaseTypeClickhouse:
+				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
+					if conn.OnSchemaChange != nil {
+						conn.OnSchemaChange(conn.ChatID)
+					}
+				}
 			}
 		}()
 
@@ -946,6 +962,22 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		err = db.Ping()
 		if err != nil {
 			return fmt.Errorf("failed to connect to MySQL: %v", err)
+		}
+
+	case constants.DatabaseTypeClickhouse:
+		dsn := fmt.Sprintf(
+			"clickhouse://%s:%s@%s:%s/%s",
+			*config.Username, *config.Password, config.Host, config.Port, config.Database,
+		)
+		db, err := sql.Open("clickhouse", dsn)
+		if err != nil {
+			return fmt.Errorf("failed to create ClickHouse connection: %v", err)
+		}
+		defer db.Close()
+
+		err = db.Ping()
+		if err != nil {
+			return fmt.Errorf("failed to connect to ClickHouse: %v", err)
 		}
 
 	case constants.DatabaseTypeMongoDB:
@@ -1113,4 +1145,18 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 
 	log.Printf("DBManager -> RefreshSchemaWithExamples -> Successfully refreshed schema for chatID: %s (schema length: %d)", chatID, len(formattedSchema))
 	return formattedSchema, nil
+}
+
+func (m *Manager) registerDefaultDrivers() {
+	// Register PostgreSQL driver
+	m.RegisterDriver("postgresql", NewPostgresDriver())
+
+	// Register YugabyteDB driver (uses PostgreSQL driver)
+	m.RegisterDriver("yugabytedb", NewPostgresDriver())
+
+	// Register MySQL driver
+	m.RegisterDriver("mysql", NewMySQLDriver())
+
+	// Register ClickHouse driver
+	m.RegisterDriver("clickhouse", NewClickHouseDriver())
 }

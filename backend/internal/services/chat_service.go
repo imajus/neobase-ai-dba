@@ -89,8 +89,8 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	log.Printf("Creating chat for user %s", userID)
 
 	// Check if the database type is supported
-	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB {
-		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL and YugabyteDB are supported for now")
+	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB && req.Connection.Type != constants.DatabaseTypeMySQL && req.Connection.Type != constants.DatabaseTypeClickhouse {
+		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL, YugabyteDB, MySQL and Clickhouse are supported for now")
 	}
 
 	// Test connection without creating a persistent connection
@@ -588,7 +588,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 			if queryMap["rollbackQuery"] != nil {
 				rollbackQuery = utils.ToStringPtr(queryMap["rollbackQuery"].(string))
 			}
-			queries = append(queries, models.Query{
+
+			// Create the query object
+			query := models.Query{
 				ID:                     primitive.NewObjectID(),
 				Query:                  queryMap["query"].(string),
 				Description:            queryMap["explanation"].(string),
@@ -606,7 +608,34 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, st
 				RollbackQuery:          rollbackQuery,
 				RollbackDependentQuery: rollbackDependentQuery,
 				Pagination:             pagination,
-			})
+			}
+
+			// Handle ClickHouse-specific metadata
+			if connInfo.Config.Type == constants.DatabaseTypeClickhouse {
+				metadata := make(map[string]interface{})
+
+				// Add ClickHouse-specific fields if they exist
+				if queryMap["engineType"] != nil {
+					metadata["engineType"] = queryMap["engineType"]
+				}
+				if queryMap["partitionKey"] != nil {
+					metadata["partitionKey"] = queryMap["partitionKey"]
+				}
+				if queryMap["orderByKey"] != nil {
+					metadata["orderByKey"] = queryMap["orderByKey"]
+				}
+
+				// Store metadata as JSON if we have any
+				if len(metadata) > 0 {
+					metadataJSON, err := json.Marshal(metadata)
+					if err == nil {
+						metadataStr := string(metadataJSON)
+						query.Metadata = &metadataStr
+					}
+				}
+			}
+
+			queries = append(queries, query)
 		}
 	}
 
@@ -1120,7 +1149,7 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 }
 
 func isValidDBType(dbType string) bool {
-	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB} // Add more as supported
+	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB, constants.DatabaseTypeClickhouse} // Add more as supported
 	for _, t := range validTypes {
 		if t == dbType {
 			return true

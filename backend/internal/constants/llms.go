@@ -13,6 +13,10 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 			return OpenAIPostgresLLMResponseSchema
 		case DatabaseTypeYugabyteDB:
 			return OpenAIYugabyteDBLLMResponseSchema
+		case DatabaseTypeMySQL:
+			return OpenAIMySQLLLMResponseSchema
+		case DatabaseTypeClickhouse:
+			return OpenAIClickhouseLLMResponseSchema
 		default:
 			return OpenAIPostgresLLMResponseSchema
 		}
@@ -22,6 +26,12 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 			return GeminiPostgresLLMResponseSchema
 		case DatabaseTypeYugabyteDB:
 			return GeminiYugabyteDBLLMResponseSchema
+		case DatabaseTypeMySQL:
+			return GeminiMySQLLLMResponseSchema
+		case DatabaseTypeClickhouse:
+			return GeminiClickhouseLLMResponseSchema
+		default:
+			return GeminiPostgresLLMResponseSchema
 		}
 	}
 	return ""
@@ -38,6 +48,8 @@ func GetSystemPrompt(provider string, dbType string) string {
 			return OpenAIMySQLPrompt
 		case DatabaseTypeYugabyteDB:
 			return OpenAIYugabyteDBPrompt
+		case DatabaseTypeClickhouse:
+			return OpenAIClickhousePrompt
 		default:
 			return OpenAIPostgreSQLPrompt // Default to PostgreSQL
 		}
@@ -47,6 +59,12 @@ func GetSystemPrompt(provider string, dbType string) string {
 			return GeminiPostgreSQLPrompt
 		case DatabaseTypeYugabyteDB:
 			return GeminiYugabyteDBPrompt
+		case DatabaseTypeMySQL:
+			return GeminiMySQLPrompt
+		case DatabaseTypeClickhouse:
+			return GeminiClickhousePrompt
+		default:
+			return GeminiPostgreSQLPrompt // Default to PostgreSQL
 		}
 	}
 	return ""

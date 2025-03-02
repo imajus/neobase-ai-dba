@@ -46,8 +46,8 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
         console.log('SelectTablesModal: About to call getTables API for chat.id:', chat.id);
         // Get tables from the API
         const tablesResponse = await chatService.getTables(chat.id);
-        console.log('SelectTablesModal: Received tables response:', tablesResponse.tables.length, 'tables');
-        setTables(tablesResponse.tables);
+        console.log('SelectTablesModal: Received tables response:', tablesResponse.tables?.length, 'tables');
+        setTables(tablesResponse.tables || []);
         
         // Initialize selected tables based on is_selected field
         const selectedTableNames = tablesResponse.tables
@@ -57,7 +57,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
         setSelectedTables(selectedTableNames);
         
         // Check if all tables are selected to set selectAll state correctly
-        setSelectAll(selectedTableNames.length === tablesResponse.tables.length);
+        setSelectAll(selectedTableNames.length === tablesResponse.tables?.length);
       } catch (error: any) {
         console.error('Failed to load tables:', error);
         setError(error.message || 'Failed to load tables');
@@ -87,7 +87,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
       } else {
         // If all tables are now selected, check "Select All"
         const newSelected = [...prev, tableName];
-        if (newSelected.length === tables.length) {
+        if (newSelected.length === tables?.length) {
           setSelectAll(true);
         }
         return newSelected;
@@ -110,7 +110,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
       return;
     } else {
       // Select all
-      setSelectedTables(tables.map(table => table.name));
+      setSelectedTables(tables?.map(table => table.name) || []);
       setSelectAll(true);
     }
   };
