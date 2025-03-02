@@ -23,13 +23,13 @@
 ## Supported DBs
 - PostgreSQL
 - Yugabyte
+- MySQL
+- ClickHouse
 
 ## Planned to be supported DBs
 - MongoDB (Priority 1)
-- MySQL (Priority 2)
+- Redis (Priority 2)
 - Neo4j DB (Priority 3)
-- Redis (Priority 4)
-- Clickhouse (Priority 5)
 
 ## Supported LLM Clients
 - OpenAI (Any chat completion model)
