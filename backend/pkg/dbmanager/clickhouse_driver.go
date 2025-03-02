@@ -2,6 +2,7 @@ package dbmanager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
@@ -218,8 +219,42 @@ func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, q
 				}
 				return result
 			}
+
+			// Process the rows to ensure proper type handling
+			processedRows := make([]map[string]interface{}, len(rows))
+			for i, row := range rows {
+				processedRow := make(map[string]interface{})
+				for key, val := range row {
+					// Handle different types properly
+					switch v := val.(type) {
+					case []byte:
+						// Convert []byte to string
+						processedRow[key] = string(v)
+					case string:
+						// Keep strings as is
+						processedRow[key] = v
+					case float64:
+						// Keep numbers as is
+						processedRow[key] = v
+					case int64:
+						// Keep integers as is
+						processedRow[key] = v
+					case bool:
+						// Keep booleans as is
+						processedRow[key] = v
+					case nil:
+						// Keep nulls as is
+						processedRow[key] = nil
+					default:
+						// For other types, convert to string
+						processedRow[key] = fmt.Sprintf("%v", v)
+					}
+				}
+				processedRows[i] = processedRow
+			}
+
 			result.Result = map[string]interface{}{
-				"rows": rows,
+				"results": processedRows,
 			}
 		} else {
 			// For other queries (INSERT, CREATE, ALTER, etc.), execute and return affected rows
@@ -233,8 +268,15 @@ func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, q
 			}
 
 			rowsAffected := execResult.RowsAffected
-			result.Result = map[string]interface{}{
-				"rowsAffected": rowsAffected,
+			if rowsAffected > 0 {
+				result.Result = map[string]interface{}{
+					"rowsAffected": rowsAffected,
+					"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
+				}
+			} else {
+				result.Result = map[string]interface{}{
+					"message": "Query performed successfully",
+				}
 			}
 		}
 	}
@@ -242,6 +284,20 @@ func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, q
 	// Calculate execution time
 	executionTime := int(time.Since(startTime).Milliseconds())
 	result.ExecutionTime = executionTime
+
+	// Marshal the result to JSON
+	resultJSON, err := json.Marshal(result.Result)
+	if err != nil {
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "JSON_MARSHAL_FAILED",
+				Message: err.Error(),
+				Details: "Failed to marshal query results",
+			},
+		}
+	}
+	result.ResultJSON = string(resultJSON)
 
 	return result
 }
@@ -355,8 +411,42 @@ func (t *ClickHouseTransaction) ExecuteQuery(ctx context.Context, conn *Connecti
 				}
 				return result
 			}
+
+			// Process the rows to ensure proper type handling
+			processedRows := make([]map[string]interface{}, len(rows))
+			for i, row := range rows {
+				processedRow := make(map[string]interface{})
+				for key, val := range row {
+					// Handle different types properly
+					switch v := val.(type) {
+					case []byte:
+						// Convert []byte to string
+						processedRow[key] = string(v)
+					case string:
+						// Keep strings as is
+						processedRow[key] = v
+					case float64:
+						// Keep numbers as is
+						processedRow[key] = v
+					case int64:
+						// Keep integers as is
+						processedRow[key] = v
+					case bool:
+						// Keep booleans as is
+						processedRow[key] = v
+					case nil:
+						// Keep nulls as is
+						processedRow[key] = nil
+					default:
+						// For other types, convert to string
+						processedRow[key] = fmt.Sprintf("%v", v)
+					}
+				}
+				processedRows[i] = processedRow
+			}
+
 			result.Result = map[string]interface{}{
-				"rows": rows,
+				"results": processedRows,
 			}
 		} else {
 			// For other queries (INSERT, CREATE, ALTER, etc.), execute and return affected rows
@@ -370,8 +460,15 @@ func (t *ClickHouseTransaction) ExecuteQuery(ctx context.Context, conn *Connecti
 			}
 
 			rowsAffected := execResult.RowsAffected
-			result.Result = map[string]interface{}{
-				"rowsAffected": rowsAffected,
+			if rowsAffected > 0 {
+				result.Result = map[string]interface{}{
+					"rowsAffected": rowsAffected,
+					"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
+				}
+			} else {
+				result.Result = map[string]interface{}{
+					"message": "Query performed successfully",
+				}
 			}
 		}
 	}
@@ -379,6 +476,20 @@ func (t *ClickHouseTransaction) ExecuteQuery(ctx context.Context, conn *Connecti
 	// Calculate execution time
 	executionTime := int(time.Since(startTime).Milliseconds())
 	result.ExecutionTime = executionTime
+
+	// Marshal the result to JSON
+	resultJSON, err := json.Marshal(result.Result)
+	if err != nil {
+		return &QueryExecutionResult{
+			ExecutionTime: int(time.Since(startTime).Milliseconds()),
+			Error: &dtos.QueryError{
+				Code:    "JSON_MARSHAL_FAILED",
+				Message: err.Error(),
+				Details: "Failed to marshal query results",
+			},
+		}
+	}
+	result.ResultJSON = string(resultJSON)
 
 	return result
 }
@@ -397,4 +508,49 @@ func (t *ClickHouseTransaction) Rollback() error {
 		return fmt.Errorf("no active transaction to rollback")
 	}
 	return t.tx.Rollback().Error
+}
+
+// GetSchema retrieves the database schema
+func (d *ClickHouseDriver) GetSchema(ctx context.Context, db DBExecutor, selectedTables []string) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("ClickHouseDriver -> GetSchema -> Context cancelled: %v", err)
+		return nil, err
+	}
+
+	// Create a new ClickHouse schema fetcher
+	fetcher := NewClickHouseSchemaFetcher(db)
+
+	// Get the schema
+	return fetcher.GetSchema(ctx, db, selectedTables)
+}
+
+// GetTableChecksum calculates a checksum for a table
+func (d *ClickHouseDriver) GetTableChecksum(ctx context.Context, db DBExecutor, table string) (string, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("ClickHouseDriver -> GetTableChecksum -> Context cancelled: %v", err)
+		return "", err
+	}
+
+	// Create a new ClickHouse schema fetcher
+	fetcher := NewClickHouseSchemaFetcher(db)
+
+	// Get the table checksum
+	return fetcher.GetTableChecksum(ctx, db, table)
+}
+
+// FetchExampleRecords fetches example records from a table
+func (d *ClickHouseDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, table string, limit int) ([]map[string]interface{}, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		log.Printf("ClickHouseDriver -> FetchExampleRecords -> Context cancelled: %v", err)
+		return nil, err
+	}
+
+	// Create a new ClickHouse schema fetcher
+	fetcher := NewClickHouseSchemaFetcher(db)
+
+	// Get example records
+	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }

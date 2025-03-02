@@ -286,11 +286,16 @@ func (sm *SchemaManager) CheckSchemaChanges(ctx context.Context, chatID string, 
 	// Try to get stored schema
 	storedSchema, err := sm.getStoredSchema(ctx, chatID)
 	if err != nil {
-		log.Printf("SchemaManager -> CheckSchemaChanges -> No stored schema found: %v", err)
+		// This is a first-time schema storage scenario or there was an error retrieving the schema
+		if strings.Contains(err.Error(), "first-time schema storage") || strings.Contains(err.Error(), "key does not exist") {
+			log.Printf("SchemaManager -> CheckSchemaChanges -> First-time schema storage for chatID: %s", chatID)
+		} else {
+			log.Printf("SchemaManager -> CheckSchemaChanges -> Error retrieving stored schema: %v", err)
+		}
 
-		// First time - store current schema
+		// First time - store current schema without any comparison
 		if err := sm.storeSchema(ctx, chatID, currentSchema, db, dbType); err != nil {
-			return nil, true, err
+			return nil, false, fmt.Errorf("failed to store schema: %v", err)
 		}
 
 		// Return special diff for first time with full schema
@@ -655,7 +660,24 @@ func (sm *SchemaManager) getStoredSchema(ctx context.Context, chatID string) (*S
 		return nil, err
 	}
 
-	return sm.storageService.Retrieve(ctx, chatID)
+	schema, err := sm.storageService.Retrieve(ctx, chatID)
+	if err != nil {
+		// Check if this is a "key does not exist" error, which is expected for first-time schema storage
+		if strings.Contains(err.Error(), "key does not exist") {
+			log.Printf("getStoredSchema -> No schema found for chatID %s (first-time schema storage)", chatID)
+			return nil, fmt.Errorf("no stored schema found (first-time schema storage)")
+		}
+		// For other errors, return as is
+		return nil, err
+	}
+
+	// Validate the schema
+	if schema == nil || schema.FullSchema == nil || len(schema.FullSchema.Tables) == 0 {
+		log.Printf("getStoredSchema -> Invalid or empty schema found for chatID %s (treating as first-time schema storage)", chatID)
+		return nil, fmt.Errorf("invalid or empty schema found (first-time schema storage)")
+	}
+
+	return schema, nil
 }
 
 // Add type-specific schema simplification
@@ -750,6 +772,8 @@ var (
 
 // FormatSchemaForLLM formats the schema into a LLM-friendly string
 func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
+	log.Printf("FormatSchemaForLLM -> Starting with %d tables", len(schema.Tables))
+
 	var result strings.Builder
 	result.WriteString("Current Database Schema:\n\n")
 
@@ -759,10 +783,14 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 		tableNames = append(tableNames, tableName)
 	}
 	sort.Strings(tableNames)
+	log.Printf("FormatSchemaForLLM -> Sorted %d table names", len(tableNames))
 
 	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
 		table := schema.Tables[tableName]
+		log.Printf("FormatSchemaForLLM -> Formatting table: %s with %d columns",
+			tableName, len(table.Columns))
+
 		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
 		if table.Comment != "" {
 			result.WriteString(fmt.Sprintf("Description: %s\n", table.Comment))
@@ -774,9 +802,17 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			columnNames = append(columnNames, columnName)
 		}
 		sort.Strings(columnNames)
+		log.Printf("FormatSchemaForLLM -> Table %s has %d columns", tableName, len(columnNames))
+
+		// Check if we have any columns
+		if len(columnNames) == 0 {
+			log.Printf("FormatSchemaForLLM -> Warning: No columns found for table %s", tableName)
+		}
 
 		for _, columnName := range columnNames {
 			column := table.Columns[columnName]
+			log.Printf("FormatSchemaForLLM -> Formatting column: %s of type %s", columnName, column.Type)
+
 			nullable := "NOT NULL"
 			if column.IsNullable {
 				nullable = "NULL"
@@ -788,14 +824,24 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			))
 
 			// Check if column is primary key by looking at indexes
+			isPrimaryKey := false
+			isUnique := false
 			for _, idx := range table.Indexes {
 				if len(idx.Columns) == 1 && idx.Columns[0] == columnName {
 					if strings.Contains(strings.ToLower(idx.Name), "pkey") {
-						result.WriteString(" PRIMARY KEY")
+						isPrimaryKey = true
 					} else if idx.IsUnique {
-						result.WriteString(" UNIQUE")
+						isUnique = true
 					}
 				}
+			}
+
+			if isPrimaryKey {
+				result.WriteString(" PRIMARY KEY")
+				log.Printf("FormatSchemaForLLM -> Column %s is a PRIMARY KEY", columnName)
+			} else if isUnique {
+				result.WriteString(" UNIQUE")
+				log.Printf("FormatSchemaForLLM -> Column %s has a UNIQUE constraint", columnName)
 			}
 
 			if column.DefaultValue != "" {
@@ -815,11 +861,14 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 		result.WriteString("\n")
 	}
 
+	log.Printf("FormatSchemaForLLM -> Completed formatting schema with %d tables", len(tableNames))
 	return result.String()
 }
 
 // FormatSchemaForLLMWithExamples formats the schema into a LLM-friendly string with example records
 func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) string {
+	log.Printf("FormatSchemaForLLMWithExamples -> Starting with %d tables", len(storage.LLMSchema.Tables))
+
 	var result strings.Builder
 	result.WriteString("Current Database Schema:\n\n")
 
@@ -829,10 +878,14 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 		tableNames = append(tableNames, tableName)
 	}
 	sort.Strings(tableNames)
+	log.Printf("FormatSchemaForLLMWithExamples -> Sorted %d table names", len(tableNames))
 
 	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
 		table := storage.LLMSchema.Tables[tableName]
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting table: %s with %d columns and %d example records",
+			tableName, len(table.Columns), len(table.ExampleRecords))
+
 		result.WriteString(fmt.Sprintf("Table: %s\n", tableName))
 		if table.Description != "" {
 			result.WriteString(fmt.Sprintf("Description: %s\n", table.Description))
@@ -842,6 +895,11 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 		sort.Slice(table.Columns, func(i, j int) bool {
 			return table.Columns[i].Name < table.Columns[j].Name
 		})
+
+		// Check if we have any columns
+		if len(table.Columns) == 0 {
+			log.Printf("FormatSchemaForLLMWithExamples -> Warning: No columns found for table %s", tableName)
+		}
 
 		for _, column := range table.Columns {
 			nullable := "NOT NULL"
@@ -867,37 +925,6 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			result.WriteString("\n")
 		}
 
-		// Add foreign key information
-		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.ForeignKeys) > 0 {
-			result.WriteString("\nForeign Keys:\n")
-
-			// Sort foreign keys for consistent output
-			fkNames := make([]string, 0, len(fullTable.ForeignKeys))
-			for fkName := range fullTable.ForeignKeys {
-				fkNames = append(fkNames, fkName)
-			}
-			sort.Strings(fkNames)
-
-			for _, fkName := range fkNames {
-				fk := fullTable.ForeignKeys[fkName]
-				result.WriteString(fmt.Sprintf("  - %s: %s references %s(%s)",
-					fkName,
-					fk.ColumnName,
-					fk.RefTable,
-					fk.RefColumn))
-
-				if fk.OnDelete != "NO ACTION" {
-					result.WriteString(fmt.Sprintf(" ON DELETE %s", fk.OnDelete))
-				}
-
-				if fk.OnUpdate != "NO ACTION" {
-					result.WriteString(fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate))
-				}
-
-				result.WriteString("\n")
-			}
-		}
-
 		// Add index information
 		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.Indexes) > 0 {
 			result.WriteString("\nIndexes:\n")
@@ -908,6 +935,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 				indexNames = append(indexNames, indexName)
 			}
 			sort.Strings(indexNames)
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d indexes for table %s", len(indexNames), tableName)
 
 			for _, indexName := range indexNames {
 				index := fullTable.Indexes[indexName]
@@ -932,6 +960,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 				constraintNames = append(constraintNames, constraintName)
 			}
 			sort.Strings(constraintNames)
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d constraints for table %s", len(constraintNames), tableName)
 
 			for _, constraintName := range constraintNames {
 				constraint := fullTable.Constraints[constraintName]
@@ -942,11 +971,46 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			}
 		}
 
+		// Add foreign key information
+		if fullTable, ok := storage.FullSchema.Tables[tableName]; ok && len(fullTable.ForeignKeys) > 0 {
+			result.WriteString("\nForeign Keys:\n")
+
+			// Sort foreign keys for consistent output
+			fkNames := make([]string, 0, len(fullTable.ForeignKeys))
+			for fkName := range fullTable.ForeignKeys {
+				fkNames = append(fkNames, fkName)
+			}
+			sort.Strings(fkNames)
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d foreign keys for table %s", len(fkNames), tableName)
+
+			for _, fkName := range fkNames {
+				fk := fullTable.ForeignKeys[fkName]
+				result.WriteString(fmt.Sprintf("  - %s: %s references %s(%s)",
+					fkName,
+					fk.ColumnName,
+					fk.RefTable,
+					fk.RefColumn))
+
+				if fk.OnDelete != "NO ACTION" {
+					result.WriteString(fmt.Sprintf(" ON DELETE %s", fk.OnDelete))
+				}
+
+				if fk.OnUpdate != "NO ACTION" {
+					result.WriteString(fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate))
+				}
+
+				result.WriteString("\n")
+			}
+		}
+
 		// Add row count information
 		result.WriteString(fmt.Sprintf("\nRow Count: %d\n", table.RowCount))
 
 		// Add example records if available
 		if len(table.ExampleRecords) > 0 {
+			log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d example records for table %s",
+				len(table.ExampleRecords), tableName)
+
 			result.WriteString("\nExample Records:\n")
 
 			// Get column names for header
@@ -955,12 +1019,18 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 				columnNames[i] = col.Name
 			}
 
+			// Debug column names
+			log.Printf("FormatSchemaForLLMWithExamples -> Column names for table %s: %v", tableName, columnNames)
+
 			// Format as a simple table
 			for i, record := range table.ExampleRecords {
+				log.Printf("FormatSchemaForLLMWithExamples -> Formatting record %d: %+v", i, record)
+
 				result.WriteString(fmt.Sprintf("Record %d:\n", i+1))
 
-				for _, colName := range columnNames {
-					if val, ok := record[colName]; ok {
+				// If we have no columns defined but have records, use the record keys as column names
+				if len(columnNames) == 0 {
+					for key, val := range record {
 						// Format the value based on its type
 						var valStr string
 						if val == nil {
@@ -973,11 +1043,32 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 								valStr = fmt.Sprintf("%v", v)
 							}
 						}
-						result.WriteString(fmt.Sprintf("  %s: %s\n", colName, valStr))
+						result.WriteString(fmt.Sprintf("  %s: %s\n", key, valStr))
+					}
+				} else {
+					// Use the defined column names
+					for _, colName := range columnNames {
+						if val, ok := record[colName]; ok {
+							// Format the value based on its type
+							var valStr string
+							if val == nil {
+								valStr = "NULL"
+							} else {
+								switch v := val.(type) {
+								case string:
+									valStr = fmt.Sprintf("\"%s\"", v)
+								default:
+									valStr = fmt.Sprintf("%v", v)
+								}
+							}
+							result.WriteString(fmt.Sprintf("  %s: %s\n", colName, valStr))
+						}
 					}
 				}
 				result.WriteString("\n")
 			}
+		} else {
+			log.Printf("FormatSchemaForLLMWithExamples -> No example records for table %s", tableName)
 		}
 
 		result.WriteString("\n")
@@ -993,6 +1084,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			viewNames = append(viewNames, viewName)
 		}
 		sort.Strings(viewNames)
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d views", len(viewNames))
 
 		for _, viewName := range viewNames {
 			view := storage.FullSchema.Views[viewName]
@@ -1011,6 +1103,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			sequenceNames = append(sequenceNames, sequenceName)
 		}
 		sort.Strings(sequenceNames)
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d sequences", len(sequenceNames))
 
 		for _, sequenceName := range sequenceNames {
 			sequence := storage.FullSchema.Sequences[sequenceName]
@@ -1038,6 +1131,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 			enumNames = append(enumNames, enumName)
 		}
 		sort.Strings(enumNames)
+		log.Printf("FormatSchemaForLLMWithExamples -> Formatting %d enums", len(enumNames))
 
 		for _, enumName := range enumNames {
 			enum := storage.FullSchema.Enums[enumName]
@@ -1048,6 +1142,7 @@ func (m *SchemaManager) FormatSchemaForLLMWithExamples(storage *SchemaStorage) s
 		result.WriteString("\n")
 	}
 
+	log.Printf("FormatSchemaForLLMWithExamples -> Completed formatting schema with %d tables", len(tableNames))
 	return result.String()
 }
 
@@ -1337,6 +1432,8 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		}
 	}
 
+	log.Printf("createLLMSchemaWithExamples -> Starting for dbType: %s with %d tables", dbType, len(schema.Tables))
+
 	llmSchema := &LLMSchemaInfo{
 		Tables:        make(map[string]LLMTableInfo),
 		Relationships: make([]SchemaRelationship, 0),
@@ -1348,8 +1445,10 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 	// Get fetcher for the database type
 	fetcher, err := sm.getFetcher(dbType, db)
 	if err != nil {
-		log.Printf("Failed to get schema fetcher: %v", err)
+		log.Printf("createLLMSchemaWithExamples -> Failed to get schema fetcher: %v", err)
 		// Continue without example records
+	} else {
+		log.Printf("createLLMSchemaWithExamples -> Successfully got schema fetcher for dbType: %s", dbType)
 	}
 
 	// Check for context cancellation
@@ -1366,6 +1465,8 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 			return llmSchema
 		}
 
+		log.Printf("createLLMSchemaWithExamples -> Processing table: %s with %d columns", tableName, len(table.Columns))
+
 		llmTable := LLMTableInfo{
 			Name:           tableName,
 			Description:    table.Comment,
@@ -1375,7 +1476,8 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		}
 
 		// Process columns using the appropriate simplifier
-		for _, col := range table.Columns {
+		for colName, col := range table.Columns {
+			log.Printf("createLLMSchemaWithExamples -> Processing column: %s of type %s", colName, col.Type)
 			simplifiedType := simplifier.SimplifyDataType(col.Type)
 
 			llmCol := LLMColumnInfo{
@@ -1386,31 +1488,46 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 				IsIndexed:   sm.isColumnIndexed(col.Name, table.Indexes),
 			}
 			llmTable.Columns = append(llmTable.Columns, llmCol)
+			log.Printf("createLLMSchemaWithExamples -> Added column: %s of simplified type %s", col.Name, simplifiedType)
 		}
 
 		// Find primary key
-		for _, constraint := range table.Constraints {
+		for constraintName, constraint := range table.Constraints {
 			if constraint.Type == "PRIMARY KEY" && len(constraint.Columns) > 0 {
 				llmTable.PrimaryKey = strings.Join(constraint.Columns, ", ")
+				log.Printf("createLLMSchemaWithExamples -> Found primary key constraint %s with columns: %s",
+					constraintName, llmTable.PrimaryKey)
 				break
 			}
 		}
 
 		// Fetch example records if fetcher is available
 		if fetcher != nil {
+			log.Printf("createLLMSchemaWithExamples -> Fetching example records for table: %s", tableName)
 			examples, err := fetcher.FetchExampleRecords(ctx, db, tableName, 3)
 			if err != nil {
-				log.Printf("Failed to fetch example records for table %s: %v", tableName, err)
+				log.Printf("createLLMSchemaWithExamples -> Failed to fetch example records for table %s: %v", tableName, err)
 			} else {
+				log.Printf("createLLMSchemaWithExamples -> Successfully fetched %d example records for table %s", len(examples), tableName)
 				llmTable.ExampleRecords = examples
+
+				// Debug the example records
+				for i, record := range examples {
+					log.Printf("createLLMSchemaWithExamples -> Example record %d for table %s: %+v", i, tableName, record)
+				}
 			}
+		} else {
+			log.Printf("createLLMSchemaWithExamples -> No fetcher available, skipping example records for table: %s", tableName)
 		}
 
 		llmSchema.Tables[tableName] = llmTable
+		log.Printf("createLLMSchemaWithExamples -> Added table %s to LLM schema with %d columns and %d example records",
+			tableName, len(llmTable.Columns), len(llmTable.ExampleRecords))
 	}
 
 	// Extract relationships
 	llmSchema.Relationships = sm.extractRelationships(schema)
+	log.Printf("createLLMSchemaWithExamples -> Extracted %d relationships", len(llmSchema.Relationships))
 
 	return llmSchema
 }
@@ -1826,7 +1943,15 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 
 	// Try to get from storage first
 	storage, err := sm.getStoredSchema(ctx, chatID)
-	if err == nil && storage != nil && storage.LLMSchema != nil {
+	if err != nil {
+		// If this is a first-time schema storage scenario, we'll continue to fetch the schema
+		if strings.Contains(err.Error(), "first-time schema storage") {
+			log.Printf("GetSchemaWithExamples -> First-time schema storage for chatID: %s, will fetch schema", chatID)
+		} else {
+			log.Printf("GetSchemaWithExamples -> Error retrieving stored schema: %v, will fetch schema", err)
+		}
+		// Continue to fetch the schema
+	} else if storage != nil && storage.LLMSchema != nil {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
 			log.Printf("GetSchemaWithExamples -> context cancelled after getting stored schema: %v", err)
@@ -1879,6 +2004,11 @@ func (sm *SchemaManager) GetSchemaWithExamples(ctx context.Context, chatID strin
 	// Get the stored schema with examples
 	storage, err = sm.getStoredSchema(ctx, chatID)
 	if err != nil {
+		// Check if this is a first-time schema storage scenario
+		if strings.Contains(err.Error(), "first-time schema storage") {
+			log.Printf("GetSchemaWithExamples -> First-time schema storage for chatID: %s", chatID)
+			return nil, fmt.Errorf("first-time schema storage, please try again: %v", err)
+		}
 		return nil, fmt.Errorf("failed to get stored schema: %v", err)
 	}
 

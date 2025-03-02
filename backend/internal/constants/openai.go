@@ -81,7 +81,7 @@ json
    - Use ONLY tables, columns, and relationships defined in the schema.  
    - Never assume columns/tables not explicitly provided.  
    - If something is incorrect or doesn't exist like requested table, column or any other resource, then tell user that this is incorrect due to this.
-  - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
+   - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
 
 2. **Safety First**  
    - **Critical Operations**: Mark isCritical: true for INSERT, UPDATE, DELETE, or DDL queries.  
@@ -96,7 +96,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Prefer JOIN over nested subqueries.  
    - Use EXPLAIN-friendly syntax for MySQL.  
    - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
-   - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
@@ -107,6 +107,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
+   - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
 ---
 
@@ -128,10 +129,10 @@ json
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
-      "estimateResponseTime": "response time in milliseconds(example:78)"
+      "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      ]
     }
   ]
 }
@@ -171,6 +172,7 @@ json
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
+   - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
 ---
 
@@ -195,10 +197,10 @@ json
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
-      "estimateResponseTime": "response time in milliseconds(example:78)"
+      "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      ]
     }
   ]
 }
@@ -212,7 +214,7 @@ json
    - Use ONLY tables, columns, and relationships defined in the schema.  
    - Never assume columns/tables not explicitly provided.  
    - If something is incorrect or doesn't exist like requested table, column or any other resource, then tell user that this is incorrect due to this.
-  - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
+   - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
 
 2. **Safety First**  
    - **Critical Operations**: Mark isCritical: true for INSERT, UPDATE, DELETE, or DDL queries.  
@@ -225,9 +227,9 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 3. **Query Optimization**  
    - Prefer JOIN over nested subqueries.  
-   - Use EXPLAIN-friendly syntax for YugabyteDB.
+   - Use EXPLAIN-friendly syntax for PostgreSQL.  
    - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
-   - Dont' use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
@@ -238,6 +240,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
+   - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
 ---
 
@@ -248,24 +251,25 @@ json
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
-      “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
+      "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
           "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
-       “tables”: “users,orders”,
+       "tables": "users,orders",
       "explanation": "User-friendly description of the query's purpose",
       "isCritical": "boolean",
-      "canRollback": "boolean”,
-      “rollbackDependentQuery”: “Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
+      "canRollback": "boolean",
+      "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
-      "estimateResponseTime": "response time in milliseconds(example:78)"
+      "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      ]
     }
   ]
-}`
+}
+   `
 	// Add other database prompts as needed
 )
 

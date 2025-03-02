@@ -55,8 +55,8 @@ func (r *RedisRepositories) Get(key string, ctx context.Context) (string, error)
 	log.Printf("Getting Redis key: %s", key)
 	result, err := r.Client.Get(ctx, key).Result()
 	if err == redis.Nil {
-		log.Printf("Redis key not found: %s", key)
-		return "", errors.New("key does not exist")
+		log.Printf("Redis key not found: %s (this is normal for first-time access)", key)
+		return "", errors.New("key does not exist (normal for first-time access)")
 	} else if err != nil {
 		log.Printf("Error getting Redis key: %v", err)
 		return "", err

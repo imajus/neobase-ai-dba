@@ -21,18 +21,39 @@ func NewClickHouseSchemaFetcher(db DBExecutor) SchemaFetcher {
 
 // GetSchema retrieves the schema for the selected tables
 func (f *ClickHouseSchemaFetcher) GetSchema(ctx context.Context, db DBExecutor, selectedTables []string) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %v", err)
+	}
+
 	// Fetch the full schema
 	schema, err := f.FetchSchema(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch schema: %v", err)
+	}
+
+	// Log the tables and their column counts
+	for tableName, table := range schema.Tables {
+		fmt.Printf("ClickHouseSchemaFetcher -> GetSchema -> Table: %s, Columns: %d, Row Count: %d\n",
+			tableName, len(table.Columns), table.RowCount)
 	}
 
 	// Filter the schema based on selected tables
-	return f.filterSchemaForSelectedTables(schema, selectedTables), nil
+	filteredSchema := f.filterSchemaForSelectedTables(schema, selectedTables)
+	fmt.Printf("ClickHouseSchemaFetcher -> GetSchema -> Filtered schema to %d tables\n", len(filteredSchema.Tables))
+
+	return filteredSchema, nil
 }
 
 // FetchSchema retrieves the full database schema
 func (f *ClickHouseSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %v", err)
+	}
+
+	fmt.Printf("ClickHouseSchemaFetcher -> FetchSchema -> Starting full schema fetch\n")
+
 	schema := &SchemaInfo{
 		Tables:    make(map[string]TableSchema),
 		Views:     make(map[string]ViewSchema),
@@ -42,10 +63,14 @@ func (f *ClickHouseSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo,
 	// Fetch tables
 	tables, err := f.fetchTables(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch tables: %v", err)
 	}
 
+	fmt.Printf("ClickHouseSchemaFetcher -> FetchSchema -> Processing %d tables\n", len(tables))
+
 	for _, table := range tables {
+		fmt.Printf("ClickHouseSchemaFetcher -> FetchSchema -> Processing table: %s\n", table)
+
 		tableSchema := TableSchema{
 			Name:        table,
 			Columns:     make(map[string]ColumnInfo),
@@ -57,31 +82,18 @@ func (f *ClickHouseSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo,
 		// Fetch columns
 		columns, err := f.fetchColumns(ctx, table)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to fetch columns for table %s: %v", table, err)
 		}
 		tableSchema.Columns = columns
-
-		// Fetch table engine and other metadata
-		tableInfo, err := f.fetchTableInfo(ctx, table)
-		if err != nil {
-			return nil, err
-		}
-
-		// Add primary key as a constraint if it exists
-		if len(tableInfo.PrimaryKey) > 0 {
-			tableSchema.Constraints["PRIMARY"] = ConstraintInfo{
-				Name:    "PRIMARY",
-				Type:    "PRIMARY KEY",
-				Columns: tableInfo.PrimaryKey,
-			}
-		}
+		fmt.Printf("ClickHouseSchemaFetcher -> FetchSchema -> Fetched %d columns for table %s\n", len(columns), table)
 
 		// Get row count
 		rowCount, err := f.getTableRowCount(ctx, table)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get row count for table %s: %v", table, err)
 		}
 		tableSchema.RowCount = rowCount
+		fmt.Printf("ClickHouseSchemaFetcher -> FetchSchema -> Table %s has %d rows\n", table, rowCount)
 
 		// Calculate table schema checksum
 		tableData, _ := json.Marshal(tableSchema)
@@ -90,16 +102,12 @@ func (f *ClickHouseSchemaFetcher) FetchSchema(ctx context.Context) (*SchemaInfo,
 		schema.Tables[table] = tableSchema
 	}
 
-	// Fetch views
-	views, err := f.fetchViews(ctx)
-	if err != nil {
-		return nil, err
-	}
-	schema.Views = views
-
 	// Calculate overall schema checksum
 	schemaData, _ := json.Marshal(schema.Tables)
 	schema.Checksum = fmt.Sprintf("%x", md5.Sum(schemaData))
+
+	fmt.Printf("ClickHouseSchemaFetcher -> FetchSchema -> Successfully completed schema fetch with %d tables\n",
+		len(schema.Tables))
 
 	return schema, nil
 }
@@ -313,6 +321,11 @@ func (f *ClickHouseSchemaFetcher) GetTableChecksum(ctx context.Context, db DBExe
 
 // FetchExampleRecords retrieves sample records from a table
 func (f *ClickHouseSchemaFetcher) FetchExampleRecords(ctx context.Context, db DBExecutor, table string, limit int) ([]map[string]interface{}, error) {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %v", err)
+	}
+
 	// Ensure limit is reasonable
 	if limit <= 0 {
 		limit = 3 // Default to 3 records
@@ -332,6 +345,22 @@ func (f *ClickHouseSchemaFetcher) FetchExampleRecords(ctx context.Context, db DB
 	// If no records found, return empty slice
 	if len(records) == 0 {
 		return []map[string]interface{}{}, nil
+	}
+
+	// Process records to ensure all values are properly formatted
+	for i, record := range records {
+		for key, value := range record {
+			// Handle nil values
+			if value == nil {
+				continue
+			}
+
+			// Handle byte arrays
+			if byteVal, ok := value.([]byte); ok {
+				// Try to convert to string
+				records[i][key] = string(byteVal)
+			}
+		}
 	}
 
 	return records, nil
@@ -356,8 +385,12 @@ func (f *ClickHouseSchemaFetcher) FetchTableList(ctx context.Context) ([]string,
 
 // filterSchemaForSelectedTables filters the schema to only include elements related to the selected tables
 func (f *ClickHouseSchemaFetcher) filterSchemaForSelectedTables(schema *SchemaInfo, selectedTables []string) *SchemaInfo {
+	fmt.Printf("ClickHouseSchemaFetcher -> filterSchemaForSelectedTables -> Starting with %d tables in schema and %d selected tables\n",
+		len(schema.Tables), len(selectedTables))
+
 	// If no tables are selected or "ALL" is selected, return the full schema
 	if len(selectedTables) == 0 || (len(selectedTables) == 1 && selectedTables[0] == "ALL") {
+		fmt.Printf("ClickHouseSchemaFetcher -> filterSchemaForSelectedTables -> No filtering needed, returning full schema\n")
 		return schema
 	}
 
@@ -365,6 +398,7 @@ func (f *ClickHouseSchemaFetcher) filterSchemaForSelectedTables(schema *SchemaIn
 	selectedTablesMap := make(map[string]bool)
 	for _, table := range selectedTables {
 		selectedTablesMap[table] = true
+		fmt.Printf("ClickHouseSchemaFetcher -> filterSchemaForSelectedTables -> Added table to selection: %s\n", table)
 	}
 
 	// Create a new filtered schema
@@ -377,30 +411,18 @@ func (f *ClickHouseSchemaFetcher) filterSchemaForSelectedTables(schema *SchemaIn
 	// Filter tables
 	for tableName, tableSchema := range schema.Tables {
 		if selectedTablesMap[tableName] {
+			fmt.Printf("ClickHouseSchemaFetcher -> filterSchemaForSelectedTables -> Including table: %s with %d columns\n",
+				tableName, len(tableSchema.Columns))
 			filteredSchema.Tables[tableName] = tableSchema
 		}
 	}
 
-	// Filter views based on their definition referencing selected tables
-	for viewName, viewSchema := range schema.Views {
-		shouldInclude := false
-
-		// Check if the view definition references any of the selected tables
-		for tableName := range selectedTablesMap {
-			if strings.Contains(strings.ToLower(viewSchema.Definition), strings.ToLower(tableName)) {
-				shouldInclude = true
-				break
-			}
-		}
-
-		if shouldInclude {
-			filteredSchema.Views[viewName] = viewSchema
-		}
-	}
-
-	// Recalculate checksum for the filtered schema
+	// Calculate new checksum for filtered schema
 	schemaData, _ := json.Marshal(filteredSchema.Tables)
 	filteredSchema.Checksum = fmt.Sprintf("%x", md5.Sum(schemaData))
+
+	fmt.Printf("ClickHouseSchemaFetcher -> filterSchemaForSelectedTables -> Filtered schema contains %d tables\n",
+		len(filteredSchema.Tables))
 
 	return filteredSchema
 }

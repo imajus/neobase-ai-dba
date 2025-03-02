@@ -93,6 +93,16 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		return &PostgresDriver{}
 	})
 
+	// Add MySQL schema fetcher registration
+	m.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
+		return NewMySQLSchemaFetcher(db)
+	})
+
+	// Add ClickHouse schema fetcher registration
+	m.RegisterFetcher("clickhouse", func(db DBExecutor) SchemaFetcher {
+		return NewClickHouseSchemaFetcher(db)
+	})
+
 	m.registerDefaultDrivers()
 
 	return m, nil
@@ -670,6 +680,18 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 	// Pass selectedTables instead of hardcoded "ALL"
 	diff, hasChanged, err := m.schemaManager.CheckSchemaChanges(ctx, chatID, conn, dbConn.Config.Type, selectedTables)
 	if err != nil {
+		// Check if this is a first-time schema storage error, which we can ignore
+		if strings.Contains(err.Error(), "first-time schema storage") || strings.Contains(err.Error(), "key does not exist") {
+			log.Printf("DBManager -> doSchemaCheck -> First-time schema storage for chat %s (expected behavior)", chatID)
+			return nil
+		}
+
+		// Check if this is a schema fetcher not found error, which means we need to register the fetcher
+		if strings.Contains(err.Error(), "schema fetcher not found") || strings.Contains(err.Error(), "no schema fetcher registered") {
+			log.Printf("DBManager -> doSchemaCheck -> Schema fetcher not found for type %s. This is likely a configuration issue.", dbConn.Config.Type)
+			return nil
+		}
+
 		return fmt.Errorf("schema check failed: %v", err)
 	}
 

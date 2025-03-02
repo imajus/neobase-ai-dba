@@ -1050,7 +1050,7 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 	}
 
 	// Clear previous system message from LLM
-	if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
+	if err := s.llmRepo.DeleteMessagesByRole(chatObjID, string(MessageTypeSystem)); err != nil {
 		log.Printf("ChatService -> HandleSchemaChange -> Error deleting system message: %v", err)
 	}
 
@@ -2425,7 +2425,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 			}
 
 			// Clear previous system message from LLM
-			if err := s.llmRepo.DeleteMessagesByRole(userObjID, chatObjID, string(MessageTypeSystem)); err != nil {
+			if err := s.llmRepo.DeleteMessagesByRole(chatObjID, string(MessageTypeSystem)); err != nil {
 				log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
 			}
 

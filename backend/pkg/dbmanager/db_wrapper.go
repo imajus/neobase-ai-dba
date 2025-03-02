@@ -304,7 +304,14 @@ func (w *MySQLWrapper) Query(sql string, dest interface{}, values ...interface{}
 	if err := w.updateUsage(); err != nil {
 		return fmt.Errorf("failed to update usage: %v", err)
 	}
-	return w.db.Raw(sql, values...).Scan(dest).Error
+	log.Printf("MySQLWrapper -> Query -> Executing: %s with values: %v", sql, values)
+	result := w.db.Raw(sql, values...).Scan(dest)
+	if result.Error != nil {
+		log.Printf("MySQLWrapper -> Query -> Error: %v", result.Error)
+	} else {
+		log.Printf("MySQLWrapper -> Query -> Success: %d rows affected", result.RowsAffected)
+	}
+	return result.Error
 }
 
 // QueryRows executes a SQL query and scans the result into dest
