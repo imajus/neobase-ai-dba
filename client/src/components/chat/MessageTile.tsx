@@ -1118,6 +1118,37 @@ export default function MessageTile({
                         )}
                     </div>
                 )}
+                {message.type === 'assistant' && (
+                    <div className="
+            absolute 
+            left-0 
+            -bottom-9
+            md:-bottom-10 
+            flex 
+            gap-1
+            z-[5]
+          ">
+                        <button
+                            onClick={() => handleCopyToClipboard(message.content)}
+                            className="
+                -translate-y-1/2
+                p-1.5
+                md:p-2 
+                group-hover:opacity-100 
+                transition-colors
+                hover:bg-neo-gray
+                rounded-lg
+                flex-shrink-0
+                border-0
+                bg-white/80
+                backdrop-blur-sm
+              "
+                            title="Copy message"
+                        >
+                            <Copy className="w-4 h-4 text-gray-800" />
+                        </button>
+                    </div>
+                )}
                 <div className={`
     message-bubble
     inline-block
