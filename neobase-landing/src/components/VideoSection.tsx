@@ -55,7 +55,7 @@ const VideoSection = () => {
     <section className="py-16 sm:py-16 md:py-24 lg:py-36 relative overflow-hidden bg-[#FFDB58]/5 mb-16 sm:mb-24 md:mb-32 lg:mb-36">
       <FloatingBackground count={15} opacity={0.03} />
       <div className="container mx-auto px-2 sm:px-6 md:px-8 relative">
-        <h2 className="text-3xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-center mb-6 sm:mb-10 md:mb-16">
+        <h2 className="text-3xl sm:text-3xl md:text-4xl lg:text-4xl font-bold text-center mb-6 sm:mb-10 md:mb-16">
           See NeoBase in <span className="text-yellow-500">Action</span>
         </h2>
         
