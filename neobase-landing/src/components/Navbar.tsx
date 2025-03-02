@@ -8,12 +8,9 @@ const Navbar = () => {
   useEffect(() => {
     const fetchStarCount = async () => {
       try {
-          const response = await fetch(`${import.meta.env.VITE_API_URL}/github/stats`);
-          if (!response.ok) {
-              throw new Error('Failed to fetch star count');
-          }
+          const response = await fetch('https://api.github.com/repos/bhaskarblur/neobase-ai-dba');
           const data = await response.json();
-          setStarCount(data.stars);
+          setStarCount(data.stargazers_count);
       } catch (error) {
           console.error('Error fetching star count:', error);
           setStarCount(1); // I Starred it manually :)
