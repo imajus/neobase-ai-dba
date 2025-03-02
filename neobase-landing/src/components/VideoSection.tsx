@@ -1,9 +1,10 @@
-import { Pause, Play } from 'lucide-react';
+import { Maximize, Pause, Play, Volume2, VolumeX } from 'lucide-react';
 import { useState, useRef } from 'react';
 import FloatingBackground from './FloatingBackground';
 
 const VideoSection = () => {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const togglePlayPause = () => {
@@ -14,6 +15,23 @@ const VideoSection = () => {
         videoRef.current.play();
       }
       setIsPlaying(!isPlaying);
+    }
+  };
+
+  const toggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted;
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleFullScreen = () => {
+    if (videoRef.current) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        videoRef.current.requestFullscreen();
+      }
     }
   };
 
@@ -28,22 +46,23 @@ const VideoSection = () => {
         <div className="relative">
           {/* Video Container */}
           <div className="max-w-5xl mx-auto relative z-10">
-            <div className="neo-border bg-white p-1 sm:p-2 md:p-4 hover:shadow-xl transition-all duration-300" style={{ transform: 'rotate(-0.5deg)' }}>
+            <div className="neo-border bg-white p-1 sm:p-2 md:p-4 hover:shadow-xl transition-all duration-300 group" style={{ transform: 'rotate(-1.0deg)' }}>
               {/* Video */}
-              <div className="relative overflow-hidden neo-border min-h-[350px] sm:min-h-[350px] md:min-h-[450px] lg:min-h-[560px]">
+              <div className="relative overflow-hidden min-h-[350px] sm:min-h-[350px] md:min-h-[450px] lg:min-h-[560px] rounded-lg">
                 <video 
                   ref={videoRef}
-                  className="w-full h-full object-cover absolute inset-0"
+                  className="w-full h-full object-contain absolute inset-0 rounded-lg bg-black"
                   poster="/video-poster.png"
+                  muted={isMuted}
                 >
-                  <source src="/demo.mp4" type="video/mp4" />
+                  <source src="https://res.cloudinary.com/dsnb1bl19/video/upload/v1740903765/neobase-sound_a4yeoe.mp4" type="video/mp4" />
                   Your browser does not support the video tag.
                 </video>
                 
                 {/* Play/Pause Button */}
                 <button 
                   onClick={togglePlayPause}
-                  className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#FFDB58] hover:bg-[#FFDB58]/90 text-black neo-border rounded-full p-4 sm:p-5 md:p-6 transition-all"
+                  className={`absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#FFDB58] hover:bg-[#FFDB58]/90 text-black neo-border rounded-full p-4 sm:p-5 md:p-6 transition-all ${isPlaying ? 'opacity-0 group-hover:opacity-100 focus:opacity-100' : 'opacity-100'}`}
                   aria-label={isPlaying ? "Pause video" : "Play video"}
                 >
                   {isPlaying ? (
@@ -51,6 +70,28 @@ const VideoSection = () => {
                   ) : (
                     <Play className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 ml-0.5 sm:ml-1" />
                   )}
+                </button>
+                
+                {/* Mute/Unmute Button */}
+                <button 
+                  onClick={toggleMute}
+                  className="absolute top-3 right-14 sm:top-4 sm:right-16 md:top-5 md:right-16 bg-black/70 hover:bg-black/80 text-white rounded-full p-1.5 sm:p-2 transition-all"
+                  aria-label={isMuted ? "Unmute video" : "Mute video"}
+                >
+                  {isMuted ? (
+                    <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                  )}
+                </button>
+
+                {/* Full Screen Button */}
+                <button 
+                  onClick={toggleFullScreen}
+                  className="absolute top-3 right-3 sm:top-4 sm:right-4 md:top-5 md:right-5 bg-black/70 hover:bg-black/80 text-white rounded-full p-1.5 sm:p-2 transition-all"
+                  aria-label="Toggle full screen"
+                >
+                  <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               </div>
             </div>

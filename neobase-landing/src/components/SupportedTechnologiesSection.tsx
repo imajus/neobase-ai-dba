@@ -12,8 +12,8 @@ const SupportedTechnologiesSection: React.FC = () => {
   const databases: Technology[] = [
     { name: 'PostgreSQL', isSupported: true },
     { name: 'YugabyteDB', isSupported: true },
-    { name: 'MongoDB', isSupported: true, priority: 1 },
-    { name: 'MySQL', isSupported: false, priority: 2 },
+    { name: 'MongoDB', isSupported: false, priority: 1 },
+    { name: 'MySQL', isSupported: true, priority: 2 },
     { name: 'Neo4j', isSupported: false, priority: 3 },
     { name: 'Redis', isSupported: false, priority: 4 },
     { name: 'Clickhouse', isSupported: true, priority: 5 }
@@ -44,7 +44,7 @@ const SupportedTechnologiesSection: React.FC = () => {
         {Array.from({ length: 5 }).map((_, i) => (
           <img 
             key={`db-${i}`}
-            src="/db-logos/postgresql.svg" 
+            src="/postgresql-logo.png" 
             alt="" 
             className="absolute w-8 sm:w-10 md:w-12 h-8 sm:h-10 md:h-12 animate-float opacity-10"
             style={{
@@ -60,7 +60,7 @@ const SupportedTechnologiesSection: React.FC = () => {
         {Array.from({ length: 3 }).map((_, i) => (
           <img 
             key={`mongo-${i}`}
-            src="/db-logos/mongodb.svg" 
+            src="/mongodb-logo.png" 
             alt="" 
             className="absolute w-10 sm:w-12 md:w-14 h-10 sm:h-12 md:h-14 animate-float opacity-10"
             style={{
@@ -76,7 +76,7 @@ const SupportedTechnologiesSection: React.FC = () => {
         {Array.from({ length: 4 }).map((_, i) => (
           <img 
             key={`mysql-${i}`}
-            src="/db-logos/mysql.svg" 
+            src="/mysql-logo.png" 
             alt="" 
             className="absolute w-8 sm:w-9 md:w-10 h-8 sm:h-9 md:h-10 animate-float opacity-10"
             style={{
