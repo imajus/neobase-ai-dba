@@ -22,7 +22,7 @@ interface ChatWindowProps {
   onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
-  onEditConnection?: (id: string, connection: Connection) => Promise<{ success: boolean, error?: string }>;
+  onEditConnection?: (id: string, connection: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
   onCancelStream: () => void;
@@ -778,12 +778,12 @@ export default function ChatWindow({
           <ConnectionModal
             initialData={chat}
             onClose={() => setShowEditConnection(false)}
-            onEdit={async (data) => {
-              const result = await onEditConnection?.(chat.id, data);
+            onEdit={async (data, autoExecuteQuery) => {
+              const result = await onEditConnection?.(chat.id, data, autoExecuteQuery);
               return { success: result?.success || false, error: result?.error };
             }}
-            onSubmit={async (data) => {
-              const result = await onEditConnection?.(chat.id, data);
+            onSubmit={async (data, autoExecuteQuery) => {
+              const result = await onEditConnection?.(chat.id, data, autoExecuteQuery);
               return { success: result?.success || false, error: result?.error };
             }}
             onUpdateSelectedCollections={onUpdateSelectedCollections}

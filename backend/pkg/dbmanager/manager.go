@@ -786,6 +786,7 @@ func (m *Manager) CancelQueryExecution(streamID string) {
 	}
 }
 
+// ExecuteQuery executes a query and returns the result, synchronous, no SSE events are sent
 func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, queryType string, isRollback bool) (*QueryExecutionResult, *dtos.QueryError) {
 	m.executionMu.Lock()
 

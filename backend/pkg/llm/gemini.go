@@ -109,9 +109,9 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 		}
 	}
 
-	for _, msg := range geminiMessages {
-		log.Printf("GEMINI -> GenerateResponse -> msg: %v", msg)
-	}
+	// for _, msg := range geminiMessages {
+	// 	log.Printf("GEMINI -> GenerateResponse -> msg: %v", msg)
+	// }
 	// Build the request with a single content bundle.
 	// Call Gemini's content generation API.
 	model := c.client.GenerativeModel(c.model)

@@ -16,10 +16,11 @@ const chatService = {
     // Track ongoing API requests to prevent duplicates
     pendingRequests: {} as Record<string, Promise<TablesResponse>>,
 
-    async createChat(connection: Connection): Promise<Chat> {
+    async createChat(connection: Connection, autoExecuteQuery: boolean = false): Promise<Chat> {
         try {
             const response = await axios.post<CreateChatResponse>(`${API_URL}/chats`, {
-                connection
+                connection,
+                auto_execute_query: autoExecuteQuery
             });
 
             if (!response.data.success) {
@@ -32,13 +33,18 @@ const chatService = {
             throw new Error(error.response?.data?.error || 'Failed to create chat');
         }
     },
-    async editChat(chatId: string, connection: Connection): Promise<Chat> {
+    async editChat(chatId: string, connection: Connection, autoExecuteQuery?: boolean): Promise<Chat> {
         try {
+            const payload: any = { connection };
+            
+            // Only include auto_execute_query if it's explicitly provided
+            if (typeof autoExecuteQuery === 'boolean') {
+                payload.auto_execute_query = autoExecuteQuery;
+            }
+            
             const response = await axios.patch<CreateChatResponse>(
                 `${API_URL}/chats/${chatId}`,
-                {
-                    connection: connection
-                },
+                payload,
                 {
                     withCredentials: true,
                     headers: {
@@ -402,6 +408,33 @@ const chatService = {
             }
             
             throw new Error(error.response?.data?.error || 'Failed to get tables');
+        }
+    },
+
+    async updateAutoExecuteQuery(chatId: string, autoExecuteQuery: boolean): Promise<Chat> {
+        try {
+            const response = await axios.patch<CreateChatResponse>(
+                `${API_URL}/chats/${chatId}`,
+                {
+                    auto_execute_query: autoExecuteQuery
+                },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+
+            if (!response.data.success) {
+                throw new Error('Failed to update auto execute query setting');
+            }
+
+            return response.data.data;
+        } catch (error: any) {
+            console.error('Update auto execute query error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to update auto execute query setting');
         }
     }
 };

@@ -20,12 +20,14 @@ type ConnectionResponse struct {
 }
 
 type CreateChatRequest struct {
-	Connection CreateConnectionRequest `json:"connection" binding:"required"`
+	Connection       CreateConnectionRequest `json:"connection" binding:"required"`
+	AutoExecuteQuery bool                    `json:"auto_execute_query" binding:"required"`
 }
 
 type UpdateChatRequest struct {
 	Connection          *CreateConnectionRequest `json:"connection"`
 	SelectedCollections *string                  `json:"selected_collections"` // "ALL" or comma-separated table names
+	AutoExecuteQuery    *bool                    `json:"auto_execute_query"`
 }
 
 type ChatResponse struct {
@@ -35,6 +37,7 @@ type ChatResponse struct {
 	SelectedCollections string             `json:"selected_collections"`
 	CreatedAt           string             `json:"created_at"`
 	UpdatedAt           string             `json:"updated_at"`
+	AutoExecuteQuery    bool               `json:"auto_execute_query"`
 }
 
 type ChatListResponse struct {

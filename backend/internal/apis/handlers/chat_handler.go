@@ -215,7 +215,7 @@ func (h *ChatHandler) UpdateMessage(c *gin.Context) {
 	chatID := c.Param("id")
 	messageID := c.Param("messageId")
 
-	response, statusCode, err := h.chatService.UpdateMessage(userID, chatID, messageID, req.StreamID, &req)
+	response, statusCode, err := h.chatService.UpdateMessage(c.Request.Context(), userID, chatID, messageID, req.StreamID, &req)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{

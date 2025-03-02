@@ -6,9 +6,10 @@ import SelectTablesModal from './SelectTablesModal';
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
-  onEdit?: (data: Connection) => Promise<{ success: boolean, error?: string }>;
-  onSubmit: (data: Connection) => Promise<{ success: boolean, error?: string }>;
+  onEdit?: (data: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
+  onSubmit: (data: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
   onUpdateSelectedCollections?: (chatId: string, selectedCollections: string) => Promise<void>;
+  onUpdateAutoExecuteQuery?: (chatId: string, autoExecuteQuery: boolean) => Promise<void>;
 }
 
 interface FormErrors {
@@ -23,7 +24,8 @@ export default function ConnectionModal({
   onClose, 
   onEdit, 
   onSubmit,
-  onUpdateSelectedCollections 
+  onUpdateSelectedCollections,
+  onUpdateAutoExecuteQuery
 }: ConnectionModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState<Connection>({
@@ -38,6 +40,14 @@ export default function ConnectionModal({
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
+  const [autoExecuteQuery, setAutoExecuteQuery] = useState(initialData?.auto_execute_query || false);
+
+  // Update autoExecuteQuery when initialData changes
+  useEffect(() => {
+    if (initialData) {
+      setAutoExecuteQuery(initialData.auto_execute_query || false);
+    }
+  }, [initialData]);
 
   const validateField = (name: string, value: Connection) => {
     switch (name) {
@@ -111,15 +121,20 @@ export default function ConnectionModal({
 
     try {
       if (initialData) {
-        const result = await onEdit?.(formData);
+        const result = await onEdit?.(formData, autoExecuteQuery);
         console.log("edit result in connection modal", result);
         if (result?.success) {
+          // Update auto_execute_query if it has changed
+          if (initialData.auto_execute_query !== autoExecuteQuery && onUpdateAutoExecuteQuery) {
+            await onUpdateAutoExecuteQuery(initialData.id, autoExecuteQuery);
+          }
           onClose();
         } else if (result?.error) {
           setError(result.error);
         }
       } else {
-        const result = await onSubmit(formData);
+        // For new connections, pass autoExecuteQuery to onSubmit
+        const result = await onSubmit(formData, autoExecuteQuery);
         console.log("submit result in connection modal", result);
         if (result?.success) {
           onClose();
@@ -421,6 +436,31 @@ DATABASE_PASSWORD=your_password`}
                 placeholder="Enter your database password"
                 required
               />
+            </div>
+
+            {/* Add Auto Execute Query toggle */}
+            <div className="my-6 pt-4 border-t border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block font-bold mb-1 text-lg">Auto Fetch Results</label>
+                  <p className="text-gray-600 text-sm">Automatically fetches results from the database upon a user request. However, the critical queries still need to be executed manually.</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer" 
+                    checked={autoExecuteQuery}
+                    onChange={() => {
+                      const newValue = !autoExecuteQuery;
+                      setAutoExecuteQuery(newValue);
+                      if (initialData && onUpdateAutoExecuteQuery) {
+                        onUpdateAutoExecuteQuery(initialData.id, newValue);
+                      }
+                    }}
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
             </div>
 
             {/* Add Select Tables button for edit mode */}

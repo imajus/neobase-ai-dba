@@ -13,6 +13,7 @@ export interface Chat {
     user_id: string;
     connection: Connection;
     selected_collections?: string; // "ALL" or comma-separated table names
+    auto_execute_query?: boolean; // Whether to automatically execute queries when a new message is created
     created_at: string;
     updated_at: string;
 }
