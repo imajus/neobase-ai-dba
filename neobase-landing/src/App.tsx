@@ -31,29 +31,31 @@ function App() {
 }
 
 function initializeAnalytics() {
+  console.log('Initializing analytics');
   // Initialize Microsoft Clarity
-  if (import.meta.env.CLARITY_PROJECT_ID) {
-    Clarity.init(import.meta.env.CLARITY_PROJECT_ID);
+  if (import.meta.env.VITE_CLARITY_PROJECT_ID) {
+    Clarity.init(import.meta.env.VITE_CLARITY_PROJECT_ID);
     console.log('Clarity initialized');
   }
 
   // Initialize Firebase Analytics
   const firebaseConfig = {
-    apiKey: import.meta.env.FIREBASE_API_KEY,
-    authDomain: import.meta.env.FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.FIREBASE_APP_ID,
-    measurementId: import.meta.env.FIREBASE_MEASUREMENT_ID
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
   };
 
   // Only initialize Firebase if the required environment variables are set
-  if (import.meta.env.FIREBASE_API_KEY && import.meta.env.FIREBASE_MEASUREMENT_ID) {
+  if (import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_MEASUREMENT_ID) {
     // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
     
+    console.log('Firebase initialized');
     // Log page view event
     logEvent(analytics, 'page_view');
     
