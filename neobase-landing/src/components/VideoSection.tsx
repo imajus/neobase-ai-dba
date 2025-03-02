@@ -1,10 +1,11 @@
 import { Maximize, Pause, Play, Volume2, VolumeX } from 'lucide-react';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import FloatingBackground from './FloatingBackground';
 
 const VideoSection = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const togglePlayPause = () => {
@@ -35,24 +36,50 @@ const VideoSection = () => {
     }
   };
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      const handleLoadedData = () => {
+        setIsVideoLoaded(true);
+      };
+      
+      video.addEventListener('loadeddata', handleLoadedData);
+      
+      return () => {
+        video.removeEventListener('loadeddata', handleLoadedData);
+      };
+    }
+  }, []);
+
   return (
     <section className="py-16 sm:py-16 md:py-24 lg:py-36 relative overflow-hidden bg-[#FFDB58]/5 mb-16 sm:mb-24 md:mb-32 lg:mb-36">
       <FloatingBackground count={15} opacity={0.03} />
       <div className="container mx-auto px-2 sm:px-6 md:px-8 relative">
-        <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-center mb-6 sm:mb-10 md:mb-16">
+        <h2 className="text-3xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-center mb-6 sm:mb-10 md:mb-16">
           See NeoBase in <span className="text-yellow-500">Action</span>
         </h2>
         
         <div className="relative">
           {/* Video Container */}
           <div className="max-w-5xl mx-auto relative z-10">
-            <div className="neo-border bg-white p-1 sm:p-2 md:p-4 hover:shadow-xl transition-all duration-300 group" style={{ transform: 'rotate(-1.0deg)' }}>
+            <div className="neo-border bg-white p-1 sm:p-2 md:p-4 hover:shadow-xl transition-all duration-300 group" style={{ transform: 'rotate(-0.5deg)' }}>
               {/* Video */}
-              <div className="relative overflow-hidden min-h-[350px] sm:min-h-[350px] md:min-h-[450px] lg:min-h-[560px] rounded-lg">
+              <div className="relative overflow-hidden min-h-[350px] sm:min-h-[350px] md:min-h-[450px] lg:min-h-[560px] rounded-lg bg-black">
+                {/* Poster Image (shown until video loads) */}
+                {!isVideoLoaded && (
+                  <div className="absolute inset-0 z-0">
+                    <img 
+                      src="/video-poster.png" 
+                      alt="Video thumbnail" 
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                  </div>
+                )}
+                
                 <video 
                   ref={videoRef}
-                  className="w-full h-full object-contain absolute inset-0 rounded-lg bg-black"
-                  poster="/video-poster.png"
+                  className="w-full h-full object-contain absolute inset-0 rounded-lg"
+                  poster=""
                   muted={isMuted}
                 >
                   <source src="https://res.cloudinary.com/dsnb1bl19/video/upload/v1740903765/neobase-sound_a4yeoe.mp4" type="video/mp4" />
@@ -139,14 +166,14 @@ const VideoSection = () => {
           </div>
           
           {/* Mobile Features (simplified) */}
-          <div className="md:hidden space-y-3 mt-6 sm:mt-8">
-            <div className="neo-border bg-[#FFDB58] px-4 py-2 sm:py-3 font-bold text-base sm:text-lg text-center mx-2 sm:mx-4">
+          <div className="md:hidden space-y-4 mt-8 sm:mt-10">
+            <div className="neo-border bg-[#FFDB58] px-4 py-3 sm:py-3 font-bold text-lg sm:text-lg text-center mx-2 sm:mx-4">
               AI-Driven Operations
             </div>
-            <div className="neo-border bg-[#FFDB58] px-4 py-2 sm:py-3 font-bold text-base sm:text-lg text-center mx-2 sm:mx-4">
+            <div className="neo-border bg-[#FFDB58] px-4 py-3 sm:py-3 font-bold text-lg sm:text-lg text-center mx-2 sm:mx-4">
               Visualize & Export Results
             </div>
-            <div className="neo-border bg-[#FFDB58] px-4 py-2 sm:py-3 font-bold text-base sm:text-lg text-center mx-2 sm:mx-4">
+            <div className="neo-border bg-[#FFDB58] px-4 py-3 sm:py-3 font-bold text-lg sm:text-lg text-center mx-2 sm:mx-4">
               Talk to Your Database Naturally
             </div>
           </div>

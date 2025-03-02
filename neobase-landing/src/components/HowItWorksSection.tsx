@@ -32,10 +32,10 @@ const HowItWorksSection: React.FC = () => {
       
       <div className="container mx-auto px-4 sm:px-6 md:px-8 max-w-7xl">
         <div className="text-center mb-8 md:mb-16">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
+          <h2 className="text-3xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
             How <span className="text-green-500">NeoBase</span> Works
           </h2>
-          <p className="text-base md:text-lg text-gray-700 max-w-3xl mx-auto px-2">
+          <p className="text-lg md:text-lg text-gray-700 max-w-3xl mx-auto px-2">
             From human language to database results in seconds
           </p>
         </div>
@@ -58,9 +58,9 @@ const HowItWorksSection: React.FC = () => {
                       <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-black text-white flex items-center justify-center text-xs md:text-sm font-bold">
                         {index + 1}
                       </div>
-                      <h3 className="font-bold text-base md:text-lg">{step.title}</h3>
+                      <h3 className="font-bold text-lg md:text-xl">{step.title}</h3>
                     </div>
-                    <p className="text-sm md:text-base text-gray-600">{step.description}</p>
+                    <p className="text-base md:text-base text-gray-600">{step.description}</p>
                   </div>
                 </div>
               ))}
@@ -89,7 +89,7 @@ const HowItWorksSection: React.FC = () => {
                 <div className="mt-3 md:mt-4 p-3 md:p-4 bg-white rounded-lg neo-border">
                   <div className="flex items-center gap-2 mb-3 md:mb-4">
                     <MessageSquare className="w-4 h-4 md:w-5 md:h-5 text-green-500" />
-                    <p className="text-sm md:text-base text-gray-700 italic">"Talk to your data"</p>
+                    <p className="text-base md:text-base text-gray-700 italic">"Talk to your data"</p>
                   </div>
                   <img src="/working-2.png" alt="NeoBase in action" className="w-full h-auto rounded-lg shadow-lg" />
                 </div>
