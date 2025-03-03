@@ -289,7 +289,8 @@ function AppContent() {
   };
 
   const handleEditConnection = async (id: string, data: Connection, autoExecuteQuery: boolean): Promise<{ success: boolean; error?: string }> => {
-    const loadingToast = toast.loading('Updating connection...', {
+    let loadingToastId: string | undefined;
+    loadingToastId = toast.loading('Updating connection...', {
       style: {
         background: '#000',
         color: '#fff',
@@ -299,96 +300,98 @@ function AppContent() {
     });
 
     try {
+      // Check if connection details have changed
+      const credentialsChanged = selectedConnection &&
+        (selectedConnection.connection.database !== data.database ||
+        selectedConnection.connection.host !== data.host ||
+        selectedConnection.connection.port !== data.port ||
+        selectedConnection.connection.username !== data.username);
+
       // Update the connection
       const response = await chatService.editChat(id, data, autoExecuteQuery);
-
       console.log("handleEditConnection response", response);
+
       if (response) {
-        // Only disconnect & reconnect if any properties from the connection are changed
-        if (selectedConnection?.connection.type !== data.type ||
-            selectedConnection?.connection.host !== data.host ||
-            selectedConnection?.connection.port !== data.port ||
-            selectedConnection?.connection.username !== data.username ||
-            selectedConnection?.connection.database !== data.database) {
-        // First disconnect the current connection
-        await axios.post(
-          `${import.meta.env.VITE_API_URL}/chats/${id}/disconnect`,
-          {
-            stream_id: streamId
-          },
-          {
-            withCredentials: true,
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
-          }
-        );
-
-        // Reconnect with new connection details
-        await axios.post(
-          `${import.meta.env.VITE_API_URL}/chats/${id}/connect`,
-          {
-            stream_id: streamId
-          },
-          {
-            withCredentials: true,
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
-          }
-        );
-      }
-              // Update local state
-              setChats(prev => prev.map(chat => {
-                if (chat.id === id) {
-                  return {
-                    ...chat,
-                    connection: data,
-                    auto_execute_query: autoExecuteQuery
-                  };
-                }
-                return chat;
-              }));
-
-        // Update the selected connection if it's the one being edited
+        // Update local state
+        setChats(prev => prev.map(chat => 
+          chat.id === id ? response : chat
+        ));
+        
         if (selectedConnection?.id === id) {
-          setSelectedConnection(chats.find(c => c.id === id));
+          setSelectedConnection(response);
         }
-        // Update connection status
-        handleConnectionStatusChange(id, true, 'edit-connection');
 
-        // Dismiss loading toast and show success
-        toast.dismiss(loadingToast);
-        toast.success('Connection updated & reconnected', {
+        // If credentials changed and we have a valid streamId, we need to handle reconnection
+        if (credentialsChanged && streamId) {
+          try {
+            // First disconnect the current connection
+            await chatService.disconnectFromConnection(id, streamId);
+            
+            // Clear any existing tables cache for this chat
+            delete chatService.tablesCache?.[id];
+
+            // Wait a bit before reconnecting to ensure disconnection is complete
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Reconnect with new connection details
+            await chatService.connectToConnection(id, streamId);
+
+            // Update connection status
+            handleConnectionStatusChange(id, true, 'edit-connection');
+          } catch (error) {
+            console.error('Error during reconnection:', error);
+            toast.error('Failed to reconnect to database. Please try reconnecting manually.', {
+              style: {
+                background: '#000',
+                color: '#fff',
+                borderRadius: '12px',
+                border: '4px solid #f00',
+              },
+            });
+          }
+        } else if (credentialsChanged) {
+          // If credentials changed but no streamId, show a notification
+          toast.error('Connection details updated. Please reconnect to the database.', {
+            style: {
+              background: '#000',
+              color: '#fff',
+              borderRadius: '12px',
+              border: '4px solid #ff9800',
+            },
+          });
+          // Set connection status to false since we couldn't reconnect
+          handleConnectionStatusChange(id, false, 'edit-connection-no-stream');
+        }
+
+        toast.success('Connection updated successfully!', {
           style: {
             background: '#000',
             color: '#fff',
             borderRadius: '12px',
+            border: '4px solid #000',
           },
         });
 
+        if (loadingToastId) {
+          toast.dismiss(loadingToastId);
+        }
+
         return { success: true };
+      }
+
+      if (loadingToastId) {
+        toast.dismiss(loadingToastId);
       }
 
       return { success: false, error: 'Failed to update connection' };
     } catch (error: any) {
       console.error('Failed to update connection:', error);
-      toast.dismiss(loadingToast);
-      toast.error(error.message || 'Failed to update connection', {
-        style: {
-          background: '#ff4444',
-          color: '#fff',
-          border: '4px solid #cc0000',
-          borderRadius: '12px',
-          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
-          padding: '12px 24px',
-        }
-      });
+      
+      if (loadingToastId) {
+        toast.dismiss(loadingToastId);
+      }
 
-      return {
-        success: false,
-        error: error.message || 'Failed to update connection'
-      };
+      return { success: false, error: error.message || 'Failed to update connection' };
     }
   };
 

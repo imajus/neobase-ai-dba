@@ -127,6 +127,13 @@ export default function ConnectionModal({
 
     try {
       if (initialData) {
+        // Check if critical connection details have changed
+        const credentialsChanged = 
+          initialData.connection.database !== formData.database ||
+          initialData.connection.host !== formData.host ||
+          initialData.connection.port !== formData.port ||
+          initialData.connection.username !== formData.username;
+
         const result = await onEdit?.(formData, autoExecuteQuery);
         console.log("edit result in connection modal", result);
         if (result?.success) {
@@ -134,7 +141,13 @@ export default function ConnectionModal({
           if (initialData.auto_execute_query !== autoExecuteQuery && onUpdateAutoExecuteQuery) {
             await onUpdateAutoExecuteQuery(initialData.id, autoExecuteQuery);
           }
-          onClose();
+
+          // If credentials changed, show the select tables modal
+          if (credentialsChanged) {
+            setShowSelectTablesModal(true);
+          } else {
+            onClose();
+          }
         } else if (result?.error) {
           setError(result.error);
         }

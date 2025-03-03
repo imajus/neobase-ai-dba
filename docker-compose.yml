@@ -18,7 +18,12 @@ services:
     image: redis:latest
     container_name: neobase-redis
     restart: always
-    command: redis-server --requirepass default
+    command: >
+      redis-server 
+      --requirepass default
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --stop-writes-on-bgsave-error no
     ports:
       - 6379:6379
     volumes:

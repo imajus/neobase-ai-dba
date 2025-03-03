@@ -175,6 +175,13 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			return nil, http.StatusBadRequest, fmt.Errorf("cannot change the database type")
 		}
 
+		// Check if critical connection details have changed
+		credentialsChanged := chat.Connection.Database != req.Connection.Database ||
+			chat.Connection.Host != req.Connection.Host ||
+			chat.Connection.Port != req.Connection.Port ||
+			*chat.Connection.Username != req.Connection.Username ||
+			(req.Connection.Password != "" && *chat.Connection.Password != req.Connection.Password)
+
 		// Test connection without creating a persistent connection
 		err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 			Type:     req.Connection.Type,
@@ -188,17 +195,30 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
 		}
 
-		// Update chat fields
-		if req.Connection != nil {
-			chat.Connection = models.Connection{
-				Type:     req.Connection.Type,
-				Host:     req.Connection.Host,
-				Port:     req.Connection.Port,
-				Username: &req.Connection.Username,
-				Password: &req.Connection.Password,
-				Database: req.Connection.Database,
-				Base:     models.NewBase(),
+		// If credentials changed, disconnect existing connection
+		if credentialsChanged {
+			log.Printf("ChatService -> Update -> Critical connection details changed, disconnecting existing connection")
+			if err := s.dbManager.Disconnect(chatID, userID, true); err != nil {
+				log.Printf("ChatService -> Update -> Warning: Failed to disconnect existing connection: %v", err)
+				// Don't return error as we still want to update the connection details
 			}
+		}
+
+		// Update chat fields
+		chat.Connection = models.Connection{
+			Type:     req.Connection.Type,
+			Host:     req.Connection.Host,
+			Port:     req.Connection.Port,
+			Username: &req.Connection.Username,
+			Password: &req.Connection.Password,
+			Database: req.Connection.Database,
+			Base:     models.NewBase(),
+		}
+
+		// If credentials changed, reset selected collections
+		if credentialsChanged {
+			log.Printf("ChatService -> Update -> Resetting selected collections due to connection change")
+			chat.SelectedCollections = ""
 		}
 	}
 
