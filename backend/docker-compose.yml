@@ -10,6 +10,7 @@ services:
       - 3000:3000
     environment:
       - IS_DOCKER=${IS_DOCKER}
+      - CORS_ALLOWED_ORIGIN=${CORS_ALLOWED_ORIGIN} # Frontend exposed base url
       - PORT=${PORT}
       - ENVIRONMENT=${ENVIRONMENT} # DEVELOPMENT, PRODUCTION
       - MAX_CHATS_PER_USER=${MAX_CHATS_PER_USER} # 0 for trial mode(1 connection), 1 for unlimited

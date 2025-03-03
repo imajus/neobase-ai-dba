@@ -90,7 +90,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	log.Printf("Creating chat for user %s", userID)
 
 	// If 0, means trial mode, so user cannot create more than 1 chat
-	if config.Env.MAX_CHATS_PER_USER == 0 {
+	if config.Env.MaxChatsPerUser == 0 {
 		// Apply check that single user cannot have more than 1 chat
 		userObjID, err := primitive.ObjectIDFromHex(userID)
 		if err != nil {
