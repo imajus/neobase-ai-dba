@@ -129,7 +129,7 @@ const CompactFeaturesSection: React.FC = () => {
         
         <div className="flex flex-row justify-center gap-4 mt-8 sm:mt-12 md:mt-16 text-center ">
           <a 
-            href={import.meta.env.NEOBASE_APP_URL}
+            href={import.meta.env.VITE_NEOBASE_APP_URL}
             target="_blank" 
             rel="noopener noreferrer" 
             className="neo-button inline-flex items-center justify-center gap-2 py-3 px-6 sm:py-3 sm:px-8 text-lg sm:text-lg"

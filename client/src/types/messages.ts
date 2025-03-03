@@ -16,6 +16,7 @@ export interface BackendMessage {
     chat_id: string;
     type: 'user' | 'assistant';
     content: string;
+    user_message_id?: string;
     is_edited: boolean;
     queries?: {
         id: string;
@@ -47,17 +48,21 @@ export interface BackendMessage {
 }
 
 // Add transform function
-export const transformBackendMessage = (msg: BackendMessage): Message => ({
-    id: msg.id,
-    type: msg.type,
-    content: msg.content,
-    queries: msg.queries || [],
-    is_loading: false,
+export const transformBackendMessage = (msg: BackendMessage): Message => {
+    console.log('transformBackendMessage -> msg', msg);
+    return {
+        id: msg.id,
+        type: msg.type,
+        content: msg.content,
+        queries: msg.queries || [],
+        user_message_id: msg.user_message_id,
+        is_loading: false,
     loading_steps: [],
     is_streaming: false,
-    is_edited: msg.is_edited,
-    created_at: msg.created_at
-});
+        is_edited: msg.is_edited,
+        created_at: msg.created_at
+    };
+};
 
 // Add interface for the API response
 export interface SendMessageResponse {

@@ -7,13 +7,14 @@ import (
 )
 
 type Message struct {
-	UserID   primitive.ObjectID `bson:"user_id" json:"user_id"`
-	ChatID   primitive.ObjectID `bson:"chat_id" json:"chat_id"`
-	Type     string             `bson:"type" json:"type"` // 'user' or 'assistant'
-	Content  string             `bson:"content" json:"content"`
-	IsEdited bool               `bson:"is_edited" json:"is_edited"` // if the message content has been edited, only for user messages
-	Queries  *[]Query           `bson:"queries,omitempty" json:"queries,omitempty"`
-	Base     `bson:",inline"`
+	UserID        primitive.ObjectID  `bson:"user_id" json:"user_id"`
+	ChatID        primitive.ObjectID  `bson:"chat_id" json:"chat_id"`
+	UserMessageId *primitive.ObjectID `bson:"user_message_id,omitempty" json:"user_message_id,omitempty"` // Holds id of user message that was sent before this message, only applicable for Type assistant
+	Type          string              `bson:"type" json:"type"`                                           // 'user' or 'assistant'
+	Content       string              `bson:"content" json:"content"`
+	IsEdited      bool                `bson:"is_edited" json:"is_edited"` // if the message content has been edited, only for user messages
+	Queries       *[]Query            `bson:"queries,omitempty" json:"queries,omitempty"`
+	Base          `bson:",inline"`
 }
 
 type Query struct {
@@ -49,15 +50,16 @@ type Pagination struct {
 	PaginatedQuery    *string `bson:"paginated_query" json:"paginated_query"`
 }
 
-func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query) *Message {
+func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query, userMessageId *primitive.ObjectID) *Message {
 	log.Printf("NewMessage -> queries: %v", queries)
 	return &Message{
-		UserID:   userID,
-		ChatID:   chatID,
-		Type:     msgType,
-		Content:  content,
-		IsEdited: false,
-		Queries:  queries,
-		Base:     NewBase(),
+		UserID:        userID,
+		ChatID:        chatID,
+		Type:          msgType,
+		UserMessageId: userMessageId,
+		Content:       content,
+		IsEdited:      false,
+		Queries:       queries,
+		Base:          NewBase(),
 	}
 }

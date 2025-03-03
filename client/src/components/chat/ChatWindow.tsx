@@ -693,6 +693,50 @@ export default function ChatWindow({
               ))}
             </div>
           ))}
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full">
+               <div className="
+                  px-4 
+                  py-2
+                  bg-white 
+                  text-sm 
+                  font-medium 
+                  text-black
+                  border-2
+                  border-black
+                  shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+                  rounded-full
+                ">
+                  {formatDateDivider(new Date().toISOString())}
+                </div>
+              <MessageTile
+                key={"welcome-message"}
+              checkSSEConnection={checkSSEConnection}
+              chatId={chat.id}
+              message={{
+                                    id: "welcome-message",
+                                    type: "assistant",
+                                    content: "Welcome to NeoBase! Ask me anything about your database.",
+                                    queries: [],
+                                    created_at: new Date().toISOString(),
+                                    updated_at: new Date().toISOString(),
+                                  }}
+                                  setMessage={setMessage}
+                                  onEdit={handleEditMessage}
+                                  editingMessageId={editingMessageId}
+                                  editInput={editInput}
+                                  setEditInput={setEditInput}
+                                  onSaveEdit={handleSaveEdit}
+                                  onCancelEdit={handleCancelEdit}
+                                  queryStates={queryStates}
+                                  setQueryStates={setQueryStates}
+                                  queryTimeouts={queryTimeouts}
+                                  isFirstMessage={false}
+                                  onQueryUpdate={handleQueryUpdate}
+                                  onEditQuery={handleEditQuery}
+              />
+            </div>
+          )}
         </div>
         <div ref={messagesEndRef} />
 

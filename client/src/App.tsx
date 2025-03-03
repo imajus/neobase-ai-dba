@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
-import { LoadingStep, Message } from './components/chat/types';
+import { Message, QueryResult, LoadingStep } from './components/chat/types';
 import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
@@ -583,23 +583,112 @@ function AppContent() {
 
   // Add helper function for typing animation
   const animateTyping = async (text: string, messageId: string) => {
+    // Reset content to empty before starting animation
+    setMessages(prev => {
+      return prev.map(msg => {
+        if (msg.id === messageId) {
+          return {
+            ...msg,
+            content: '',
+            is_streaming: true
+          };
+        }
+        return msg;
+      });
+    });
+
+    // Animate content word by word with natural timing
     const words = text.split(' ');
     for (const word of words) {
       await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
       setMessages(prev => {
-        const [lastMessage, ...rest] = prev;
-        if (lastMessage?.id === messageId) {
-          return [
-            {
-              ...lastMessage,
-              content: lastMessage.content + (lastMessage.content ? ' ' : '') + word,
-            },
-            ...rest
-          ];
-        }
-        return prev;
+        return prev.map(msg => {
+          if (msg.id === messageId) {
+            return {
+              ...msg,
+              content: msg.content + (msg.content ? ' ' : '') + word,
+            };
+          }
+          return msg;
+        });
       });
     }
+
+    // Mark as no longer streaming when done
+    setMessages(prev => {
+      return prev.map(msg => {
+        if (msg.id === messageId) {
+          return {
+            ...msg,
+            is_streaming: false
+          };
+        }
+        return msg;
+      });
+    });
+  };
+
+  // Add helper function for animating queries
+  const animateQueryTyping = async (messageId: string, queries: QueryResult[]) => {
+    if (!queries || queries.length === 0) return;
+
+    // First ensure queries are initialized with empty strings
+    setMessages(prev => {
+      return prev.map(msg => {
+        if (msg.id === messageId) {
+          const initializedQueries = queries.map(q => ({
+            ...q,
+            query: ''
+          }));
+          return {
+            ...msg,
+            queries: initializedQueries,
+            is_streaming: true
+          };
+        }
+        return msg;
+      });
+    });
+
+    // Then animate each query
+    for (const query of queries) {
+      const queryWords = query.query.split(' ');
+      for (const word of queryWords) {
+        await new Promise(resolve => setTimeout(resolve, 20 + Math.random() * 10));
+        setMessages(prev => {
+          return prev.map(msg => {
+            if (msg.id === messageId) {
+              const updatedQueries = [...(msg.queries || [])];
+              const queryIndex = updatedQueries.findIndex(q => q.id === query.id);
+              if (queryIndex !== -1) {
+                updatedQueries[queryIndex] = {
+                  ...updatedQueries[queryIndex],
+                  query: updatedQueries[queryIndex].query + (updatedQueries[queryIndex].query ? ' ' : '') + word
+                };
+              }
+              return {
+                ...msg,
+                queries: updatedQueries
+              };
+            }
+            return msg;
+          });
+        });
+      }
+    }
+
+    // Mark as no longer streaming when done with all queries
+    setMessages(prev => {
+      return prev.map(msg => {
+        if (msg.id === messageId) {
+          return {
+            ...msg,
+            is_streaming: false
+          };
+        }
+        return msg;
+      });
+    });
   };
 
   const checkSSEConnection = async () => {
@@ -704,7 +793,7 @@ function AppContent() {
             // Set default of 500 ms delay for first step
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            if (!temporaryMessage) {
+            if (!temporaryMessage ) {
               console.log('ai-response-step -> creating new temp message');
             } else {
               console.log('ai-response-step -> updating existing temp message');
@@ -740,89 +829,113 @@ function AppContent() {
             if (response.data) {
               console.log('ai-response -> response.data', response.data);
 
-              // Create base message with empty loading steps
-              const baseMessage: Message = {
-                id: response.data.id,
-                type: 'assistant' as const,
-                content: '',
-                queries: response.data.queries || [],
-                is_loading: false,
-                loading_steps: [], // Clear loading steps for final message
-                is_streaming: true,
-                created_at: new Date().toISOString()
-              };
-
-              setMessages(prev => {
-                const withoutTemp = prev.filter(msg => !msg.is_streaming);
-                console.log('ai-response -> withoutTemp', withoutTemp);
-                return [baseMessage, ...withoutTemp];
-              });
-
-              // Animate both content and queries with slower speed
-              const finalWords = response.data.content.split(' ');
-              for (const word of finalWords) {
-                await new Promise(resolve => setTimeout(resolve, 50)); // Increased delay to 50ms
+              // Check if this is a response to an edited message
+              const isEditedResponse = response.data.user_message_id && 
+                messages.some(msg => msg.id === response.data.user_message_id && msg.is_edited);
+              
+              console.log('ai-response -> isEditedResponse', isEditedResponse);
+              console.log('ai-response -> user_message_id', response.data.user_message_id);
+              
+              // Find existing AI message that needs to be updated (for edited messages)
+              const existingAiMessageIndex = isEditedResponse ? 
+                messages.findIndex(msg => 
+                  msg.type === 'assistant' && 
+                  msg.user_message_id === response.data.user_message_id
+                ) : -1;
+              
+              console.log('ai-response -> existingAiMessageIndex', existingAiMessageIndex);
+              
+              if (isEditedResponse && existingAiMessageIndex !== -1) {
+                console.log('ai-response -> updating existing message at index', existingAiMessageIndex);
+                
+                // For edited messages, update the existing message with the new data
+                const existingMessage = messages[existingAiMessageIndex];
+                
+                // First update the message with the new data but keep content empty for animation
                 setMessages(prev => {
-                  const [lastMessage, ...rest] = prev;
-                  if (lastMessage?.id === response.data.id) {
-                    return [
-                      {
-                        ...lastMessage,
-                        content: lastMessage.content + (lastMessage.content ? ' ' : '') + word,
-                      },
-                      ...rest
-                    ];
-                  }
-                  return prev;
+                  return prev.map((msg, index) => {
+                    if (index === existingAiMessageIndex) {
+                      return {
+                        ...msg,
+                        id: msg.id, // Keep the original ID
+                        content: '', // Reset content to empty for animation
+                        queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings
+                        is_loading: false,
+                        loading_steps: [],
+                        is_streaming: true,
+                        user_message_id: response.data.user_message_id,
+                        updated_at: new Date().toISOString()
+                      };
+                    }
+                    return msg;
+                  });
+                });
+                
+                // Animate content
+                await animateTyping(response.data.content, existingMessage.id);
+                
+                // Animate queries
+                if (response.data.queries && response.data.queries.length > 0) {
+                  await animateQueryTyping(existingMessage.id, response.data.queries);
+                }
+                
+                // Set final state - no longer streaming
+                setMessages(prev => {
+                  return prev.map((msg, index) => {
+                    if (index === existingAiMessageIndex) {
+                      return {
+                        ...msg,
+                        is_streaming: false,
+                        updated_at: new Date().toISOString()
+                      };
+                    }
+                    return msg;
+                  });
+                });
+              } else {
+                // For new messages, create a new message
+                // Create base message with empty content for animation
+                const baseMessage: Message = {
+                  id: response.data.id,
+                  type: 'assistant' as const,
+                  content: '',
+                  queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [],
+                  is_loading: false,
+                  loading_steps: [], // Clear loading steps for final message
+                  is_streaming: true,
+                  created_at: new Date().toISOString(),
+                  user_message_id: response.data.user_message_id
+                };
+
+                // Add the new message to the array
+                setMessages(prev => {
+                  const withoutTemp = prev.filter(msg => !msg.is_streaming);
+                  console.log('ai-response -> withoutTemp', withoutTemp);
+                  return [...withoutTemp, baseMessage];
+                });
+
+                // Animate content
+                await animateTyping(response.data.content, response.data.id);
+                
+                // Animate queries
+                if (response.data.queries && response.data.queries.length > 0) {
+                  await animateQueryTyping(response.data.id, response.data.queries);
+                }
+                
+                // Set final state - no longer streaming for new messages
+                setMessages(prev => {
+                  return prev.map(msg => {
+                    if (msg.id === response.data.id) {
+                      return {
+                        ...msg,
+                        is_streaming: false,
+                        updated_at: new Date().toISOString()
+                      };
+                    }
+                    return msg;
+                  });
                 });
               }
-
-              // Slower animation for queries too
-              if (response.data.queries && response.data.queries.length > 0) {
-                for (const query of response.data.queries) {
-                  const queryWords = query.query.split(' ');
-                  for (const word of queryWords) {
-                    await new Promise(resolve => setTimeout(resolve, 40)); // Increased delay to 40ms
-                    setMessages(prev => {
-                      const [lastMessage, ...rest] = prev;
-                      if (lastMessage?.id === response.data.id) {
-                        const updatedQueries = [...(lastMessage.queries || [])];
-                        const queryIndex = updatedQueries.findIndex(q => q.id === query.id);
-                        if (queryIndex !== -1) {
-                          updatedQueries[queryIndex] = {
-                            ...updatedQueries[queryIndex],
-                            query: updatedQueries[queryIndex].query + (updatedQueries[queryIndex].query ? ' ' : '') + word
-                          };
-                        }
-                        return [
-                          {
-                            ...lastMessage,
-                            queries: updatedQueries
-                          },
-                          ...rest
-                        ];
-                      }
-                      return prev;
-                    });
-                  }
-                }
-              }
-
-              // Set final state
-              setMessages(prev => {
-                const [lastMessage, ...rest] = prev;
-                if (lastMessage?.id === response.data.id) {
-                  return [
-                    {
-                      ...lastMessage,
-                      is_streaming: false,
-                      created_at: new Date().toISOString()
-                    },
-                    ...rest
-                  ];
-                }
-                return prev;
-              });
             }
             setTemporaryMessage(null);
             break;
@@ -931,25 +1044,41 @@ function AppContent() {
         // Set is_edited to true
         setMessages(prev => prev.map(msg => {
           if (msg.id === id) {
-            return { ...msg, is_edited: true };
-          }
+            return { ...msg, content: content, is_edited: true, updated_at: new Date().toISOString()};
+          } 
           return msg;
         }));
-        console.log('ai-response-step -> creating new temp message');
-        const tempMsg: Message = {
-          id: `temp`,
-          type: 'assistant',
-          content: '',
-          queries: [],
-          is_loading: true,
-          loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
-          is_streaming: true,
-          created_at: new Date().toISOString()
-        };
 
-        // Add temp message to the end
-        setMessages(prev => [...prev, tempMsg]);
-        setTemporaryMessage(tempMsg);
+        // Find the ai message where user_message_id is the id of the message
+        console.log('handleEditMessage -> finding ai message for user message id', id);
+        const aiMessage = messages.find(msg => {
+          console.log('handleEditMessage -> finding ai message for user message id:', id, msg);
+          return msg.user_message_id === id;
+        });
+        if(aiMessage) {
+          // Update the ai message with the new content
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === aiMessage.id) {
+              return { ...msg, is_edited: true, content:"", queries: [], updated_at: new Date().toISOString(), loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }], is_streaming: true };
+            } 
+            return msg;
+          }));
+          setTemporaryMessage(messages.find(msg => msg.id === aiMessage.id) || null);
+        } else {
+          console.log('handleEditMessage -> aiMessage not found');
+          const tempMsg: Message = {
+            id: `temp`,
+            type: 'assistant',
+            content: '',
+            queries: [],
+            is_loading: true,
+            loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
+            is_streaming: true,
+            created_at: new Date().toISOString()
+          };
+          setMessages(prev => [...prev, tempMsg]);
+          setTemporaryMessage(tempMsg);
+        }
       }
     } catch (error) {
       console.error('Failed to edit message:', error);

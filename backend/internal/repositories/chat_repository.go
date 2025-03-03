@@ -25,6 +25,7 @@ type ChatRepository interface {
 	FindMessagesByChat(chatID primitive.ObjectID, page, pageSize int) ([]*models.Message, int64, error)
 	FindLatestMessageByChat(chatID primitive.ObjectID, page, pageSize int) ([]*models.Message, int64, error)
 	FindMessageByID(id primitive.ObjectID) (*models.Message, error)
+	FindNextMessageByID(id primitive.ObjectID) (*models.Message, error)
 }
 
 type chatRepository struct {
@@ -186,4 +187,49 @@ func (r *chatRepository) updateChatTimeStamp(chatID primitive.ObjectID) error {
 		}
 	}()
 	return nil
+}
+
+// FindNextMessageByID finds the next message by ID of the previous user message (ex: if the previous message is a user message, find the next message that has userMessageId as the previous message id and is an assistant message)
+func (r *chatRepository) FindNextMessageByID(id primitive.ObjectID) (*models.Message, error) {
+	// First, find the current message to get its chat ID
+	currentMsg, err := r.FindMessageByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if currentMsg == nil {
+		return nil, mongo.ErrNoDocuments
+	}
+
+	// If this is a user message, find the AI message that has this message ID as its UserMessageId
+	if currentMsg.Type == "user" {
+		filter := bson.M{
+			"chat_id":         currentMsg.ChatID,
+			"user_message_id": id,
+			"type":            "assistant",
+		}
+
+		var aiMsg models.Message
+		err = r.messageCollection.FindOne(context.Background(), filter).Decode(&aiMsg)
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return &aiMsg, err
+	} else {
+		// If it's not a user message, fall back to timestamp-based search
+		filter := bson.M{
+			"chat_id": currentMsg.ChatID,
+			"created_at": bson.M{
+				"$gt": currentMsg.CreatedAt,
+			},
+		}
+
+		opts := options.FindOne().SetSort(bson.D{{Key: "created_at", Value: 1}})
+
+		var nextMsg models.Message
+		err = r.messageCollection.FindOne(context.Background(), filter, opts).Decode(&nextMsg)
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return &nextMsg, err
+	}
 }
