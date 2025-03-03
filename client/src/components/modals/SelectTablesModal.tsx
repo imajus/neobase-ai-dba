@@ -133,6 +133,21 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
       if (formattedSelection !== chat.selected_collections) {
         // Only save if the selection has changed
         await onSave(formattedSelection);
+        
+        // If this is a new connection (chat was created within the last minute) and "ALL" is selected, refresh schema
+        const chatCreatedAt = new Date(chat.created_at);
+        const now = new Date();
+        const isNewConnection = (now.getTime() - chatCreatedAt.getTime()) < 180000; // Within last 3 minutes
+        if (isNewConnection && formattedSelection === 'ALL') {
+          try {
+            const abortController = new AbortController();
+            await chatService.refreshSchema(chat.id, abortController);
+            console.log('Schema refreshed successfully for new connection');
+          } catch (error) {
+            console.error('Failed to refresh schema:', error);
+          }
+        }
+        
         // Close the modal only on success
         onClose();
       } else {
