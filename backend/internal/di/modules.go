@@ -202,21 +202,29 @@ func Initialize() {
 		log.Fatalf("Failed to provide auth handler: %v", err)
 	}
 
+	if err := DiContainer.Provide(func(chatService services.ChatService) *handlers.ChatHandler {
+		return handlers.NewChatHandler(chatService)
+	}); err != nil {
+		log.Fatalf("Failed to provide chat handler: %v", err)
+	}
+
 	if err := DiContainer.Provide(func(githubService services.GitHubService) *handlers.GitHubHandler {
 		return handlers.NewGitHubHandler(githubService)
 	}); err != nil {
 		log.Fatalf("Failed to provide github handler: %v", err)
 	}
 
-	// Chat Handler
-	if err := DiContainer.Provide(func(
-		chatService services.ChatService,
-	) *handlers.ChatHandler {
-		handler := handlers.NewChatHandler(chatService)
-		chatService.SetStreamHandler(handler)
-		return handler
+	// Add visualization service and handler
+	if err := DiContainer.Provide(func(dbManager *dbmanager.Manager) services.VisualizationService {
+		return services.NewVisualizationService(dbManager)
 	}); err != nil {
-		log.Fatalf("Failed to provide chat handler: %v", err)
+		log.Fatalf("Failed to provide visualization service: %v", err)
+	}
+
+	if err := DiContainer.Provide(func(visualizationService services.VisualizationService) *handlers.VisualizationHandler {
+		return handlers.NewVisualizationHandler(visualizationService)
+	}); err != nil {
+		log.Fatalf("Failed to provide visualization handler: %v", err)
 	}
 }
 
@@ -250,8 +258,14 @@ func GetGitHubHandler() (*handlers.GitHubHandler, error) {
 	err := DiContainer.Invoke(func(h *handlers.GitHubHandler) {
 		handler = h
 	})
-	if err != nil {
-		return nil, err
-	}
-	return handler, nil
+	return handler, err
+}
+
+// GetVisualizationHandler returns the visualization handler
+func GetVisualizationHandler() (*handlers.VisualizationHandler, error) {
+	var handler *handlers.VisualizationHandler
+	err := DiContainer.Invoke(func(h *handlers.VisualizationHandler) {
+		handler = h
+	})
+	return handler, err
 }

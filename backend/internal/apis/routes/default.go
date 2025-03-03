@@ -28,7 +28,15 @@ func SetupDefaultRoutes(router *gin.Engine) {
 	}
 	// Github repository statistics route
 	router.GET("/api/github/stats", githubHandler.GetGitHubStats)
+
 	// Setup all route groups
 	SetupAuthRoutes(router)
 	SetupChatRoutes(router)
+
+	// Setup visualization routes
+	visualizationHandler, err := di.GetVisualizationHandler()
+	if err != nil {
+		log.Fatalf("Failed to get visualization handler: %v", err)
+	}
+	SetupVisualizationRoutes(router, visualizationHandler)
 }

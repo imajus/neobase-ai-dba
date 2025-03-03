@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle, LineChart } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -8,6 +8,7 @@ import ConfirmationModal from '../modals/ConfirmationModal';
 import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
 import LoadingSteps from './LoadingSteps';
 import { Message, QueryResult } from './types';
+import VisualizationPanel from '../visualizations/VisualizationPanel';
 
 interface QueryState {
     isExecuting: boolean;
@@ -107,6 +108,20 @@ export default function MessageTile({
     const abortControllerRef = useRef<Record<string, AbortController>>({});
     const [queryResults, setQueryResults] = useState<Record<string, QueryResultState>>({});
     const pageDataCacheRef = useRef<Record<string, Record<number, PageData>>>({});
+    const [showVisualizations, setShowVisualizations] = useState(false);
+    const [visualizationTableName, setVisualizationTableName] = useState<string | undefined>(undefined);
+
+    // Extract table name from query
+    const extractTableName = (query: string): string | undefined => {
+        // Simple regex to extract table name from common SQL patterns
+        // FROM table_name, JOIN table_name, UPDATE table_name, etc.
+        const fromMatch = query.match(/FROM\s+([a-zA-Z0-9_]+)/i);
+        const joinMatch = query.match(/JOIN\s+([a-zA-Z0-9_]+)/i);
+        const updateMatch = query.match(/UPDATE\s+([a-zA-Z0-9_]+)/i);
+        const insertMatch = query.match(/INSERT\s+INTO\s+([a-zA-Z0-9_]+)/i);
+        
+        return fromMatch?.[1] || joinMatch?.[1] || updateMatch?.[1] || insertMatch?.[1];
+    };
 
     useEffect(() => {
         const streamQueries = async () => {
@@ -791,6 +806,18 @@ export default function MessageTile({
                             >
                                 <Copy className="w-4 h-4" />
                             </button>
+                            <div className="w-px h-4 bg-gray-700 mx-2" />
+                            <button
+                                onClick={() => {
+                                    const tableName = extractTableName(query.query);
+                                    setVisualizationTableName(tableName);
+                                    setShowVisualizations(true);
+                                }}
+                                className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
+                                title="Visualize data"
+                            >
+                                <LineChart className="w-4 h-4" />
+                            </button>
                         </div>
                     </div>
                     {isEditingQuery ? (
@@ -1280,6 +1307,26 @@ export default function MessageTile({
                         setQueryToExecute(null);
                     }}
                 />
+            )}
+            
+            {showVisualizations && visualizationTableName && (
+                <div className="mt-4 border rounded-lg p-4 bg-white dark:bg-gray-800">
+                    <div className="flex justify-between items-center mb-2">
+                        <h3 className="text-lg font-medium">Visualizations</h3>
+                        <button
+                            onClick={() => setShowVisualizations(false)}
+                            className="h-8 w-8 p-0 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center"
+                        >
+                            <X className="h-4 w-4" />
+                        </button>
+                    </div>
+                    <VisualizationPanel 
+                        tableName={visualizationTableName} 
+                        chatId={chatId} 
+                        isVisible={showVisualizations}
+                        onClose={() => setShowVisualizations(false)}
+                    />
+                </div>
             )}
         </div>
     );
