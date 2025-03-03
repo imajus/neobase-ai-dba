@@ -43,9 +43,11 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 		return nil, http.StatusBadRequest, errors.New("username already exists")
 	}
 
-	validUserSignupSecret := s.userRepo.ValidateUserSignupSecret(req.UserSignupSecret)
-	if !validUserSignupSecret {
-		return nil, http.StatusUnauthorized, errors.New("invalid user signup secret")
+	if config.Env.Environment != "DEVELOPMENT" {
+		validUserSignupSecret := s.userRepo.ValidateUserSignupSecret(req.UserSignupSecret)
+		if !validUserSignupSecret {
+			return nil, http.StatusUnauthorized, errors.New("invalid user signup secret")
+		}
 	}
 	existingUser, err := s.userRepo.FindByUsername(req.Username)
 	if err != nil {
@@ -92,9 +94,11 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 	}
 
 	go func() {
-		err := s.userRepo.DeleteUserSignupSecret(req.UserSignupSecret)
-		if err != nil {
-			log.Println("failed to delete user signup secret:" + err.Error())
+		if config.Env.Environment != "DEVELOPMENT" {
+			err := s.userRepo.DeleteUserSignupSecret(req.UserSignupSecret)
+			if err != nil {
+				log.Println("failed to delete user signup secret:" + err.Error())
+			}
 		}
 	}()
 
@@ -179,9 +183,6 @@ func (s *authService) Login(req *dtos.LoginRequest) (*dtos.AuthResponse, uint, e
 }
 
 func (s *authService) GenerateUserSignupSecret(req *dtos.UserSignupSecretRequest) (*models.UserSignupSecret, uint, error) {
-	if req.Username != config.Env.AdminUser || req.Password != config.Env.AdminPassword {
-		return nil, http.StatusUnauthorized, errors.New("invalid credentials for the admin")
-	}
 
 	secret := utils.GenerateSecret()
 
