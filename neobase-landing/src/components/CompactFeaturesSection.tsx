@@ -1,8 +1,10 @@
-import React from 'react';
-import { MessageSquare, Database, Zap, Shield, Server, Boxes, Rocket } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { MessageSquare, Database, Zap, Shield, Server, Boxes, Rocket, Github } from 'lucide-react';
 import FloatingBackground from './FloatingBackground';
 
 const CompactFeaturesSection: React.FC = () => {
+  
+
   const features = [
     {
       icon: <MessageSquare className="w-6 h-6 md:w-8 md:h-8" />,
@@ -60,6 +62,30 @@ const CompactFeaturesSection: React.FC = () => {
     }
   ];
 
+  const [starCount, setStarCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    const fetchStarCount = async () => {
+      try {
+          const response = await fetch('https://api.github.com/repos/bhaskarblur/neobase-ai-dba');
+          const data = await response.json();
+          setStarCount(data.stargazers_count);
+      } catch (error) {
+          console.error('Error fetching fork count:', error);
+            (1); // Default value if API call fails
+      }
+  };
+
+  fetchStarCount();
+  }, [])
+
+  const formatStarCount= (count: number): string => {
+    if (count >= 1000) {
+      return `${(count / 1000).toFixed(1)}k`
+    }
+    return count.toString()
+  }
+  
   return (
     <section id="features" className="py-12 sm:py-16 md:py-20 lg:py-24 bg-[#FFDB58]/5 relative overflow-hidden">
       <FloatingBackground count={10} opacity={0.03} />
@@ -101,15 +127,27 @@ const CompactFeaturesSection: React.FC = () => {
           ))}
         </div>
         
-        <div className="mt-8 sm:mt-12 md:mt-16 text-center">
+        <div className="flex flex-row justify-center gap-4 mt-8 sm:mt-12 md:mt-16 text-center ">
           <a 
-            href="https://github.com/bhaskarblur/neobase-ai-dba" 
+            href={import.meta.env.NEOBASE_APP_URL}
             target="_blank" 
             rel="noopener noreferrer" 
             className="neo-button inline-flex items-center justify-center gap-2 py-3 px-6 sm:py-3 sm:px-8 text-lg sm:text-lg"
           >
             <span className="flex items-center gap-2 sm:gap-4"><Rocket className="w-5 h-5 sm:w-5 sm:h-5" /> Try NeoBase</span>
           </a>
+          <a 
+                href="https://github.com/bhaskarblur/neobase-ai-dba" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="neo-button-secondary flex items-center justify-center gap-2 py-2 sm:py-3 px-5 sm:px-6 text-base sm:text-lg"
+              >
+                <Github className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span>Star us</span>
+                <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono">
+                      {formatStarCount(starCount || 1)}
+                    </span>
+              </a>
         </div>
       </div>
     </section>

@@ -3,24 +3,24 @@ import { useEffect, useState } from 'react'
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [starCount, setStarCount] = useState<number | null>(null)
+  const [forkCount, setForkCount] = useState<number | null>(null)
 
   useEffect(() => {
-    const fetchStarCount = async () => {
+    const fetchForkCount = async () => {
       try {
           const response = await fetch('https://api.github.com/repos/bhaskarblur/neobase-ai-dba');
           const data = await response.json();
-          setStarCount(data.stargazers_count);
+          setForkCount(data.forks_count);
       } catch (error) {
-          console.error('Error fetching star count:', error);
-          setStarCount(1); // I Starred it manually :)
+          console.error('Error fetching fork count:', error);
+          setForkCount(1); // Default value if API call fails
       }
   };
 
-    fetchStarCount();
+    fetchForkCount();
   }, [])
 
-  const formatStarCount = (count: number): string => {
+  const formatForkCount = (count: number): string => {
     if (count >= 1000) {
       return `${(count / 1000).toFixed(1)}k`
     }
@@ -43,7 +43,7 @@ const Navbar = () => {
             </a>
 
             {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center gap-8">
+            <div className="hidden md:flex items-center gap-6">
               <a href="#features" className="font-medium hover:text-gray-600 transition-colors">Features</a>
               <a href="#technologies" className="font-medium hover:text-gray-600 transition-colors">Technologies</a>
               
@@ -60,7 +60,7 @@ const Navbar = () => {
                 <span>Product Hunt</span>
               </a>
               
-              {/* Github Star Button */}
+              {/* Github Fork Button */}
               <a 
                 href="https://github.com/bhaskarblur/neobase-ai-dba" 
                 target="_blank" 
@@ -68,9 +68,9 @@ const Navbar = () => {
                 className="neo-button flex items-center gap-2 py-2 px-4 text-sm bg-black text-white"
               >
                 <Github className="w-4 h-4" />
-                <span>Star Us</span>
+                <span>Fork Us</span>
                 <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                  {formatStarCount(starCount || 0)}
+                  {formatForkCount(forkCount || 1)}
                 </span>
               </a>
               
@@ -107,7 +107,7 @@ const Navbar = () => {
                     <span>Product Hunt</span>
                   </a>
                   
-                  {/* Github Star Button */}
+                  {/* Github Fork Button */}
                   <a 
                     href="https://github.com/bhaskarblur/neobase-ai-dba" 
                     target="_blank" 
@@ -115,9 +115,9 @@ const Navbar = () => {
                     className="neo-button flex items-center justify-center gap-2 py-2 bg-black text-white"
                   >
                     <Github className="w-4 h-4" />
-                    <span>Star Us</span>
+                    <span>Fork Us</span>
                     <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                      {formatStarCount(starCount || 0)}
+                      {formatForkCount(forkCount || 1)}
                     </span>
                   </a>
                   
