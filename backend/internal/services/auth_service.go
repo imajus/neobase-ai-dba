@@ -37,13 +37,13 @@ func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTSe
 }
 
 func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint, error) {
-	// Check if user exists
-
 	if req.Username == config.Env.AdminUser {
 		return nil, http.StatusBadRequest, errors.New("username already exists")
 	}
 
-	if config.Env.Environment != "DEVELOPMENT" {
+	if config.Env.Environment == "DEVELOPMENT" {
+		log.Println("Development mode, skipping user signup secret validation")
+	} else {
 		validUserSignupSecret := s.userRepo.ValidateUserSignupSecret(req.UserSignupSecret)
 		if !validUserSignupSecret {
 			return nil, http.StatusUnauthorized, errors.New("invalid user signup secret")
@@ -94,7 +94,9 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 	}
 
 	go func() {
-		if config.Env.Environment != "DEVELOPMENT" {
+		if config.Env.Environment == "DEVELOPMENT" {
+			log.Println("Development mode, skipping user signup secret deletion")
+		} else {
 			err := s.userRepo.DeleteUserSignupSecret(req.UserSignupSecret)
 			if err != nil {
 				log.Println("failed to delete user signup secret:" + err.Error())

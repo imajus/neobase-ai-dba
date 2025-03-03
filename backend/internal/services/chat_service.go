@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"neobase-ai/config"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
@@ -87,6 +88,22 @@ func NewChatService(
 
 func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error) {
 	log.Printf("Creating chat for user %s", userID)
+
+	// If 0, means trial mode, so user cannot create more than 1 chat
+	if config.Env.MAX_CHATS_PER_USER == 0 {
+		// Apply check that single user cannot have more than 1 chat
+		userObjID, err := primitive.ObjectIDFromHex(userID)
+		if err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+		}
+		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 1)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+		}
+		if len(chats) > 0 {
+			return nil, http.StatusBadRequest, fmt.Errorf("you cannot have more than 1 chat in trial mode")
+		}
+	}
 
 	// Check if the database type is supported
 	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB && req.Connection.Type != constants.DatabaseTypeMySQL && req.Connection.Type != constants.DatabaseTypeClickhouse {

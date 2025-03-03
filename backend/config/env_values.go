@@ -11,9 +11,10 @@ import (
 
 type Environment struct {
 	// Server configs
-	IsDocker    bool
-	Port        string
-	Environment string
+	IsDocker           bool
+	Port               string
+	Environment        string
+	MAX_CHATS_PER_USER int
 	// Auth configs
 	SchemaEncryptionKey              string
 	JWTSecret                        string
@@ -64,6 +65,7 @@ func LoadEnv() error {
 	// Server configs
 	Env.Port = getEnvWithDefault("PORT", "3000")
 	Env.Environment = getEnvWithDefault("ENVIRONMENT", "DEVELOPMENT")
+	Env.MAX_CHATS_PER_USER = getIntEnvWithDefault("MAX_CHATS_PER_USER", 1)
 	// Auth configs
 	Env.SchemaEncryptionKey = getRequiredEnv("SCHEMA_ENCRYPTION_KEY", "neobase_schema_encryption_key")
 	Env.JWTSecret = getRequiredEnv("JWT_SECRET", "neobase_jwt_secret")
