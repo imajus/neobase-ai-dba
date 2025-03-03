@@ -23,7 +23,7 @@ const HeroSection = () => {
             </p>
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4 sm:pt-6">
               <a 
-                href={import.meta.env.NEOBASE_APP_URL}
+                href={import.meta.env.VITE_NEOBASE_APP_URL}
                 target="_blank" 
                 rel="noopener noreferrer" 
                 className="neo-button flex items-center justify-center gap-2 py-2 sm:py-3 px-6 sm:px-8 text-base sm:text-lg"

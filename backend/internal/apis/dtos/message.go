@@ -12,13 +12,15 @@ type CreateMessageRequest struct {
 }
 
 type MessageResponse struct {
-	ID        string   `json:"id"`
-	ChatID    string   `json:"chat_id"`
-	Type      string   `json:"type"`
-	Content   string   `json:"content"`
-	Queries   *[]Query `json:"queries,omitempty"`
-	IsEdited  bool     `json:"is_edited"`
-	CreatedAt string   `json:"created_at"`
+	ID            string   `json:"id"`
+	ChatID        string   `json:"chat_id"`
+	UserMessageID *string  `json:"user_message_id,omitempty"` // Only for AI response, this is the user message id of the message that triggered the AI response
+	Type          string   `json:"type"`
+	Content       string   `json:"content"`
+	Queries       *[]Query `json:"queries,omitempty"`
+	IsEdited      bool     `json:"is_edited"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 type Query struct {

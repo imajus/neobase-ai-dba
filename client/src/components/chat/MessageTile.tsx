@@ -62,7 +62,9 @@ const toastStyle = {
     duration: 2000,
 };
 
-const formatMessageTime = (dateString: string) => {
+const formatMessageTime = (message: Message) => {
+    // Use updated_at if available and message is edited, otherwise use created_at
+    const dateString = message.is_edited && message.updated_at ? message.updated_at : message.created_at;
     const date = new Date(dateString);
     return date.toLocaleTimeString('en-US', {
         hour: 'numeric',
@@ -107,28 +109,83 @@ export default function MessageTile({
     const abortControllerRef = useRef<Record<string, AbortController>>({});
     const [queryResults, setQueryResults] = useState<Record<string, QueryResultState>>({});
     const pageDataCacheRef = useRef<Record<string, Record<number, PageData>>>({});
+    
+    // Add these state hooks at the component level to fix the hooks order issue
+    const [expandedQueries, setExpandedQueries] = useState<Record<string, boolean>>({});
+    const [showExampleResults, setShowExampleResults] = useState<Record<string, boolean>>({});
+    const [queryCurrentPages, setQueryCurrentPages] = useState<Record<string, number>>({});
+    const [editingQueries, setEditingQueries] = useState<Record<string, boolean>>({});
+    const [editedQueryTexts, setEditedQueryTexts] = useState<Record<string, string>>({});
+
+    // Ensure message is valid to prevent errors
+    if (!message) {
+        console.error('MessageTile received invalid message');
+        return null;
+    }
 
     useEffect(() => {
         const streamQueries = async () => {
             if (!message.queries || !message.is_streaming) return;
 
+            // Set streaming index to 0 to start showing the first query
+            setStreamingQueryIndex(0);
+            
             // Just set the content immediately without streaming
             for (let i = 0; i < message.queries.length; i++) {
                 const query = message.queries[i];
+                if (!query || !query.id) continue;
+                
                 setStreamingQueryIndex(i);
                 setCurrentDescription(query.description);
-                setCurrentQuery(query.query);
+                setCurrentQuery(removeDuplicateQueries(query.query));
+
+                // Initialize the edited query text for this query
+                setEditedQueryTexts(prev => ({
+                    ...prev,
+                    [query.id]: removeDuplicateQueries(query.query || '')
+                }));
 
                 // Keep the existing query state management
                 if (message.queries) {
                     message.queries[i].is_streaming = false;
                 }
             }
-            setStreamingQueryIndex(-1);
         };
 
         streamQueries();
     }, [message.queries, message.is_streaming]);
+
+    // Add a separate effect to handle when streaming is complete
+    useEffect(() => {
+        if (!message.is_streaming && message.queries && message.queries.length > 0) {
+            // Reset streaming index when streaming is complete
+            setStreamingQueryIndex(-1);
+        }
+    }, [message.is_streaming, message.queries]);
+
+    // Initialize editedQueryTexts when queries change
+    useEffect(() => {
+        if (message.queries) {
+            const initialQueryTexts: Record<string, string> = {};
+            message.queries.forEach(query => {
+                if (query && query.id) {
+                    initialQueryTexts[query.id] = removeDuplicateQueries(query.query || '');
+                }
+            });
+            if (Object.keys(initialQueryTexts).length > 0) {
+                setEditedQueryTexts(prev => {
+                    const newState = { ...prev };
+                    // Only set values that don't already exist or have changed
+                    Object.entries(initialQueryTexts).forEach(([id, text]) => {
+                        if (!prev[id]) {
+                            newState[id] = text;
+                        }
+                    });
+                    return newState;
+                });
+            }
+        }
+    }, [message.queries]);
 
     useEffect(() => {
         if (message.queries) {
@@ -688,18 +745,66 @@ export default function MessageTile({
     };
 
     const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
+        // Ensure query is valid before proceeding
+        if (!query) {
+            console.error('renderQuery called with invalid query');
+            return null;
+        }
+
+        // Only skip rendering if we're actively streaming a specific query
+        // and this isn't that query
+        if (isMessageStreaming && streamingQueryIndex !== -1 && index !== streamingQueryIndex) {
+            return null;
+        }
+
+        // Instead of using useState hooks inside the render function, use the state from the component level
+        const isExpanded = expandedQueries[query.id] || false;
+        const showExampleResult = showExampleResults[query.id] || false;
+        const currentPage = queryCurrentPages[query.id] || 1;
+        const isEditingQuery = editingQueries[query.id] || false;
+        const editedQueryText = editedQueryTexts[query.id] || removeDuplicateQueries(query.query || '');
+
+        // Functions to update the state
+        const setIsExpanded = (value: boolean) => {
+            setExpandedQueries(prev => ({ ...prev, [query.id]: value }));
+        };
+        
+        const setShowExampleResult = (value: boolean) => {
+            setShowExampleResults(prev => ({ ...prev, [query.id]: value }));
+        };
+        
+        const setCurrentPage = (value: number) => {
+            setQueryCurrentPages(prev => ({ ...prev, [query.id]: value }));
+        };
+        
+        const setIsEditingQuery = (value: boolean) => {
+            setEditingQueries(prev => ({ ...prev, [query.id]: value }));
+        };
+        
+        const setEditedQueryText = (value: string) => {
+            setEditedQueryTexts(prev => ({ ...prev, [query.id]: value }));
+        };
+
+        // Get query state or initialize it
+        const queryState = queryStates[query.id] || { isExecuting: false, isExample: false };
+        const queryResult = queryResults[query.id] || { 
+            data: null, 
+            loading: false, 
+            error: null, 
+            currentPage: 1, 
+            pageSize: DEFAULT_PAGE_SIZE, 
+            totalRecords: null 
+        };
+
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
         const isCurrentlyStreaming = !isMessageStreaming && streamingQueryIndex === index;
-        const [isEditingQuery, setIsEditingQuery] = useState(false);
-        const [editedQueryText, setEditedQueryText] = useState(
-            removeDuplicateQueries(query.query)
-        );
 
         const shouldShowRollback = query.can_rollback &&
             query.is_executed &&
-            !query.is_rolled_back;
+            !query.is_rolled_back &&
+            !query.error;
 
         return (
             <div>
@@ -720,7 +825,7 @@ export default function MessageTile({
                         </div>
                         <div className="flex items-center">
                             {(
-                                !queryStates[queryId]?.isExecuting && !query.is_executed && (
+                                !queryState.isExecuting && !query.is_executed && (
                                     <>
                                         <button
                                             onClick={(e) => {
@@ -738,7 +843,7 @@ export default function MessageTile({
                                 )
                             )}
 
-                            {queryStates[queryId]?.isExecuting ? (
+                            {queryState.isExecuting ? (
                                 <button
                                     onClick={(e) => {
                                         e.preventDefault();
@@ -806,7 +911,7 @@ export default function MessageTile({
                                 <button
                                     onClick={() => {
                                         setIsEditingQuery(false);
-                                        setEditedQueryText(query.query);
+                                        setEditedQueryText(removeDuplicateQueries(query.query || ''));
                                     }}
                                     className="px-4 py-2 bg-gray-800 text-white border-2 border-gray-600
                                                   hover:bg-gray-700 transition-colors shadow-[2px_2px_0px_0px_rgba(75,85,99,1)]
@@ -839,9 +944,9 @@ export default function MessageTile({
                             </code>
                         </pre>
                     )}
-                    {(query.execution_result || query.example_result || query.error || queryStates[queryId]?.isExecuting) && (
+                    {(query.execution_result || query.example_result || query.error || queryState.isExecuting) && (
                         <div className="border-t border-gray-700 mt-2 w-full">
-                            {queryStates[queryId]?.isExecuting ? (
+                            {queryState.isExecuting ? (
                                 <div className="flex items-center justify-center p-8">
                                     <Loader className="w-8 h-8 animate-spin text-gray-400" />
                                     <span className="ml-3 text-gray-400">Executing  query...</span>
@@ -914,7 +1019,7 @@ export default function MessageTile({
                                                     <Copy className="w-4 h-4" />
                                                 </button>
                                                 {shouldShowRollback && (
-                                                    !queryStates[queryId]?.isExecuting ? (
+                                                    !queryState.isExecuting ? (
                                                         <button
                                                             onClick={(e) => {
                                                                 e.preventDefault();
@@ -925,7 +1030,7 @@ export default function MessageTile({
                                                                 }, 0);
                                                             }}
                                                             className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
-                                                            disabled={queryStates[queryId]?.isExecuting}
+                                                            disabled={queryState.isExecuting}
                                                         >
                                                             <History className="w-4 h-4" />
                                                         </button>
@@ -1045,7 +1150,47 @@ export default function MessageTile({
         // Join back with semicolons
         return uniqueQueries.join(';\n');
     };
-
+    
+    // Remove duplicate content from the message
+    const removeDuplicateContent = (content: string): string => {
+        if (!content) return '';
+        
+        // Check for exact duplication of the entire content
+        const contentLength = content.length;
+        if (contentLength > 20) { // Only check for longer content
+            const halfPoint = Math.floor(contentLength / 2);
+            
+            // Try different split points around the middle
+            for (let offset = -10; offset <= 10; offset++) {
+                const splitPoint = halfPoint + offset;
+                if (splitPoint <= 0 || splitPoint >= contentLength) continue;
+                
+                const firstPart = content.substring(0, splitPoint).trim();
+                const secondPart = content.substring(splitPoint).trim();
+                
+                // If the second part starts with the same text as the first part
+                if (secondPart.startsWith(firstPart.substring(0, Math.min(20, firstPart.length)))) {
+                    return firstPart;
+                }
+            }
+        }
+        
+        // If not an exact duplication, handle sentence by sentence
+        const sentences = content.split(/(?<=[.!?])\s+/);
+        const uniqueSentences: string[] = [];
+        const seen = new Set<string>();
+        
+        for (const sentence of sentences) {
+            const trimmed = sentence.trim();
+            // Skip empty sentences and check for duplicates (case insensitive)
+            if (trimmed && !seen.has(trimmed.toLowerCase())) {
+                seen.add(trimmed.toLowerCase());
+                uniqueSentences.push(sentence);
+            }
+        }
+        
+        return uniqueSentences.join(' ');
+    };
     return (
         <div className={`
                 py-4 md:py-6
@@ -1069,7 +1214,7 @@ export default function MessageTile({
 
           ">
                         <button
-                            onClick={() => handleCopyToClipboard(message.content)}
+                            onClick={() => handleCopyToClipboard(removeDuplicateContent(message.content))}
                             className="
                 -translate-y-1/2
                 p-1.5
@@ -1129,7 +1274,7 @@ export default function MessageTile({
             z-[5]
           ">
                         <button
-                            onClick={() => handleCopyToClipboard(message.content)}
+                            onClick={() => handleCopyToClipboard(removeDuplicateContent(message.content))}
                             className="
                 -translate-y-1/2
                 p-1.5
@@ -1229,7 +1374,7 @@ export default function MessageTile({
                             ) : (
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
                                     <p className="text-lg whitespace-pre-wrap break-words">
-                                        {message.content}
+                                        {removeDuplicateContent(message.content)}
                                         {message.is_edited && message.type === 'user' && (
                                             <span className="ml-2 text-xs text-gray-600 italic">
                                                 (edited)
@@ -1238,9 +1383,15 @@ export default function MessageTile({
                                     </p>
                                     {message.queries && message.queries.length > 0 && (
                                         <div className="min-w-full">
-                                            {message.queries.map((query: QueryResult, index: number) =>
-                                                renderQuery(message.is_streaming || false, query, index)
-                                            )}
+                                            {message.queries.map((query: QueryResult, index: number) => {
+                                                // Ensure query is valid before rendering
+                                                if (!query || !query.id) {
+                                                    console.error('Invalid query in message', message.id, index);
+                                                    return null;
+                                                }
+                                                
+                                                return renderQuery(message.is_streaming || false, query, index);
+                                            })}
                                         </div>
                                     )}
                                 </div>
@@ -1251,7 +1402,7 @@ export default function MessageTile({
                               text-[12px] text-gray-500 mt-1
                               ${message.type === 'user' ? 'text-right' : 'text-left'}
                             `}>
-                            {formatMessageTime(message.created_at)}
+                            {formatMessageTime(message)}
                         </div>
                     </div>
                 </div>

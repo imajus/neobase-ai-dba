@@ -28,11 +28,13 @@ export interface Message {
     type: 'user' | 'assistant';
     content: string;
     created_at: string;
+    updated_at?: string;
     is_loading?: boolean;
     loading_steps?: LoadingStep[];
     queries?: QueryResult[];
     is_edited?: boolean;
     is_streaming?: boolean;
+    user_message_id?: string;
 }
 
 export interface LoadingStep {
