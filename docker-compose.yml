@@ -35,22 +35,31 @@ services:
     ports:
       - 3000:3000
     environment:
-      - IS_DOCKER=true
-      - PORT=3000
-      - NEOBASE_ADMIN_USERNAME=neobase-admin
-      - NEOBASE_ADMIN_PASSWORD=neobase-password
-      - SCHEMA_ENCRYPTION_KEY=neobase_schema_encryption_key
-      - JWT_SECRET=neobase_jwt_secret
-      - USER_JWT_EXPIRATION_MILLISECONDS=1000*60*60*24*10
-      - USER_JWT_REFRESH_EXPIRATION_MILLISECONDS=1000*60*60*24*30
-      - DEFAULT_LLM_CLIENT=openai
-      - NEOBASE_MONGODB_URI=mongodb://neobase:neobase@neobase-mongodb:27017/neobase-db?authSource=admin
-      - NEOBASE_MONGODB_NAME=neobase-db
-      - NEOBASE_REDIS_HOST=neobase-redis
-      - NEOBASE_REDIS_PORT=6379
-      - NEOBASE_REDIS_USERNAME=default
-      - NEOBASE_REDIS_PASSWORD=default
-
+      - IS_DOCKER=${IS_DOCKER}
+      - PORT=${PORT}
+      - ENVIRONMENT=${ENVIRONMENT} # DEVELOPMENT, PRODUCTION
+      - MAX_CHATS_PER_USER=${MAX_CHATS_PER_USER} # 0 for trial mode(1 connection), 1 for unlimited
+      - NEOBASE_ADMIN_USERNAME=${NEOBASE_ADMIN_USERNAME}
+      - NEOBASE_ADMIN_PASSWORD=${NEOBASE_ADMIN_PASSWORD}
+      - SCHEMA_ENCRYPTION_KEY=${SCHEMA_ENCRYPTION_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - USER_JWT_EXPIRATION_MILLISECONDS=${USER_JWT_EXPIRATION_MILLISECONDS}
+      - USER_JWT_REFRESH_EXPIRATION_MILLISECONDS=${USER_JWT_REFRESH_EXPIRATION_MILLISECONDS}
+      - NEOBASE_MONGODB_URI=${NEOBASE_MONGODB_URI}
+      - NEOBASE_MONGODB_NAME=${NEOBASE_MONGODB_NAME}
+      - NEOBASE_REDIS_HOST=${NEOBASE_REDIS_HOST}
+      - NEOBASE_REDIS_PORT=${NEOBASE_REDIS_PORT}
+      - NEOBASE_REDIS_USERNAME=${NEOBASE_REDIS_USERNAME}
+      - NEOBASE_REDIS_PASSWORD=${NEOBASE_REDIS_PASSWORD}
+      - DEFAULT_LLM_CLIENT=${DEFAULT_LLM_CLIENT}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - OPENAI_MAX_COMPLETION_TOKENS=${OPENAI_MAX_COMPLETION_TOKENS}
+      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL}
+      - GEMINI_MAX_COMPLETION_TOKENS=${GEMINI_MAX_COMPLETION_TOKENS}
+      - GEMINI_TEMPERATURE=${GEMINI_TEMPERATURE}
     depends_on:
       - neobase-mongodb
       - neobase-redis
@@ -63,11 +72,14 @@ services:
       dockerfile: Dockerfile
     container_name: neobase-client
     environment:
-      - VITE_FRONTEND_BASE_URL=http://localhost:5173 # Should be the exposed host
-      - VITE_API_URL=http://neobase-backend:3000
+      - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL} # Frontend exposed base url
+      - VITE_API_URL=${VITE_API_URL} # Backend url with /api
+      - VITE_ENVIRONMENT=${VITE_ENVIRONMENT} # DEVELOPMENT, PRODUCTION
     restart: always
     ports:
       - 5173:5173
+    depends_on:
+      - neobase-backend
     networks:
       - neobase-network
 
