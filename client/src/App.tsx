@@ -171,6 +171,11 @@ function AppContent() {
       const response = await authService.signup(data);
       console.log("handleSignup response", response);
       setIsAuthenticated(true);
+      setUser({
+        id: response.data.user.id,
+        username: response.data.user.username,
+        created_at: response.data.user.created_at
+      });
       setSuccessMessage(`Welcome to NeoBase, ${response.data.user.username}!`);
     } catch (error: any) {
       console.error("Signup error:", error);
