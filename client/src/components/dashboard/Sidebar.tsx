@@ -197,7 +197,7 @@ export default function Sidebar({
               // Make good looking empty state
               isExpanded && (
                 <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
-                  <p className="text-black font-bold text-lg">No connections found</p>
+                  <p className="text-black font-bold text-lg">No connections yet</p>
                   <p className="text-gray-600">Add a connection to get started</p>
                 </div>
               )

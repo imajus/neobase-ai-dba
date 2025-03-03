@@ -26,7 +26,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
     userSignupSecret: ''
   });
   const [formError, setFormError] = useState<string | null>(null);
-
+  const Environment = import.meta.env.VITE_ENVIRONMENT;
   const validateUserName = (userName: string) => {
     if (!userName) return 'Username is required';
     if (userName.length < 3) return 'Username must be at least 3 characters';
@@ -46,6 +46,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
     return '';
   };
   const validateForm = () => {
+    console.log(Environment);
     const newErrors: FormErrors = {};
 
     const userNameError = validateUserName(formData.userName);
@@ -55,7 +56,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
     if (passwordError) newErrors.password = passwordError;
 
     const userSignupSecretError = validateUserSignupSecret(formData.userSignupSecret);
-    if (!isLogin && userSignupSecretError) newErrors.userSignupSecret = userSignupSecretError;
+    if (!isLogin && Environment != "DEVELOPMENT" && userSignupSecretError) newErrors.userSignupSecret = userSignupSecretError;
 
     if (!isLogin && formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
@@ -172,7 +173,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
             )}
           </div>
 
-          {!isLogin && (
+          {!isLogin && Environment !== "DEVELOPMENT" && (
             <div>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />

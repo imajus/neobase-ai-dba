@@ -2,12 +2,18 @@ import { AlertCircle, ChevronDown, Database, Loader2, Table, X } from 'lucide-re
 import React, { useEffect, useRef, useState } from 'react';
 import { Chat, Connection } from '../../types/chat';
 import SelectTablesModal from './SelectTablesModal';
+import chatService from '../../services/chatService';
 
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
   onEdit?: (data: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
-  onSubmit: (data: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
+  onSubmit: (data: Connection, autoExecuteQuery: boolean) => Promise<{ 
+    success: boolean;
+    error?: string;
+    chatId?: string;
+    selectedCollections?: string;
+  }>;
   onUpdateSelectedCollections?: (chatId: string, selectedCollections: string) => Promise<void>;
   onUpdateAutoExecuteQuery?: (chatId: string, autoExecuteQuery: boolean) => Promise<void>;
 }
@@ -137,6 +143,16 @@ export default function ConnectionModal({
         const result = await onSubmit(formData, autoExecuteQuery);
         console.log("submit result in connection modal", result);
         if (result?.success) {
+          // If this is a new connection and the selected_collections is "ALL", refresh the schema
+          if (result.chatId && result.selectedCollections === 'ALL') {
+            try {
+              const abortController = new AbortController();
+              await chatService.refreshSchema(result.chatId, abortController);
+              console.log('Schema refreshed successfully for new connection');
+            } catch (error) {
+              console.error('Failed to refresh schema:', error);
+            }
+          }
           onClose();
         } else if (result?.error) {
           setError(result.error);
