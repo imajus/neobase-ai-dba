@@ -17,7 +17,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                     throw new Error('Failed to fetch star count');
                 }
                 const data = await response.json();
-                setStarCount(data.stars);
+                setStarCount(data.data.star_count);
             } catch (error) {
                 console.error('Error fetching star count:', error);
                 setStarCount(1); // I Starred it manually :)

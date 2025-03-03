@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { MessageSquare, Database, Zap, Shield, Server, Boxes, Rocket, Github } from 'lucide-react';
 import FloatingBackground from './FloatingBackground';
 
-const CompactFeaturesSection: React.FC = () => {
+const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
   
 
   const features = [
@@ -62,22 +62,6 @@ const CompactFeaturesSection: React.FC = () => {
     }
   ];
 
-  const [starCount, setStarCount] = useState<number | null>(null)
-
-  useEffect(() => {
-    const fetchStarCount = async () => {
-      try {
-          const response = await fetch('https://api.github.com/repos/bhaskarblur/neobase-ai-dba');
-          const data = await response.json();
-          setStarCount(data.stargazers_count);
-      } catch (error) {
-          console.error('Error fetching fork count:', error);
-            (1); // Default value if API call fails
-      }
-  };
-
-  fetchStarCount();
-  }, [])
 
   const formatStarCount= (count: number): string => {
     if (count >= 1000) {
@@ -145,7 +129,7 @@ const CompactFeaturesSection: React.FC = () => {
                 <Github className="w-4 h-4 sm:w-5 sm:h-5" />
                 <span>Star us</span>
                 <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                      {formatStarCount(starCount || 1)}
+                      {formatStarCount(stars || 1)}
                     </span>
               </a>
         </div>

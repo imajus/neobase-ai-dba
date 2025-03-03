@@ -8,21 +8,43 @@ import HowItWorksSection from './components/HowItWorksSection'
 import Clarity from '@microsoft/clarity';
 import { initializeApp } from "firebase/app";
 import { getAnalytics, logEvent } from "firebase/analytics";
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 function App() {
+  const [stars, setStars] = useState(0);
+  const [forks, setForks] = useState(0);
   useEffect(() => {
     initializeAnalytics();
+    fetchStats();
   }, []);
+
+
+function fetchStats() {
+  const backendUrl = import.meta.env.VITE_API_URL + '/github/stats';
+  if (backendUrl) {
+    fetch(backendUrl)
+      .then(response => response.json())
+      .then(data => {
+        console.log('Stats:', data);
+        setStars(data.data.star_count);
+        setForks(data.data.fork_count);
+      })
+      .catch(error => {
+        console.error('Error fetching stats:', error);
+      });
+  }
+}
+
+
 
   return (
     <div className="min-h-screen bg-[#FFDB58]/10 overflow-hidden">
-      <Navbar />
+      <Navbar forks={forks}/>
       <main className="flex flex-col space-y-8 md:space-y-0">
         <HeroSection />
         <VideoSection />
         <SupportedTechnologiesSection />
-        <CompactFeaturesSection />
+        <CompactFeaturesSection stars={stars}/>
         <HowItWorksSection />
       </main>
       <Footer />

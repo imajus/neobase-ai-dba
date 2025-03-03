@@ -25,7 +25,7 @@ const Footer = () => {
               <span>GitHub</span>
             </a>
             <a 
-              href="https://www.producthunt.com/posts/neobase" 
+              href={import.meta.env.VITE_PRODUCT_HUNT_URL}
               target="_blank" 
               rel="noopener noreferrer"
               className="flex items-center gap-2 hover:text-[#DA552F] transition-colors"

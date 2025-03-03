@@ -1,24 +1,9 @@
 import { Github, Menu, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
-const Navbar = () => {
+const Navbar = ({ forks }: { forks: number }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [forkCount, setForkCount] = useState<number | null>(null)
 
-  useEffect(() => {
-    const fetchForkCount = async () => {
-      try {
-          const response = await fetch('https://api.github.com/repos/bhaskarblur/neobase-ai-dba');
-          const data = await response.json();
-          setForkCount(data.forks_count);
-      } catch (error) {
-          console.error('Error fetching fork count:', error);
-          setForkCount(1); // Default value if API call fails
-      }
-  };
-
-    fetchForkCount();
-  }, [])
 
   const formatForkCount = (count: number): string => {
     if (count >= 1000) {
@@ -49,7 +34,7 @@ const Navbar = () => {
               
               {/* Product Hunt Button */}
               <a 
-                href="https://www.producthunt.com/posts/neobase" 
+                href={import.meta.env.VITE_PRODUCT_HUNT_URL}
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="neo-button flex items-center gap-2 py-2 px-4 text-sm bg-[#DA552F] text-white"
@@ -70,7 +55,7 @@ const Navbar = () => {
                 <Github className="w-4 h-4" />
                 <span>Fork Us</span>
                 <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                  {formatForkCount(forkCount || 1)}
+                  {formatForkCount(forks || 1)}
                 </span>
               </a>
               
@@ -117,7 +102,7 @@ const Navbar = () => {
                     <Github className="w-4 h-4" />
                     <span>Fork Us</span>
                     <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                      {formatForkCount(forkCount || 1)}
+                      {formatForkCount(forks || 1)}
                     </span>
                   </a>
                   

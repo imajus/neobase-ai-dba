@@ -19,7 +19,7 @@ func NewGitHubHandler(githubService services.GitHubService) *GitHubHandler {
 }
 
 func (h *GitHubHandler) GetGitHubStats(c *gin.Context) {
-	starCount, err := h.githubService.GetStarCount(c.Request.Context())
+	stats, err := h.githubService.GetStats(c.Request.Context())
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(http.StatusBadRequest, dtos.Response{
@@ -31,8 +31,6 @@ func (h *GitHubHandler) GetGitHubStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
-		Data: map[string]interface{}{
-			"stars": starCount,
-		},
+		Data:    stats,
 	})
 }
