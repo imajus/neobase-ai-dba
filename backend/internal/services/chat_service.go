@@ -31,6 +31,7 @@ type StreamHandler interface {
 
 type ChatService interface {
 	Create(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error)
+	CreateWithoutConnectionPing(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error)
 	Update(userID, chatID string, req *dtos.UpdateChatRequest) (*dtos.ChatResponse, uint32, error)
 	Delete(userID, chatID string) (uint32, error)
 	GetByID(userID, chatID string) (*dtos.ChatResponse, uint32, error)
@@ -97,12 +98,12 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		if err != nil {
 			return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 		}
-		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 1)
+		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 2)
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 0 {
-			return nil, http.StatusBadRequest, fmt.Errorf("you cannot have more than 1 chat in trial mode")
+		if len(chats) > 1 {
+			return nil, http.StatusBadRequest, fmt.Errorf("you cannot have more than 2 chat in trial mode")
 		}
 	}
 
@@ -147,6 +148,52 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	return s.buildChatResponse(chat), http.StatusCreated, nil
 }
 
+func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.CreateChatRequest) (*dtos.ChatResponse, uint32, error) {
+	log.Printf("Creating chat for user %s", userID)
+
+	// If 0, means trial mode, so user cannot create more than 1 chat
+	if config.Env.MaxChatsPerUser == 0 {
+		// Apply check that single user cannot have more than 1 chat
+		userObjID, err := primitive.ObjectIDFromHex(userID)
+		if err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+		}
+		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 2)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+		}
+		if len(chats) > 1 {
+			return nil, http.StatusBadRequest, fmt.Errorf("you cannot have more than 2 chat in trial mode")
+		}
+	}
+
+	// Check if the database type is supported
+	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB && req.Connection.Type != constants.DatabaseTypeMySQL && req.Connection.Type != constants.DatabaseTypeClickhouse {
+		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL, YugabyteDB, MySQL and Clickhouse are supported for now")
+	}
+
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+	// Create connection object
+	connection := models.Connection{
+		Type:     req.Connection.Type,
+		Host:     req.Connection.Host,
+		Port:     req.Connection.Port,
+		Username: &req.Connection.Username,
+		Password: &req.Connection.Password,
+		Database: req.Connection.Database,
+		Base:     models.NewBase(),
+	}
+
+	// Create chat with connection
+	chat := models.NewChat(userObjID, connection, req.AutoExecuteQuery)
+	if err := s.chatRepo.Create(chat); err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	return s.buildChatResponse(chat), http.StatusCreated, nil
+}
 func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest) (*dtos.ChatResponse, uint32, error) {
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {

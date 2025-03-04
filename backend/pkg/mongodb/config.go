@@ -20,7 +20,7 @@ func InitializeDatabaseConnection(config MongoDbConfigModel) *MongoDBClient {
 
 	clientOptions := options.Client().ApplyURI(connectionURI)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	var err error

@@ -619,16 +619,31 @@ func (m *Manager) StartSchemaTracking(chatID string) {
 
 		defer ticker.Stop()
 
-		// Do initial schema check
-		if err := m.doSchemaCheck(chatID); err != nil {
-			log.Printf("DBManager -> StartSchemaTracking -> Initial schema check failed: %v", err)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+		defer cancel()
+
+		// Call Schema change only when schema is empty
+		if _, err := m.schemaManager.getStoredSchema(ctx, chatID); err != nil {
+			log.Printf("DBManager -> StartSchemaTracking -> err: %v", err)
+			// Do initial schema check
+			if err := m.doSchemaCheck(chatID); err != nil {
+				log.Printf("DBManager -> StartSchemaTracking -> Initial schema check failed: %v", err)
+			}
 		}
 
 		for {
 			select {
 			case <-ticker.C:
-				if err := m.doSchemaCheck(chatID); err != nil {
-					log.Printf("DBManager -> StartSchemaTracking -> Schema check failed: %v", err)
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+				defer cancel()
+
+				// Call Schema change only when schema is empty
+				if _, err := m.schemaManager.getStoredSchema(ctx, chatID); err != nil {
+					log.Printf("DBManager -> StartSchemaTracking -> err: %v", err)
+					// Do initial schema check
+					if err := m.doSchemaCheck(chatID); err != nil {
+						log.Printf("DBManager -> StartSchemaTracking -> Initial schema check failed: %v", err)
+					}
 				}
 			case <-m.stopCleanup:
 				log.Printf("DBManager -> StartSchemaTracking -> Stopping for chatID: %s", chatID)
@@ -674,7 +689,7 @@ func (m *Manager) doSchemaCheck(chatID string) error {
 	m.schemaManager.ClearSchemaCache(chatID)
 
 	// Get fresh schema from database
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
 
 	// Pass selectedTables instead of hardcoded "ALL"

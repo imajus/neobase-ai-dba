@@ -11,11 +11,17 @@ import (
 
 type Environment struct {
 	// Server configs
-	IsDocker          bool
-	Port              string
-	Environment       string
-	MaxChatsPerUser   int
-	CorsAllowedOrigin string
+	IsDocker                bool
+	Port                    string
+	Environment             string
+	MaxChatsPerUser         int
+	CorsAllowedOrigin       string
+	ExampleDatabaseType     string
+	ExampleDatabaseHost     string
+	ExampleDatabasePort     string
+	ExampleDatabaseName     string
+	ExampleDatabaseUsername string
+	ExampleDatabasePassword string
 	// Auth configs
 	SchemaEncryptionKey              string
 	JWTSecret                        string
@@ -83,6 +89,14 @@ func LoadEnv() error {
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
 	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
 	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "neobase")
+
+	// Example DB For Development Environment
+	Env.ExampleDatabaseType = getRequiredEnv("EXAMPLE_DB_TYPE", "postgres")
+	Env.ExampleDatabaseHost = getRequiredEnv("EXAMPLE_DB_HOST", "localhost")
+	Env.ExampleDatabasePort = getRequiredEnv("EXAMPLE_DB_PORT", "5432")
+	Env.ExampleDatabaseName = getRequiredEnv("EXAMPLE_DB_NAME", "postgres")
+	Env.ExampleDatabaseUsername = getRequiredEnv("EXAMPLE_DB_USERNAME", "")
+	Env.ExampleDatabasePassword = getRequiredEnv("EXAMPLE_DB_PASSWORD", "")
 
 	// LLM configs
 	Env.DefaultLLMClient = getEnvWithDefault("DEFAULT_LLM_CLIENT", constants.OpenAI)
