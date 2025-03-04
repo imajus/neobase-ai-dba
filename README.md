@@ -92,6 +92,7 @@ We welcome contributions! Here’s how you can help:
 4. Push to the branch (`git push origin feature/your-feature`).
 5. Open a pull request.
 
+See the list of contributors in [CONTRIBUTORS][CONTRIBUTORS] file.
 
 ## License
 
