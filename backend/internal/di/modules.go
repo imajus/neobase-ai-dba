@@ -201,6 +201,13 @@ func Initialize() {
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)
 
+		// Set chat service in auth service
+		err = DiContainer.Invoke(func(authService services.AuthService) {
+			authService.SetChatService(chatService)
+		})
+		if err != nil {
+			log.Fatalf("Failed to set chat service in auth service: %v", err)
+		}
 		return chatService
 	}); err != nil {
 		log.Fatalf("Failed to provide chat service: %v", err)

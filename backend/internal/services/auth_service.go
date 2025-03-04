@@ -20,12 +20,14 @@ type AuthService interface {
 	RefreshToken(refreshToken string) (*dtos.RefreshTokenResponse, uint32, error)
 	Logout(refreshToken string, accessToken string) (uint32, error)
 	GetUser(userID string) (*models.User, uint, error)
+	SetChatService(chatService ChatService)
 }
 
 type authService struct {
-	userRepo   repositories.UserRepository
-	jwtService utils.JWTService
-	tokenRepo  repositories.TokenRepository
+	chatService ChatService
+	userRepo    repositories.UserRepository
+	jwtService  utils.JWTService
+	tokenRepo   repositories.TokenRepository
 }
 
 func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTService, tokenRepo repositories.TokenRepository) AuthService {
@@ -34,6 +36,10 @@ func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTSe
 		jwtService: jwtService,
 		tokenRepo:  tokenRepo,
 	}
+}
+
+func (s *authService) SetChatService(chatService ChatService) {
+	s.chatService = chatService
 }
 
 func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint, error) {
@@ -104,6 +110,25 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 		}
 	}()
 
+	if config.Env.Environment == "DEVELOPMENT" {
+		chat, _, err := s.chatService.CreateWithoutConnectionPing(user.ID.Hex(), &dtos.CreateChatRequest{
+			Connection: dtos.CreateConnectionRequest{
+				Type:     config.Env.ExampleDatabaseType,
+				Host:     config.Env.ExampleDatabaseHost,
+				Port:     config.Env.ExampleDatabasePort,
+				Database: config.Env.ExampleDatabaseName,
+				Username: config.Env.ExampleDatabaseUsername,
+				Password: config.Env.ExampleDatabasePassword,
+			},
+		})
+		if err != nil {
+			log.Println("failed to create chat:" + err.Error())
+		}
+		if chat != nil {
+			log.Println("chat created:", chat.ID)
+		}
+
+	}
 	return &dtos.AuthResponse{
 		AccessToken:  *accessToken,
 		RefreshToken: *refreshToken,
