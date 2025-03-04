@@ -20,19 +20,29 @@ function App() {
 
 
 function fetchStats() {
-  const backendUrl = import.meta.env.VITE_API_URL + '/github/stats';
-  if (backendUrl) {
-    fetch(backendUrl)
-      .then(response => response.json())
-      .then(data => {
-        console.log('Stats:', data);
-        setStars(data.data.star_count);
-        setForks(data.data.fork_count);
-      })
-      .catch(error => {
-        console.error('Error fetching stats:', error);
-      });
-  }
+  // GitHub API endpoint for the repository
+  const repoUrl = "https://api.github.com/repos/bhaskarblur/neobase-ai-dba";
+  
+  // Fetch repository data from GitHub API
+  fetch(repoUrl)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`GitHub API request failed: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      // Update state with stars and forks count
+      setStars(data.stargazers_count);
+      setForks(data.forks_count);
+      console.log(`Fetched GitHub stats: ${data.stargazers_count} stars, ${data.forks_count} forks`);
+    })
+    .catch(error => {
+      console.error("Error fetching GitHub stats:", error);
+      // Set fallback values in case of error
+      setStars(14); // Current star count from search results
+      setForks(4);  // Current fork count from search results
+    });
 }
 
 

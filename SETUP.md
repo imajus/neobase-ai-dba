@@ -28,4 +28,8 @@ Below tech stack should be available with you in order to run NeoBase on your se
 5. Run `go run cmd/main.go` to run the backend.
 6. Alternatively, you can run the backend in docker via `docker-compose.yml` available on the root folder.
 
+
+### Run via Docker Compose
+You can also run the whole application directly via `docker-compose.yml` available on the root folder.
+
 ## Thank you for using NeoBase!
