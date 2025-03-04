@@ -716,7 +716,7 @@ export default function ChatWindow({
               message={{
                                     id: "welcome-message",
                                     type: "assistant",
-                                    content: "Welcome to NeoBase! Ask me anything about your database.",
+                                    content: "Welcome to NeoBase! Ask me anything about your database.\nRefresh your chat knowledge base by clicking on the 'refresh list' button in the top right corner.",
                                     queries: [],
                                     created_at: new Date().toISOString(),
                                     updated_at: new Date().toISOString(),
