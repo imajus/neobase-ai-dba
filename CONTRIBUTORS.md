@@ -11,8 +11,8 @@ Add core team members here with their GitHub profiles and roles -->
 
 ## Contributors
 
-<a href="https://github.com/neobase-ai/neobase-ai-dba-frontend/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=neobase-ai/neobase-ai-dba-frontend" />
+<a href="https://github.com/bhaskarblur/neobase-ai-dba/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=bhaskarblur/neobase-ai-dba" />
 </a>
 
 ## How to Contribute
