@@ -82,7 +82,7 @@ const VideoSection = () => {
                   poster=""
                   muted={isMuted}
                 >
-                  <source src="https://res.cloudinary.com/dsnb1bl19/video/upload/v1740903765/neobase-sound_a4yeoe.mp4" type="video/mp4" />
+                  <source src="https://res.cloudinary.com/dsnb1bl19/video/upload/v1741089067/NeoBase_AI_Assistant_-_Made_with_Clipchamp_xtyc06.mp4" type="video/mp4" />
                   Your browser does not support the video tag.
                 </video>
                 
