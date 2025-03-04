@@ -689,6 +689,8 @@ export default function ChatWindow({
                   isFirstMessage={index === 0}
                   onQueryUpdate={handleQueryUpdate}
                   onEditQuery={handleEditQuery}
+                  hasButton={false}
+                  hasRefreshSchemaButton={false}
                 />
               ))}
             </div>
@@ -716,7 +718,7 @@ export default function ChatWindow({
               message={{
                                     id: "welcome-message",
                                     type: "assistant",
-                                    content: "Welcome to NeoBase! Ask me anything about your database.\nRefresh your chat knowledge base by clicking on the 'refresh list' button in the top right corner.",
+                                    content: "Welcome to NeoBase! Ask me anything about your database.\nPlease fetch your latest knowledge base by clicking the button below.",
                                     queries: [],
                                     created_at: new Date().toISOString(),
                                     updated_at: new Date().toISOString(),
@@ -734,6 +736,11 @@ export default function ChatWindow({
                                   isFirstMessage={false}
                                   onQueryUpdate={handleQueryUpdate}
                                   onEditQuery={handleEditQuery}
+                                  hasButton={true}
+                                  hasRefreshSchemaButton={true}
+                                  buttonCallback={() => {
+                                    setShowRefreshSchema(true);
+                                  }}
               />
             </div>
           )}

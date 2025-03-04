@@ -45,6 +45,9 @@ interface MessageTileProps {
     isFirstMessage?: boolean;
     onQueryUpdate: (callback: () => void) => void;
     onEditQuery: (id: string, queryId: string, query: string) => void;
+    hasButton: boolean;
+    hasRefreshSchemaButton: boolean;
+    buttonCallback?: () => void;
 }
 
 const toastStyle = {
@@ -91,7 +94,10 @@ export default function MessageTile({
     checkSSEConnection,
     isFirstMessage,
     onQueryUpdate,
-    onEditQuery
+    onEditQuery,
+    buttonCallback,
+    hasButton,
+    hasRefreshSchemaButton
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -1381,6 +1387,7 @@ export default function MessageTile({
                                             </span>
                                         )}
                                     </p>
+                                    
                                     {message.queries && message.queries.length > 0 && (
                                         <div className="min-w-full">
                                             {message.queries.map((query: QueryResult, index: number) => {
@@ -1392,6 +1399,13 @@ export default function MessageTile({
                                                 
                                                 return renderQuery(message.is_streaming || false, query, index);
                                             })}
+                                        </div>
+                                    )}
+                                    {hasButton && hasRefreshSchemaButton && (
+                                        <div className="flex justify-start pt-6">
+                                            <button className="neo-button" onClick={() => buttonCallback!()}>
+                                                Fetch Latest Schema
+                                            </button>
                                         </div>
                                     )}
                                 </div>
