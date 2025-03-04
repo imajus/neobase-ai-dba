@@ -222,7 +222,7 @@ export default function Sidebar({
               <div className="p-3 border-2 border-black rounded-lg bg-white shadow-neo">
                 <div className="flex flex-col space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-base">{user?.username}</span>
+                    <span className="font-bold text-base">{user != null && user?.username!.length > 16 ? user?.username!.slice(0, 16) + '...' : user?.username}</span>
                     <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
                       Joined {formatDate(user?.created_at || '')}
                     </span>

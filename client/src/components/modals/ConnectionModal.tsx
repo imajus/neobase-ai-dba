@@ -86,9 +86,6 @@ export default function ConnectionModal({
         if (!value.username.trim()) {
           return 'Username is required';
         }
-        if (!/^[a-zA-Z0-9_-]+$/.test(value.username)) {
-          return 'Invalid username format';
-        }
         break;
       default:
         return '';
@@ -463,8 +460,8 @@ DATABASE_PASSWORD=your_password`}
                 onChange={handleChange}
                 className="neo-input w-full"
                 placeholder="Enter your database password"
-                required
               />
+              <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password</p>
             </div>
 
             {/* Add Auto Execute Query toggle */}

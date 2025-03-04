@@ -118,7 +118,7 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 				Port:     config.Env.ExampleDatabasePort,
 				Database: config.Env.ExampleDatabaseName,
 				Username: config.Env.ExampleDatabaseUsername,
-				Password: config.Env.ExampleDatabasePassword,
+				Password: utils.ToStringPtr(config.Env.ExampleDatabasePassword),
 			},
 		})
 		if err != nil {

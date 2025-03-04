@@ -970,10 +970,18 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	switch config.Type {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
-		dsn := fmt.Sprintf(
-			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			config.Host, config.Port, *config.Username, *config.Password, config.Database,
-		)
+		var dsn string
+		if config.Password == nil {
+			dsn = fmt.Sprintf(
+				"host=%s port=%s user=%s dbname=%s sslmode=disable",
+				config.Host, config.Port, *config.Username, config.Database,
+			)
+		} else {
+			dsn = fmt.Sprintf(
+				"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+				config.Host, config.Port, *config.Username, *config.Password, config.Database,
+			)
+		}
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
 			return fmt.Errorf("failed to create connection: %v", err)
@@ -982,14 +990,22 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 
 		err = db.Ping()
 		if err != nil {
-			return fmt.Errorf("failed to conne: %v", err)
+			return fmt.Errorf("failed to connect: %v", err)
 		}
 
 	case constants.DatabaseTypeMySQL:
-		dsn := fmt.Sprintf(
-			"%s:%s@tcp(%s:%s)/%s",
-			*config.Username, *config.Password, config.Host, config.Port, config.Database,
-		)
+		var dsn string
+		if config.Password == nil {
+			dsn = fmt.Sprintf(
+				"%s@tcp(%s:%s)/%s",
+				*config.Username, config.Host, config.Port, config.Database,
+			)
+		} else {
+			dsn = fmt.Sprintf(
+				"%s:%s@tcp(%s:%s)/%s",
+				*config.Username, *config.Password, config.Host, config.Port, config.Database,
+			)
+		}
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
 			return fmt.Errorf("failed to create MySQL connection: %v", err)
@@ -1002,10 +1018,18 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		}
 
 	case constants.DatabaseTypeClickhouse:
-		dsn := fmt.Sprintf(
-			"clickhouse://%s:%s@%s:%s/%s",
-			*config.Username, *config.Password, config.Host, config.Port, config.Database,
-		)
+		var dsn string
+		if config.Password == nil {
+			dsn = fmt.Sprintf(
+				"clickhouse://%s@%s:%s/%s",
+				*config.Username, config.Host, config.Port, config.Database,
+			)
+		} else {
+			dsn = fmt.Sprintf(
+				"clickhouse://%s:%s@%s:%s/%s",
+				*config.Username, *config.Password, config.Host, config.Port, config.Database,
+			)
+		}
 		db, err := sql.Open("clickhouse", dsn)
 		if err != nil {
 			return fmt.Errorf("failed to create ClickHouse connection: %v", err)

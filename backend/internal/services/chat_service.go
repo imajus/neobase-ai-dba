@@ -118,7 +118,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Host:     req.Connection.Host,
 		Port:     req.Connection.Port,
 		Username: &req.Connection.Username,
-		Password: &req.Connection.Password,
+		Password: req.Connection.Password,
 		Database: req.Connection.Database,
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Host:     req.Connection.Host,
 		Port:     req.Connection.Port,
 		Username: &req.Connection.Username,
-		Password: &req.Connection.Password,
+		Password: req.Connection.Password,
 		Database: req.Connection.Database,
 		Base:     models.NewBase(),
 	}
@@ -182,7 +182,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Host:     req.Connection.Host,
 		Port:     req.Connection.Port,
 		Username: &req.Connection.Username,
-		Password: &req.Connection.Password,
+		Password: req.Connection.Password,
 		Database: req.Connection.Database,
 		Base:     models.NewBase(),
 	}
@@ -228,7 +228,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			chat.Connection.Host != req.Connection.Host ||
 			chat.Connection.Port != req.Connection.Port ||
 			*chat.Connection.Username != req.Connection.Username ||
-			(req.Connection.Password != "" && *chat.Connection.Password != req.Connection.Password)
+			(req.Connection.Password != nil && *chat.Connection.Password != *req.Connection.Password)
 
 		// Test connection without creating a persistent connection
 		err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
@@ -236,7 +236,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			Host:     req.Connection.Host,
 			Port:     req.Connection.Port,
 			Username: &req.Connection.Username,
-			Password: &req.Connection.Password,
+			Password: req.Connection.Password,
 			Database: req.Connection.Database,
 		})
 		if err != nil {
@@ -258,7 +258,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			Host:     req.Connection.Host,
 			Port:     req.Connection.Port,
 			Username: &req.Connection.Username,
-			Password: &req.Connection.Password,
+			Password: req.Connection.Password,
 			Database: req.Connection.Database,
 			Base:     models.NewBase(),
 		}
