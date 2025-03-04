@@ -33,17 +33,7 @@ const Navbar = ({ forks }: { forks: number }) => {
               <a href="#technologies" className="font-medium hover:text-gray-600 transition-colors">Technologies</a>
               
               {/* Product Hunt Button */}
-              <a 
-                href={import.meta.env.VITE_PRODUCT_HUNT_URL}
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="neo-button flex items-center gap-2 py-2 px-4 text-sm bg-[#DA552F] text-white"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 512 512" fill="currentColor">
-                  <path d="M256 0C114.615 0 0 114.615 0 256s114.615 256 256 256 256-114.615 256-256S397.385 0 256 0zm-96 320h-32v-32h32v32zm0-80h-32v-32h32v32zm0-80h-32v-32h32v32zm64 160h-32v-32h32v32zm0-80h-32v-32h32v32zm0-80h-32v-32h32v32zm32 160V128h32v96h32v96h-64zm96 0h-32v-32h32v32zm0-80h-32v-32h32v32zm0-80h-32v-32h32v32zm0-80h-32V80h32v32zm64 240h-32v-32h32v32zm0-80h-32v-32h32v32zm0-80h-32v-32h32v32z"/>
-                </svg>
-                <span>Product Hunt</span>
-              </a>
+              <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{width: '220px', height: '48px'}} width="220" height="48" /></a>
               
               {/* Github Fork Button */}
               <a 
@@ -104,16 +94,6 @@ const Navbar = ({ forks }: { forks: number }) => {
                     <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
                       {formatForkCount(forks || 1)}
                     </span>
-                  </a>
-                  
-                  {/* Get Started Button */}
-                  <a 
-                    href="https://github.com/bhaskarblur/neobase-ai-dba" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="neo-button py-2 flex items-center justify-center"
-                  >
-                    Get Started
                   </a>
                 </div>
               </div>
