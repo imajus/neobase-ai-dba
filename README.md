@@ -54,7 +54,7 @@
 ## Getting Started
 
 ## How to setup
-Read [SETUP]([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/main/SETUP.md)) to learn how to setup NeoBase on your system.
+Read ([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/main/SETUP.md)) to learn how to setup NeoBase on your system.
 ## Usage
 
 1. **Create a new user in the app**:
