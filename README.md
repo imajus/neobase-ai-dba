@@ -50,11 +50,10 @@
 - **Styling**: Neo Brutalism design with custom Tailwind utilities
 
 
-
 ## Getting Started
 
 ## How to setup
-Read ([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/main/SETUP.md)) to learn how to setup NeoBase on your system.
+Read ([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/blob/main/SETUP.md)) to learn how to setup NeoBase on your system.
 ## Usage
 
 1. **Create a new user in the app**:
@@ -93,7 +92,7 @@ We welcome contributions! Here’s how you can help:
 4. Push to the branch (`git push origin feature/your-feature`).
 5. Open a pull request.
 
-See the list of contributors in [CONTRIBUTORS][CONTRIBUTORS] file.
+See the list of contributors in [CONTRIBUTORS](CONTRIBUTORS) file.
 
 ## License
 
