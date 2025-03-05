@@ -28,6 +28,7 @@
 
 ## Planned to be supported DBs
 - MongoDB (Priority 1)
+- Cassandra (Priority 2)
 - Redis (Priority 2)
 - Neo4j DB (Priority 3)
 
@@ -53,7 +54,7 @@
 ## Getting Started
 
 ## How to setup
-Read [SETUP](SETUP) to learn how to setup NeoBase on your system.
+Read [SETUP]([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/main/SETUP.md)) to learn how to setup NeoBase on your system.
 ## Usage
 
 1. **Create a new user in the app**:
