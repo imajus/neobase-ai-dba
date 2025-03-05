@@ -31,5 +31,7 @@ Below tech stack should be available with you in order to run NeoBase on your se
 
 ### Run via Docker Compose
 You can also run the whole application directly via `docker-compose.yml` available on the root folder.
+Setup the .env file based on `.env.example` for the docker-compose.yml to work.
+### NOTE: You may only require the folllowing services: neobase-mongodb, neobase-redis, neobase-backend, neobase-client. 
 
 ## Thank you for using NeoBase!
