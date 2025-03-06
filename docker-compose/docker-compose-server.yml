@@ -1,0 +1,70 @@
+version: '3'
+services:
+  neobase-backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: neobase-backend
+    restart: always
+    ports:
+      - 3000:3000
+    environment:
+      - IS_DOCKER=${IS_DOCKER} # true or false
+      - PORT=${PORT} # 3000
+      - ENVIRONMENT=${ENVIRONMENT} # DEVELOPMENT, PRODUCTION
+      - CORS_ALLOWED_ORIGIN=${CORS_ALLOWED_ORIGIN} # Frontend exposed base url https://${domain}
+      - MAX_CHATS_PER_USER=${MAX_CHATS_PER_USER} # 0 for trial/development mode(max 2 connection), 1 for unlimited
+      - NEOBASE_ADMIN_USERNAME=${NEOBASE_ADMIN_USERNAME} # admin username
+      - NEOBASE_ADMIN_PASSWORD=${NEOBASE_ADMIN_PASSWORD} # admin password
+      - SCHEMA_ENCRYPTION_KEY=${SCHEMA_ENCRYPTION_KEY} # 32 bytes
+      - JWT_SECRET=${JWT_SECRET} # 32 bytes
+      - USER_JWT_EXPIRATION_MILLISECONDS=${USER_JWT_EXPIRATION_MILLISECONDS} # 1000 * 60 * 60 * 24 * 30
+      - USER_JWT_REFRESH_EXPIRATION_MILLISECONDS=${USER_JWT_REFRESH_EXPIRATION_MILLISECONDS} # 1000 * 60 * 60 * 24 * 30
+      - NEOBASE_MONGODB_URI=${NEOBASE_MONGODB_URI} # mongodb://localhost:27017/neobase
+      - NEOBASE_MONGODB_NAME=${NEOBASE_MONGODB_NAME} # neobase
+      - NEOBASE_REDIS_HOST=${NEOBASE_REDIS_HOST} # neobase-redis
+      - NEOBASE_REDIS_PORT=${NEOBASE_REDIS_PORT} # 6379
+      - NEOBASE_REDIS_USERNAME=${NEOBASE_REDIS_USERNAME} # default
+      - NEOBASE_REDIS_PASSWORD=${NEOBASE_REDIS_PASSWORD} # default
+      - DEFAULT_LLM_CLIENT=${DEFAULT_LLM_CLIENT} # openai, gemini
+      - OPENAI_API_KEY=${OPENAI_API_KEY} # openai api key
+      - OPENAI_MODEL=${OPENAI_MODEL} # gpt-j4o
+      - OPENAI_MAX_COMPLETION_TOKENS=${OPENAI_MAX_COMPLETION_TOKENS} # 3072
+      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE} # 1
+      - GEMINI_API_KEY=${GEMINI_API_KEY} # gemini api key
+      - GEMINI_MODEL=${GEMINI_MODEL} # gemini-2.0-flash
+      - GEMINI_MAX_COMPLETION_TOKENS=${GEMINI_MAX_COMPLETION_TOKENS} # 3072
+      - GEMINI_TEMPERATURE=${GEMINI_TEMPERATURE} # 1
+      - EXAMPLE_DB_TYPE=${EXAMPLE_DB_TYPE} # postgres, clickhouse, mysql, yugabyte...
+      - EXAMPLE_DB_HOST=${EXAMPLE_DB_HOST} # localhost
+      - EXAMPLE_DB_PORT=${EXAMPLE_DB_PORT} # 5432
+      - EXAMPLE_DB_NAME=${EXAMPLE_DB_NAME} # testdb
+      - EXAMPLE_DB_USERNAME=${EXAMPLE_DB_USERNAME} # postgres
+      - EXAMPLE_DB_PASSWORD=${EXAMPLE_DB_PASSWORD} # postgres
+    depends_on:
+      - neobase-mongodb
+      - neobase-redis
+    networks:
+      - neobase-network
+
+  neobase-client:
+    build:
+      context: ../client
+      dockerfile: Dockerfile
+    container_name: neobase-client
+    environment:
+      - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL} # Frontend exposed base url (https://${domain}/)
+      - VITE_API_URL=${VITE_API_URL} # Backend url with /api (https://${domain}/api)
+      - VITE_ENVIRONMENT=${VITE_ENVIRONMENT} # DEVELOPMENT, PRODUCTION
+    restart: always
+    ports:
+      - 5173:5173
+    depends_on:
+      - neobase-backend
+    networks:
+      - neobase-network
+
+networks:
+  neobase-network:
+    driver: bridge
+    external: true

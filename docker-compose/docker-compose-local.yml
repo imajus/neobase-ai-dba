@@ -33,7 +33,7 @@ services:
 
   neobase-backend:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: Dockerfile
     container_name: neobase-backend
     restart: always
@@ -80,7 +80,7 @@ services:
 
   neobase-client:
     build:
-      context: ./client
+      context: ../client
       dockerfile: Dockerfile
     container_name: neobase-client
     environment:
@@ -95,56 +95,12 @@ services:
     networks:
       - neobase-network
 
-  neobase-example-postgres:
-    image: postgres:latest
-    container_name: neobase-example-postgres
-    restart: always
-    ports:
-      - 5432:5432
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: testdb
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-  neobase-example-clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: neobase-example-clickhouse
-    restart: always
-    ports:
-      - 8123:8123
-      - 9000:9000
-    environment:
-      - CLICKHOUSE_DB=testdb
-      - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=clickhouse
-      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
-    volumes:
-      - clickhouse-data:/var/lib/clickhouse
-      - ./clickhouse-init:/docker-entrypoint-initdb.d
-
-  neobase-example-mysql:
-    image: mysql:latest
-    container_name: neobase-example-mysql
-    restart: always
-    ports:
-      - 3306:3306
-    environment:
-      MYSQL_USER: mysql
-      MYSQL_PASSWORD: mysql
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: testdb
-    volumes:
-      - mysql-data:/var/lib/mysql
 
 volumes:
   neobase-mongodb-data:
   neobase-redis-data:
-  postgres-data:
-  clickhouse-data:
-  mysql-data:
 
 networks:
   neobase-network:
     driver: bridge
+    external: true
