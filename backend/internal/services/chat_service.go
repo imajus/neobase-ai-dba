@@ -1416,6 +1416,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 			// Update query status in message
 			if msg.Queries != nil {
+				log.Printf("ChatService -> ExecuteQuery -> msg queries %v", *msg.Queries)
 				for i := range *msg.Queries {
 					// Convert ObjectID to hex string for comparison
 					queryIDHex := query.ID.Hex()
@@ -1433,6 +1434,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						break
 					}
 				}
+			} else {
+				log.Println("ChatService -> ExecuteQuery -> msg queries is null")
+				return
 			}
 
 			// Save updated message
@@ -1463,9 +1467,10 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						// Convert primitive.A to []interface{}
 						queries := make([]interface{}, len(queriesVal))
 						for i, q := range queriesVal {
+							log.Printf("ChatService -> ExecuteQuery -> q: %+v", q)
 							if queryMap, ok := q.(map[string]interface{}); ok {
 								// Compare hex strings of ObjectIDs
-								if queryMap["id"] == query.ID.Hex() {
+								if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 									queryMap["isRolledBack"] = false
 									queryMap["executionTime"] = nil
 									queryMap["error"] = map[string]interface{}{
@@ -1476,8 +1481,10 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								}
 								queries[i] = queryMap
 							} else {
+								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
 								queries[i] = q
 							}
+							log.Printf("ChatService -> ExecuteQuery -> updated queries[%d]: %+v", i, queries[i])
 						}
 						assistantResponse["queries"] = queries
 
@@ -1485,7 +1492,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						log.Printf("ChatService -> ExecuteQuery -> queries is []interface{}")
 						for i, q := range queriesVal {
 							if queryMap, ok := q.(map[string]interface{}); ok {
-								if queryMap["id"] == query.ID.Hex() {
+								if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 									queryMap["isRolledBack"] = false
 									queryMap["executionTime"] = query.ExecutionTime
 									queryMap["error"] = map[string]interface{}{
@@ -1495,7 +1502,11 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 									}
 									queriesVal[i] = queryMap
 								}
+							} else {
+								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
+								queriesVal[i] = q
 							}
+
 						}
 						assistantResponse["queries"] = queriesVal
 					}
@@ -1670,7 +1681,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					for i, q := range queriesVal {
 						if queryMap, ok := q.(map[string]interface{}); ok {
 							// Compare hex strings of ObjectIDs
-							if queryMap["id"] == query.ID.Hex() {
+							if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
@@ -1698,7 +1709,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					log.Printf("ChatService -> ExecuteQuery -> queries is []interface{}")
 					for i, q := range queriesVal {
 						if queryMap, ok := q.(map[string]interface{}); ok {
-							if queryMap["id"] == query.ID.Hex() {
+							if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
@@ -1829,7 +1840,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 						if queries, ok := assistantResponse["queries"].([]interface{}); ok {
 							for _, q := range queries {
 								if queryMap, ok := q.(map[string]interface{}); ok {
-									if queryMap["id"] == query.ID.Hex() {
+									if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 										queryMap["isExecuted"] = true
 										queryMap["isRolledBack"] = false
 										queryMap["error"] = &models.QueryError{
@@ -1941,7 +1952,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			case primitive.A:
 				for i, q := range v {
 					if qMap, ok := q.(map[string]interface{}); ok {
-						if qMap["id"] == query.ID.Hex() {
+						if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 							rollbackQuery = qMap["rollback_query"].(string)
 							// Update the query map with rollback info
 							qMap["rollback_query"] = rollbackQuery
@@ -1954,7 +1965,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			case []interface{}:
 				for i, q := range v {
 					if qMap, ok := q.(map[string]interface{}); ok {
-						if qMap["id"] == query.ID.Hex() {
+						if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 							rollbackQuery = qMap["rollback_query"].(string)
 							// Update the query map with rollback info
 							qMap["rollback_query"] = rollbackQuery
@@ -2005,7 +2016,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				case primitive.A:
 					for i, q := range v {
 						if qMap, ok := q.(map[string]interface{}); ok {
-							if qMap["id"] == query.ID.Hex() {
+							if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 								qMap["isRolledBack"] = true
 								qMap["rollback_query"] = rollbackQuery
 								v[i] = qMap
@@ -2015,7 +2026,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				case []interface{}:
 					for i, q := range v {
 						if qMap, ok := q.(map[string]interface{}); ok {
-							if qMap["id"] == query.ID.Hex() {
+							if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 								qMap["rollback_query"] = rollbackQuery
 								v[i] = qMap
 							}
@@ -2098,7 +2109,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 						case primitive.A:
 							for _, q := range v {
 								if qMap, ok := q.(map[string]interface{}); ok {
-									if qMap["id"] == query.ID.Hex() {
+									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 										qMap["isExecuted"] = true
 										qMap["isRolledBack"] = false
 										qMap["error"] = &models.QueryError{
@@ -2113,7 +2124,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 						case []interface{}:
 							for _, q := range v {
 								if qMap, ok := q.(map[string]interface{}); ok {
-									if qMap["id"] == query.ID.Hex() {
+									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 										qMap["isExecuted"] = true
 										qMap["isRolledBack"] = false
 										if queryErr.Code != "" {
@@ -2226,7 +2237,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				for i, q := range queriesVal {
 					if queryMap, ok := q.(map[string]interface{}); ok {
 						// Compare hex strings of ObjectIDs
-						if queryMap["id"] == query.ID.Hex() {
+						if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
@@ -2254,7 +2265,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				log.Printf("ChatService -> RollbackQuery -> queries is []interface{}")
 				for i, q := range queriesVal {
 					if queryMap, ok := q.(map[string]interface{}); ok {
-						if queryMap["id"] == query.ID.Hex() {
+						if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
@@ -2788,7 +2799,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 				if !ok {
 					continue
 				}
-				if qMap["id"] == queryData.ID {
+				if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == queryData.Query && qMap["queryType"] == *queryData.QueryType && qMap["explanation"] == queryData.Description {
 					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
 					qMap["is_edited"] = true
 					qMap["is_executed"] = false

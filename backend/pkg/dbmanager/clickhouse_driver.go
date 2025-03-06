@@ -121,8 +121,8 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 	}
 
 	// Set connection pool parameters
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetMaxOpenConns(20)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(50)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	// Test the connection with a simple query

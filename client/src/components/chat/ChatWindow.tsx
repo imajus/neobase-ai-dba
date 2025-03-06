@@ -582,7 +582,7 @@ export default function ChatWindow({
       }
     } catch (error) {
       console.error('Failed to edit query:', error);
-      toast.error('Failed to update query');
+      toast.error('Failed to update query: '+ error);
     } finally {
       setShowEditQueryConfirm({ show: false, messageId: null, queryId: null, query: null });
     }

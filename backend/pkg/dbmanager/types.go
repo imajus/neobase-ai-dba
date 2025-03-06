@@ -31,6 +31,7 @@ type Connection struct {
 	Subscribers    map[string]bool     // Map of subscriber IDs (e.g., streamIDs) that need notifications
 	SubLock        sync.RWMutex        // Lock for thread-safe subscriber operations
 	OnSchemaChange func(chatID string) // Callback for schema changes
+	ConfigKey      string              // Reference to the shared connection pool
 }
 
 // ConnectionConfig holds the configuration for a database connection

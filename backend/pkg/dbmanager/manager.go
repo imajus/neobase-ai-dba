@@ -12,6 +12,7 @@ import (
 	// Database drivers
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 	_ "github.com/lib/pq"              // PostgreSQL/YugabyteDB Driver
+	"gorm.io/gorm"
 
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
@@ -33,6 +34,16 @@ type cleanupMetrics struct {
 	executionsRemoved  int
 }
 
+// DatabasePool represents a shared database connection with reference counting
+type DatabasePool struct {
+	DB       *sql.DB
+	GORMDB   *gorm.DB
+	RefCount int
+	Config   ConnectionConfig
+	LastUsed time.Time
+	Mutex    sync.Mutex // For thread-safe reference counting
+}
+
 // Manager handles database connections
 type Manager struct {
 	connections      map[string]*Connection    // chatID -> connection
@@ -48,6 +59,13 @@ type Manager struct {
 	cleanupMetrics   cleanupMetrics
 	fetchers         map[string]FetcherFactory
 	fetchersMu       sync.RWMutex
+	dbPools          map[string]*DatabasePool // key: hash of connection config
+	dbPoolsMu        sync.RWMutex
+	poolMetrics      struct {
+		totalPools       int
+		totalConnections int
+		reuseCount       int
+	}
 }
 
 // NewManager creates a new connection manager
@@ -67,6 +85,7 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		activeExecutions: make(map[string]*QueryExecution),
 		executionMu:      sync.RWMutex{},
 		fetchers:         make(map[string]FetcherFactory),
+		dbPools:          make(map[string]*DatabasePool),
 	}
 
 	// Set the DBManager in the SchemaManager
@@ -140,6 +159,18 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		log.Printf("DBManager -> Connect -> Preserving existing subscribers: %+v", existingSubscribers)
 	}
 
+	// Generate a unique key for this database configuration
+	configKey := generateConfigKey(config)
+	log.Printf("DBManager -> Connect -> Generated config key: %s", configKey)
+
+	// Check if we already have a connection to this database
+	var conn *Connection
+	var err error
+
+	m.dbPoolsMu.RLock()
+	pool, poolExists := m.dbPools[configKey]
+	m.dbPoolsMu.RUnlock()
+
 	// Get appropriate driver
 	driver, exists := m.drivers[config.Type]
 	if !exists {
@@ -155,22 +186,66 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		return fmt.Errorf("connection already exists for chat ID: %s", chatID)
 	}
 
-	// Create connection
-	conn, err := driver.Connect(config)
-	if err != nil {
-		log.Printf("DBManager -> Connect -> Driver connection failed: %v", err)
-		return fmt.Errorf("failed to connect: %v", err)
+	if poolExists {
+		// Use existing connection from pool
+		pool.Mutex.Lock()
+		pool.RefCount++
+		pool.LastUsed = time.Now()
+		pool.Mutex.Unlock()
+
+		log.Printf("DBManager -> Connect -> Reusing existing connection from pool, refCount: %d", pool.RefCount)
+
+		// Create a new connection using the shared pool
+		conn = &Connection{
+			DB:          pool.GORMDB,
+			LastUsed:    time.Now(),
+			Status:      StatusConnected,
+			Config:      config,
+			UserID:      userID,
+			ChatID:      chatID,
+			StreamID:    streamID,
+			Subscribers: make(map[string]bool),
+			SubLock:     sync.RWMutex{},
+			ConfigKey:   configKey, // Store the config key for reference
+		}
+
+		// Update metrics
+		m.poolMetrics.reuseCount++
+	} else {
+		// Create a new connection
+		conn, err = driver.Connect(config)
+		if err != nil {
+			log.Printf("DBManager -> Connect -> Driver connection failed: %v", err)
+			return fmt.Errorf("failed to connect: %v", err)
+		}
+
+		log.Printf("DBManager -> Connect -> Driver connection successful, creating new pool")
+
+		// Create and store the new pool
+		newPool := &DatabasePool{
+			DB:       nil, // The driver doesn't expose sql.DB directly
+			GORMDB:   conn.DB,
+			RefCount: 1,
+			Config:   config,
+			LastUsed: time.Now(),
+		}
+
+		m.dbPoolsMu.Lock()
+		m.dbPools[configKey] = newPool
+		m.dbPoolsMu.Unlock()
+
+		// Update metrics
+		m.poolMetrics.totalPools++
+
+		// Initialize connection fields
+		conn.LastUsed = time.Now()
+		conn.Status = StatusConnected
+		conn.Config = config
+		conn.UserID = userID
+		conn.ChatID = chatID
+		conn.StreamID = streamID
+		conn.ConfigKey = configKey
 	}
-
-	log.Printf("DBManager -> Connect -> Driver connection successful")
-
-	// Initialize connection fields
-	conn.LastUsed = time.Now()
-	conn.Status = StatusConnected
-	conn.Config = config
-	conn.UserID = userID
-	conn.ChatID = chatID
-	conn.StreamID = streamID
 
 	// Initialize subscribers map with existing subscribers
 	conn.Subscribers = make(map[string]bool)
@@ -220,125 +295,106 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		m.doSchemaCheck(chatID)
 	}
 
-	log.Printf("DBManager -> Connect -> Connection completed successfully for chatID: %s", chatID)
 	return nil
 }
 
 // Disconnect closes a database connection
 func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
-	log.Printf("DBManager -> Disconnect -> Starting disconnection for chatID: %s", chatID)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	m.mu.RLock()
 	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
 	if !exists {
-		return fmt.Errorf("no connection found for chat ID: %s", chatID)
+		return fmt.Errorf("connection not found for chat %s", chatID)
 	}
 
-	log.Printf("DBManager -> Disconnect -> Connection found for chatID: %s", chatID)
+	log.Printf("DBManager -> Disconnect -> Starting disconnect for chatID: %s", chatID)
 
-	// Only attempt to disconnect if there's an active connection
-	if conn.DB != nil {
-		// Get driver
-		driver, exists := m.drivers[conn.Config.Type]
-		if !exists {
-			return fmt.Errorf("driver not found for type: %s", conn.Config.Type)
-		}
+	// Get the config key for the shared pool
+	configKey := conn.ConfigKey
 
-		// Disconnect
-		if err := driver.Disconnect(conn); err != nil {
-			return fmt.Errorf("failed to disconnect: %v", err)
-		}
+	// Decrement reference count in the pool
+	m.dbPoolsMu.Lock()
+	pool, poolExists := m.dbPools[configKey]
 
-		if deleteSchema {
-			log.Printf("DBManager -> Disconnect -> Deleting schema for chatID: %s", chatID)
-			// Delete the schema
-			m.schemaManager.ClearSchemaCache(chatID)
-		}
+	if poolExists {
+		pool.Mutex.Lock()
+		pool.RefCount--
+		refCount := pool.RefCount
+		pool.Mutex.Unlock()
 
-		log.Printf("DBManager -> Disconnect -> Disconnected from chatID: %s", chatID)
+		log.Printf("DBManager -> Disconnect -> Decremented pool refCount to %d", refCount)
 
-		// Remove from cache
-		ctx := context.Background()
-		connKey := fmt.Sprintf("conn:%s", chatID)
-		if err := m.redisRepo.Del(connKey, ctx); err != nil {
-			log.Printf("DBManager -> Disconnect -> Failed to remove connection state from cache: %v", err)
-		}
-	}
-
-	// Store subscribers before deleting connection
-	subscribers := make(map[string]bool)
-	conn.SubLock.RLock()
-	log.Printf("DBManager -> Disconnect -> Current subscribers: %+v", conn.Subscribers)
-	for id := range conn.Subscribers {
-		subscribers[id] = true
-	}
-	conn.SubLock.RUnlock()
-
-	// Delete the connection
-	delete(m.connections, chatID)
-	log.Printf("DBManager -> Disconnect -> Deleted connection from manager")
-
-	// Notify subscribers after releasing the lock
-	if len(subscribers) > 0 {
-		go func(subs map[string]bool) {
-			log.Printf("DBManager -> Disconnect -> Notifying subscribers: %+v", subs)
-			for streamID := range subs {
-				response := dtos.StreamResponse{
-					Event: string(StatusDisconnected),
-					Data:  "Connection closed by user",
-				}
-
-				if m.streamHandler != nil {
-					log.Printf("DBManager -> Disconnect -> Going to notify subscriber %s of disconnection", streamID)
-					m.streamHandler.HandleDBEvent(userID, chatID, streamID, response)
-					log.Printf("DBManager -> Disconnect -> Notified subscriber %s of disconnection", streamID)
+		// If reference count is zero, close the actual connection
+		if refCount <= 0 {
+			// Get the driver for this database type
+			driver := m.drivers[conn.Config.Type]
+			if driver != nil {
+				if err := driver.Disconnect(conn); err != nil {
+					m.dbPoolsMu.Unlock()
+					return fmt.Errorf("failed to disconnect: %v", err)
 				}
 			}
-		}(subscribers)
-	} else {
-		log.Printf("DBManager -> Disconnect -> No subscribers to notify")
+
+			// Remove from pool
+			delete(m.dbPools, configKey)
+			log.Printf("DBManager -> Disconnect -> Removed pool from dbPools map")
+		}
+	}
+	m.dbPoolsMu.Unlock()
+
+	// Remove from connections map
+	m.mu.Lock()
+	delete(m.connections, chatID)
+	m.mu.Unlock()
+
+	log.Printf("DBManager -> Disconnect -> Removed connection from connections map")
+
+	// Delete schema if requested
+	if deleteSchema && m.schemaManager != nil {
+		m.schemaManager.ClearSchemaCache(chatID)
+		log.Printf("DBManager -> Disconnect -> Cleared schema cache for chatID: %s", chatID)
 	}
 
-	log.Printf("DBManager -> Disconnect -> Successfully disconnected chat %s", chatID)
+	// Notify subscribers
+	m.notifySubscribers(chatID, userID, StatusDisconnected, "")
+	log.Printf("DBManager -> Disconnect -> Notified subscribers")
+
 	return nil
 }
 
-// GetConnection returns a wrapped connection with usage tracking
+// GetConnection returns a database connection for a chat
 func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
 	if !exists {
-		return nil, fmt.Errorf("no connection found for chat ID: %s", chatID)
+		return nil, fmt.Errorf("connection not found for chat %s", chatID)
 	}
 
-	if conn.Status != StatusConnected {
-		return nil, fmt.Errorf("connection is not active")
-	}
-
-	// Update last used time
+	// Update LastUsed in both connection and pool
 	conn.LastUsed = time.Now()
 
-	// Refresh Redis TTL
-	ctx := context.Background()
-	connKey := fmt.Sprintf("conn:%s", chatID)
-	pipe := m.redisRepo.StartPipeline(ctx)
-	pipe.Set(ctx, connKey, "connected", idleTimeout)
-	if err := pipe.Execute(ctx); err != nil {
-		log.Printf("Failed to refresh connection TTL: %v", err)
+	// Also update the pool's LastUsed
+	if conn.ConfigKey != "" {
+		m.dbPoolsMu.RLock()
+		if pool, exists := m.dbPools[conn.ConfigKey]; exists {
+			pool.Mutex.Lock()
+			pool.LastUsed = time.Now()
+			pool.Mutex.Unlock()
+		}
+		m.dbPoolsMu.RUnlock()
 	}
 
-	// Return appropriate wrapper based on database type
+	// Create appropriate wrapper based on database type
 	switch conn.Config.Type {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB: // Use same wrapper for both
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
 	case constants.DatabaseTypeMySQL:
 		return NewMySQLWrapper(conn.DB, m, chatID), nil
 	case constants.DatabaseTypeClickhouse:
 		return NewClickHouseWrapper(conn.DB, m, chatID), nil
-	// Add cases for other database types
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", conn.Config.Type)
 	}
@@ -362,132 +418,110 @@ func (m *Manager) startCleanupRoutine() {
 	}
 }
 
-// cleanup closes inactive connections and cleans up stale executions
+// cleanup removes idle connections
 func (m *Manager) cleanup() {
-	start := time.Now()
-	connectionsRemoved := 0
-	executionsRemoved := 0
+	now := time.Now()
+	m.cleanupMetrics.lastRun = now
 
+	// Cleanup connections
 	m.mu.Lock()
 	for chatID, conn := range m.connections {
-		// First check if connection is still active
-		if conn.DB != nil {
-			sqlDB, err := conn.DB.DB()
-			if err != nil || sqlDB.Ping() != nil {
-				log.Printf("DBManager -> cleanup -> Connection for chatID %s is no longer active", chatID)
-				// Force cleanup of dead connection
-				if driver, exists := m.drivers[conn.Config.Type]; exists {
-					driver.Disconnect(conn)
-				}
-				delete(m.connections, chatID)
-				connectionsRemoved++
-				continue
-			}
-		}
-
 		if time.Since(conn.LastUsed) > idleTimeout {
-			log.Printf("DBManager -> cleanup -> Found idle connection for chatID: %s, last used: %v",
-				chatID, conn.LastUsed)
+			log.Printf("DBManager -> cleanup -> Removing idle connection for chatID: %s (idle for %v)", chatID, time.Since(conn.LastUsed))
 
-			// Get driver for this connection
-			driver, exists := m.drivers[conn.Config.Type]
-			if !exists {
-				log.Printf("DBManager -> cleanup -> No driver found for type: %s", conn.Config.Type)
-				continue
-			}
-
-			// Disconnect
-			if err := driver.Disconnect(conn); err != nil {
-				log.Printf("DBManager -> cleanup -> Error disconnecting: %v", err)
-				continue
-			}
-
-			// Remove from connections map
+			// Don't actually disconnect here, just remove from the map
 			delete(m.connections, chatID)
-			log.Printf("DBManager -> cleanup -> Removed inactive connection for chatID: %s", chatID)
-
-			// Remove from Redis
-			ctx := context.Background()
-			connKey := fmt.Sprintf("conn:%s", chatID)
-			if err := m.redisRepo.Del(connKey, ctx); err != nil {
-				log.Printf("DBManager -> cleanup -> Failed to remove connection state from cache: %v", err)
-			}
-
-			connectionsRemoved++
+			m.cleanupMetrics.connectionsRemoved++
 		}
 	}
 	m.mu.Unlock()
 
-	// Cleanup stale executions
-	m.executionMu.Lock()
-	for streamID, execution := range m.activeExecutions {
-		// Check if execution has been running for too long (e.g., > 10 minutes)
-		if time.Since(execution.StartTime) > 10*time.Minute {
-			log.Printf("DBManager -> cleanup -> Found stale execution for streamID: %s, started: %v",
-				streamID, execution.StartTime)
+	// Cleanup database pools
+	m.dbPoolsMu.Lock()
+	for key, pool := range m.dbPools {
+		pool.Mutex.Lock()
+		if pool.RefCount <= 0 && time.Since(pool.LastUsed) > idleTimeout {
+			log.Printf("DBManager -> cleanup -> Removing idle connection pool: %s (idle for %v)", key, time.Since(pool.LastUsed))
 
-			// Cancel the execution
-			execution.CancelFunc()
-
-			// Rollback transaction if it exists
-			if execution.Tx != nil {
-				if err := execution.Tx.Rollback(); err != nil {
-					log.Printf("DBManager -> cleanup -> Error rolling back transaction: %v", err)
+			// Close the connection
+			if pool.GORMDB != nil {
+				sqlDB, err := pool.GORMDB.DB()
+				if err == nil && sqlDB != nil {
+					sqlDB.Close()
 				}
 			}
+			delete(m.dbPools, key)
+		}
+		pool.Mutex.Unlock()
+	}
+	m.dbPoolsMu.Unlock()
 
+	// Cleanup active executions
+	m.executionMu.Lock()
+	for streamID, execution := range m.activeExecutions {
+		if !execution.IsExecuting && time.Since(execution.StartTime) > idleTimeout {
+			log.Printf("DBManager -> cleanup -> Removing idle execution for streamID: %s (idle for %v)", streamID, time.Since(execution.StartTime))
 			delete(m.activeExecutions, streamID)
-			log.Printf("DBManager -> cleanup -> Cleaned up stale execution for streamID: %s", streamID)
-
-			executionsRemoved++
+			m.cleanupMetrics.executionsRemoved++
 		}
 	}
 	m.executionMu.Unlock()
-
-	// Update metrics
-	m.cleanupMetrics = cleanupMetrics{
-		lastRun:            start,
-		connectionsRemoved: connectionsRemoved,
-		executionsRemoved:  executionsRemoved,
-	}
-
-	log.Printf("DBManager -> cleanup -> Completed in %v. Removed %d connections and %d executions",
-		time.Since(start), connectionsRemoved, executionsRemoved)
 }
 
-// Stop gracefully stops the manager and cleans up resources
+// Stop closes all connections and stops the cleanup routine
 func (m *Manager) Stop() error {
-	log.Printf("DBManager -> Stop -> Stopping manager")
+	log.Println("DBManager -> Stop -> Stopping manager")
 
-	// Stop cleanup routine
+	// Signal cleanup routine to stop
 	close(m.stopCleanup)
+	log.Println("DBManager -> Stop -> Signaled cleanup routine to stop")
 
-	// Clean up all active connections
+	// Close all connections
 	m.mu.Lock()
 	for chatID, conn := range m.connections {
 		if driver, exists := m.drivers[conn.Config.Type]; exists {
 			if err := driver.Disconnect(conn); err != nil {
-				log.Printf("DBManager -> Stop -> Error disconnecting %s: %v", chatID, err)
+				log.Printf("DBManager -> Stop -> Error disconnecting chat %s: %v", chatID, err)
+			} else {
+				log.Printf("DBManager -> Stop -> Disconnected chat %s", chatID)
 			}
 		}
 	}
 	m.connections = make(map[string]*Connection)
 	m.mu.Unlock()
+	log.Println("DBManager -> Stop -> Closed all connections")
 
-	// Cancel all active executions
+	// Close all database pools
+	m.dbPoolsMu.Lock()
+	for key, pool := range m.dbPools {
+		if pool.GORMDB != nil {
+			sqlDB, err := pool.GORMDB.DB()
+			if err == nil && sqlDB != nil {
+				sqlDB.Close()
+				log.Printf("DBManager -> Stop -> Closed pool: %s", key)
+			}
+		}
+		delete(m.dbPools, key)
+	}
+	m.dbPoolsMu.Unlock()
+	log.Println("DBManager -> Stop -> Closed all connection pools")
+
+	// Cancel any active executions
 	m.executionMu.Lock()
 	for streamID, execution := range m.activeExecutions {
 		execution.CancelFunc()
 		if execution.Tx != nil {
 			if err := execution.Tx.Rollback(); err != nil {
-				log.Printf("DBManager -> Stop -> Error rolling back transaction for %s: %v", streamID, err)
+				log.Printf("DBManager -> Stop -> Error rolling back transaction for stream %s: %v", streamID, err)
 			}
 		}
+		log.Printf("DBManager -> Stop -> Cancelled execution for stream %s", streamID)
 	}
 	m.activeExecutions = make(map[string]*QueryExecution)
 	m.executionMu.Unlock()
+	log.Println("DBManager -> Stop -> Cancelled all active executions")
 
-	log.Printf("DBManager -> Stop -> Manager stopped successfully")
+	log.Println("DBManager -> Stop -> Manager stopped successfully")
 	return nil
 }
 
@@ -1220,4 +1254,41 @@ func (m *Manager) registerDefaultDrivers() {
 
 	// Register ClickHouse driver
 	m.RegisterDriver("clickhouse", NewClickHouseDriver())
+}
+
+// generateConfigKey creates a unique string key for a database configuration
+func generateConfigKey(config ConnectionConfig) string {
+	var username string
+	if config.Username != nil {
+		username = *config.Username
+	}
+
+	// Create a unique key based on connection details
+	key := fmt.Sprintf("%s:%s:%s:%s:%s",
+		config.Type,
+		config.Host,
+		config.Port,
+		username,
+		config.Database)
+
+	return key
+}
+
+// GetPoolMetrics returns metrics about the connection pools
+func (m *Manager) GetPoolMetrics() map[string]interface{} {
+	m.dbPoolsMu.RLock()
+	defer m.dbPoolsMu.RUnlock()
+
+	totalRefs := 0
+	for _, pool := range m.dbPools {
+		pool.Mutex.Lock()
+		totalRefs += pool.RefCount
+		pool.Mutex.Unlock()
+	}
+
+	return map[string]interface{}{
+		"total_pools":       len(m.dbPools),
+		"total_connections": totalRefs,
+		"reuse_count":       m.poolMetrics.reuseCount,
+	}
 }

@@ -146,8 +146,8 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		return nil, err
 	}
 
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(50)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection pool configured")
