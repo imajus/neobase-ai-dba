@@ -1,40 +1,216 @@
-# How to Setup
-To setup NeoBase on your server or local machine, you can follow the implementer friendly instructions listed in this file.
+# NeoBase Setup Guide
 
-## Pre-requisites
-Below tech stack should be available with you in order to run NeoBase on your server:
-- **Docker**
-- **Go (v1.22+)**
-- **Node.js (v18+)**
-- **MongoDB & Redis instance(NeoBase requires them)**
-- **Open AI or Gemini API Key**
-- **Any supported Database to use**
+This guide provides detailed instructions for setting up NeoBase on your local machine or server. Follow the appropriate section based on your deployment needs.
 
-## How to Setup
+## Prerequisites
 
-### Frontend/Client setup
+Before you begin, ensure you have the following installed:
 
-1. Cd into `client/` folder.
-2. Setup the `.env` file based on `.env.example`.
-3. Run `npm install` to install depedencies.
-4. Run `npm run dev` to run in dev mode, for release mode use `npm run build`.
+- **Docker & Docker Compose** - For containerized deployment
+- **Go (v1.22+)** - For backend development
+- **Node.js (v18+)** - For frontend development
+- **OpenAI API Key or Google Gemini API Key** - For AI functionality
 
-### Backend setup
-1. Cd into `backend/` folder
-2. Setup the `.env` file based on `.env.example`.
-3. Run `go mod tidy` to install dependencies.
-4. Make sure your MongoDB & Redis are up & running.
-5. Run `go run cmd/main.go` to run the backend.
+## Application Dependencies
 
+NeoBase requires the following services to function properly:
 
-### Run via Docker Compose
-You can also run the whole application directly via `docker` available in the `docker-compose` folder.
-The folder contains various docker-compose for different purpose.
-1. `docker-compose-dependencies.yml` contains the dependencies which are required by neobase applications(mongodb, redis). These can be run differently on the server.
-2. `docker-compose-exampledbs.yml` contains the example databases which can be used to test these dbs.
-3. `docker-compose-local.yml` contains the local setup containing both neobase applications and it's dependencies. You can run this directly on your local machine.
-4. `docker-compose-server.yml` contains the server setup with only neobase applications to be run on the server. You may use your own MongoDB & Redis instances for Neobase or use the `docker-compose-dependencies.yml` to setup them.
-*** Setup the .env file based on `.env.example` for the docker-compose files to work. ***
+### Core Dependencies
+- **MongoDB** - Stores user data, connections, and chat history
+- **Redis** - Manages user sessions and database schema caching
 
+### Supported Databases (for querying)
+- PostgreSQL
+- MySQL
+- Yugabyte
+- ClickHouse
+- MongoDB (Planned)
+- Redis (Planned)
+- Neo4j (Planned)
+
+### Supported LLM Clients
+- OpenAI (Any chat completion model)
+- Google Gemini (Any chat completion model)
+- Anthropic Claude (Planned)
+- Ollama (Planned)
+
+## Setup Options
+
+You can set up NeoBase in several ways:
+
+1. [Manual Setup](#manual-setup) - Run each component separately
+2. [Docker Compose Setup](#docker-compose-setup) - Run everything with Docker Compose
+
+## Manual Setup
+
+### Frontend/Client Setup
+
+1. Navigate to the client directory:
+   ```bash
+   cd client/
+   ```
+
+2. Create an environment file:
+   ```bash
+   cp .env.example .env
+   ```
+   
+3. Edit the `.env` file with your configuration:
+   - `VITE_FRONTEND_BASE_URL` - Client URL (e.g., http://localhost:5173/)
+   - `VITE_API_URL` - Backend URL with /api (e.g., http://localhost:3000/api)
+   - `VITE_ENVIRONMENT` - DEVELOPMENT or PRODUCTION
+
+4. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+5. Run in development mode:
+   ```bash
+   npm run dev
+   ```
+   
+   Or build for production:
+   ```bash
+   npm run build
+   ```
+
+### Backend Setup
+
+1. Navigate to the backend directory:
+   ```bash
+   cd backend/
+   ```
+
+2. Create an environment file:
+   ```bash
+   cp .env.example .env
+   ```
+   
+3. Edit the `.env` file with your configuration (see `.env.example` for details)
+
+4. Install dependencies:
+   ```bash
+   go mod tidy
+   ```
+
+5. Ensure MongoDB and Redis are running
+
+6. Start the backend:
+   ```bash
+   go run cmd/main.go
+   ```
+
+## Docker Compose Setup
+
+NeoBase provides several Docker Compose configurations for different deployment scenarios:
+
+### 1. Local Development Setup
+
+This setup includes everything you need to run NeoBase locally:
+
+1. Navigate to the docker-compose directory:
+   ```bash
+   cd docker-compose/
+   ```
+
+2. Create an environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit the `.env` file with your configuration
+
+4. Create the network (first time only):
+   ```bash
+   docker network create neobase-network
+   ```
+
+5. Start the complete stack:
+   ```bash
+   docker-compose -f docker-compose-local.yml up -d
+   ```
+
+This will start:
+- MongoDB and Redis (dependencies)
+- NeoBase backend
+- NeoBase frontend
+
+Access the application at http://localhost:5173
+
+### 2. Server Deployment
+
+For production deployment on a server:
+
+1. Navigate to the docker-compose directory:
+   ```bash
+   cd docker-compose/
+   ```
+
+2. Create an environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit the `.env` file with your production configuration:
+   - Set `ENVIRONMENT=PRODUCTION`
+   - Configure your domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
+   - Set secure passwords for MongoDB and Redis
+   - Add your OpenAI or Gemini API key
+
+4. Create the network (first time only):
+   ```bash
+   docker network create neobase-network
+   ```
+
+5. Start the dependencies (if you don't have existing MongoDB/Redis):
+   ```bash
+   docker-compose -f docker-compose-dependencies.yml up -d
+   ```
+
+6. Start the NeoBase applications:
+   ```bash
+   docker-compose -f docker-compose-server.yml up -d
+   ```
+
+### 3. Running Example Databases (Optional)
+
+To test with example databases:
+
+```bash
+docker-compose -f docker-compose-exampledbs.yml up -d
+```
+
+This will start:
+- PostgreSQL (port 5432)
+- ClickHouse (ports 8123, 9000)
+- MySQL (port 3306)
+
+## First-Time Setup
+
+After deployment, follow these steps:
+
+1. Access the client app at the configured URL (default: http://localhost:5173)
+
+2. Generate a signup secret using admin credentials:
+   - Send a POST request to `api/auth/generate-signup-secret` with admin username & password
+   - Example using curl:
+     ```bash
+     curl -X POST http://localhost:3000/api/auth/generate-signup-secret \
+       -H "Content-Type: application/json" \
+       -d '{"username":"your-admin-username","password":"your-admin-password"}'
+     ```
+
+3. Use the generated secret to create a new user through the NeoBase UI
+
+4. Add database connections through the UI and start using NeoBase!
+
+## Troubleshooting
+
+- If containers fail to start, check logs with `docker-compose logs`
+- Ensure all required ports are available (3000, 5173, 27017, 6379)
+- Verify your API keys are valid for OpenAI or Gemini
 
 ## Thank you for using NeoBase!
+
+For more information, visit [neobase.cloud](https://neobase.cloud) or check our [GitHub repository](https://github.com/bhaskarblur/neobase-ai-dba).
