@@ -2,16 +2,22 @@ package dbmanager
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // MySQLDriver implements the DatabaseDriver interface for MySQL
@@ -89,63 +95,134 @@ func (mc MySQLColumn) toColumnInfo() ColumnInfo {
 
 // Connect establishes a connection to a MySQL database
 func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	// Validate connection parameters
-	if config.Host == "" || config.Port == "" || config.Database == "" {
-		return nil, fmt.Errorf("invalid connection parameters: host, port, and database are required")
-	}
-
-	// Build DSN (Data Source Name)
 	var dsn string
-	if config.Username != nil && *config.Username != "" {
-		if config.Password != nil && *config.Password != "" {
-			dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				*config.Username, *config.Password, config.Host, config.Port, config.Database)
-		} else {
-			dsn = fmt.Sprintf("%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				*config.Username, config.Host, config.Port, config.Database)
-		}
+	var tempFiles []string
+
+	// Base connection parameters
+	if config.Password != nil {
+		dsn = fmt.Sprintf(
+			"%s:%s@tcp(%s:%s)/%s",
+			*config.Username, *config.Password, config.Host, config.Port, config.Database,
+		)
 	} else {
-		dsn = fmt.Sprintf("tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-			config.Host, config.Port, config.Database)
+		dsn = fmt.Sprintf(
+			"%s@tcp(%s:%s)/%s",
+			*config.Username, config.Host, config.Port, config.Database,
+		)
 	}
 
-	// Configure GORM logger
-	gormLogger := logger.New(
-		log.New(log.Writer(), "\r\n", log.LstdFlags),
-		logger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logger.Silent,
-			IgnoreRecordNotFoundError: true,
-			Colorful:                  false,
-		},
-	)
+	// Add parameters
+	dsn += "?parseTime=true"
+
+	// Configure SSL/TLS
+	if config.UseSSL {
+		// Create a unique TLS config name
+		tlsConfigName := fmt.Sprintf("custom-%d", time.Now().UnixNano())
+
+		// Fetch certificates from URLs
+		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		if err != nil {
+			return nil, err
+		}
+
+		// Track temporary files for cleanup
+		tempFiles = certTempFiles
+
+		// Create TLS config
+		tlsConfig := &tls.Config{
+			ServerName: config.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+
+		// Add client certificates if provided
+		if certPath != "" && keyPath != "" {
+			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				// Clean up temporary files
+				for _, file := range tempFiles {
+					os.Remove(file)
+				}
+				return nil, fmt.Errorf("failed to load client certificates: %v", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+
+		// Add CA certificate if provided
+		if rootCertPath != "" {
+			rootCertPool := x509.NewCertPool()
+			pem, err := ioutil.ReadFile(rootCertPath)
+			if err != nil {
+				// Clean up temporary files
+				for _, file := range tempFiles {
+					os.Remove(file)
+				}
+				return nil, fmt.Errorf("failed to read CA certificate: %v", err)
+			}
+			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+				// Clean up temporary files
+				for _, file := range tempFiles {
+					os.Remove(file)
+				}
+				return nil, fmt.Errorf("failed to append CA certificate")
+			}
+			tlsConfig.RootCAs = rootCertPool
+		}
+
+		// Register TLS config
+		mysqldriver.RegisterTLSConfig(tlsConfigName, tlsConfig)
+
+		// Add TLS config to DSN
+		dsn += "&tls=" + tlsConfigName
+	}
 
 	// Open connection
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: gormLogger,
-	})
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MySQL: %v", err)
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		return nil, fmt.Errorf("failed to create connection: %v", err)
+	}
+
+	// Test connection
+	if err := db.Ping(); err != nil {
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		db.Close()
+		return nil, fmt.Errorf("failed to connect to database: %v", err)
 	}
 
 	// Configure connection pool
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get database connection: %v", err)
-	}
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
 
-	// Set connection pool parameters
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(50)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	// Create GORM DB
+	gormDB, err := gorm.Open(mysql.New(mysql.Config{
+		DSN: dsn,
+	}), &gorm.Config{})
+
+	if err != nil {
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		db.Close()
+		return nil, fmt.Errorf("failed to create GORM connection: %v", err)
+	}
 
 	// Create connection object
 	conn := &Connection{
-		DB:          db,
+		DB:          gormDB,
 		LastUsed:    time.Now(),
 		Status:      StatusConnected,
 		Config:      config,
 		Subscribers: make(map[string]bool),
+		SubLock:     sync.RWMutex{},
+		TempFiles:   tempFiles,
 	}
 
 	return conn, nil
@@ -153,16 +230,23 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 
 // Disconnect closes a MySQL database connection
 func (d *MySQLDriver) Disconnect(conn *Connection) error {
-	if conn == nil || conn.DB == nil {
-		return fmt.Errorf("no active connection to disconnect")
-	}
-
+	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		return fmt.Errorf("failed to get database connection: %v", err)
+		return fmt.Errorf("failed to get SQL DB: %v", err)
 	}
 
-	return sqlDB.Close()
+	// Close the connection
+	if err := sqlDB.Close(); err != nil {
+		return fmt.Errorf("failed to close connection: %v", err)
+	}
+
+	// Clean up temporary certificate files
+	for _, file := range conn.TempFiles {
+		os.Remove(file)
+	}
+
+	return nil
 }
 
 // Ping checks if the MySQL connection is alive

@@ -11,7 +11,14 @@ type Connection struct {
 	Username *string `bson:"username" json:"username"`
 	Password *string `bson:"password" json:"-"` // Hide in JSON
 	Database string  `bson:"database" json:"database"`
-	Base     `bson:",inline"`
+
+	// SSL/TLS Configuration
+	UseSSL         bool    `bson:"use_ssl" json:"use_ssl"`
+	SSLCertURL     *string `bson:"ssl_cert_url,omitempty" json:"ssl_cert_url,omitempty"`
+	SSLKeyURL      *string `bson:"ssl_key_url,omitempty" json:"ssl_key_url,omitempty"`
+	SSLRootCertURL *string `bson:"ssl_root_cert_url,omitempty" json:"ssl_root_cert_url,omitempty"`
+
+	Base `bson:",inline"`
 }
 
 type Chat struct {

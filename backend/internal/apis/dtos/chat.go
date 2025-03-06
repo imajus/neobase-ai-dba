@@ -7,6 +7,12 @@ type CreateConnectionRequest struct {
 	Username string  `json:"username" binding:"required"`
 	Password *string `json:"password"`
 	Database string  `json:"database" binding:"required"`
+
+	// SSL/TLS Configuration
+	UseSSL         bool    `json:"use_ssl"`
+	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
+	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
+	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
 }
 
 type ConnectionResponse struct {
@@ -17,6 +23,12 @@ type ConnectionResponse struct {
 	Username string `json:"username" binding:"required"`
 	Database string `json:"database" binding:"required"`
 	// Password not exposed in response
+
+	// SSL/TLS Configuration
+	UseSSL         bool    `json:"use_ssl"`
+	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
+	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
+	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
 }
 
 type CreateChatRequest struct {

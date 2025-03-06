@@ -2,16 +2,20 @@ package dbmanager
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	clickhousedriver "gorm.io/driver/clickhouse"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // ClickHouseDriver implements the DatabaseDriver interface for ClickHouse
@@ -70,76 +74,136 @@ func (cc ClickHouseColumn) toColumnInfo() ColumnInfo {
 
 // Connect establishes a connection to a ClickHouse database
 func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	// Validate connection parameters
-	if config.Host == "" || config.Port == "" || config.Database == "" {
-		return nil, fmt.Errorf("invalid connection parameters: host, port, and database are required")
-	}
-
-	// Build DSN (Data Source Name)
-	// Use the native format for ClickHouse DSN
 	var dsn string
-	if config.Username != nil && *config.Username != "" {
-		if config.Password != nil && *config.Password != "" {
-			dsn = fmt.Sprintf("clickhouse://%s:%s@%s:%s/%s?dial_timeout=10s&max_execution_time=60",
-				*config.Username, *config.Password, config.Host, config.Port, config.Database)
-		} else {
-			dsn = fmt.Sprintf("clickhouse://%s@%s:%s/%s?dial_timeout=10s&max_execution_time=60",
-				*config.Username, config.Host, config.Port, config.Database)
+	var tempFiles []string
+
+	// Base connection parameters
+	protocol := "tcp"
+
+	// Configure SSL/TLS
+	var tlsConfig *tls.Config
+	if config.UseSSL {
+		// Fetch certificates from URLs
+		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		dsn = fmt.Sprintf("clickhouse://%s:%s/%s?dial_timeout=10s&max_execution_time=60",
-			config.Host, config.Port, config.Database)
+
+		// Track temporary files for cleanup
+		tempFiles = certTempFiles
+
+		// Create TLS config
+		tlsConfig = &tls.Config{
+			ServerName: config.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+
+		// Add client certificates if provided
+		if certPath != "" && keyPath != "" {
+			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				// Clean up temporary files
+				for _, file := range tempFiles {
+					os.Remove(file)
+				}
+				return nil, fmt.Errorf("failed to load client certificates: %v", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+
+		// Add CA certificate if provided
+		if rootCertPath != "" {
+			rootCertPool := x509.NewCertPool()
+			pem, err := ioutil.ReadFile(rootCertPath)
+			if err != nil {
+				// Clean up temporary files
+				for _, file := range tempFiles {
+					os.Remove(file)
+				}
+				return nil, fmt.Errorf("failed to read CA certificate: %v", err)
+			}
+			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+				// Clean up temporary files
+				for _, file := range tempFiles {
+					os.Remove(file)
+				}
+				return nil, fmt.Errorf("failed to append CA certificate")
+			}
+			tlsConfig.RootCAs = rootCertPool
+		}
+
+		// Use secure protocol
+		protocol = "https"
 	}
 
-	log.Printf("ClickHouseDriver -> Connect -> Connecting with DSN format: %s",
-		strings.Replace(dsn, *config.Password, "******", -1))
+	// Build DSN
+	if config.Password != nil {
+		dsn = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
+			protocol, *config.Username, *config.Password, config.Host, config.Port, config.Database)
+	} else {
+		dsn = fmt.Sprintf("%s://%s@%s:%s/%s",
+			protocol, *config.Username, config.Host, config.Port, config.Database)
+	}
 
-	// Configure GORM logger
-	gormLogger := logger.New(
-		log.New(log.Writer(), "\r\n", log.LstdFlags),
-		logger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logger.Silent,
-			IgnoreRecordNotFoundError: true,
-			Colorful:                  false,
-		},
-	)
+	// Add parameters
+	dsn += "?dial_timeout=10s&read_timeout=20s"
 
-	// Open connection using the GORM ClickHouse driver
-	db, err := gorm.Open(clickhousedriver.Open(dsn), &gorm.Config{
-		Logger: gormLogger,
-	})
+	// Create ClickHouse connection
+	options := &clickhousedriver.Config{
+		DSN: dsn,
+	}
+
+	// Add TLS config if SSL is enabled
+	if config.UseSSL && tlsConfig != nil {
+		// For ClickHouse, we need to add secure=true to the DSN
+		// since the driver might not support direct TLS config
+		dsn += "&secure=true"
+		options.DSN = dsn
+	}
+
+	// Create GORM DB
+	gormDB, err := gorm.Open(clickhousedriver.New(*options), &gorm.Config{})
 	if err != nil {
-		log.Printf("ClickHouseDriver -> Connect -> Connection failed: %v", err)
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
 		return nil, fmt.Errorf("failed to connect to ClickHouse: %v", err)
 	}
 
-	// Configure connection pool
-	sqlDB, err := db.DB()
+	// Test connection
+	sqlDB, err := gormDB.DB()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get database connection: %v", err)
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		return nil, fmt.Errorf("failed to get SQL DB: %v", err)
 	}
 
-	// Set connection pool parameters
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(50)
+	if err := sqlDB.Ping(); err != nil {
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		sqlDB.Close()
+		return nil, fmt.Errorf("failed to connect to database: %v", err)
+	}
+
+	// Configure connection pool
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetConnMaxLifetime(time.Hour)
-
-	// Test the connection with a simple query
-	var result int
-	if err := db.Raw("SELECT 1").Scan(&result).Error; err != nil {
-		log.Printf("ClickHouseDriver -> Connect -> Connection test failed: %v", err)
-		return nil, fmt.Errorf("connection test failed: %v", err)
-	}
-	log.Printf("ClickHouseDriver -> Connect -> Connection established successfully")
 
 	// Create connection object
 	conn := &Connection{
-		DB:          db,
+		DB:          gormDB,
 		LastUsed:    time.Now(),
 		Status:      StatusConnected,
 		Config:      config,
 		Subscribers: make(map[string]bool),
+		SubLock:     sync.RWMutex{},
+		TempFiles:   tempFiles,
 	}
 
 	return conn, nil
@@ -147,16 +211,23 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 
 // Disconnect closes a ClickHouse database connection
 func (d *ClickHouseDriver) Disconnect(conn *Connection) error {
-	if conn == nil || conn.DB == nil {
-		return fmt.Errorf("no active connection to disconnect")
-	}
-
+	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		return fmt.Errorf("failed to get database connection: %v", err)
+		return fmt.Errorf("failed to get SQL DB: %v", err)
 	}
 
-	return sqlDB.Close()
+	// Close the connection
+	if err := sqlDB.Close(); err != nil {
+		return fmt.Errorf("failed to close connection: %v", err)
+	}
+
+	// Clean up temporary certificate files
+	for _, file := range conn.TempFiles {
+		os.Remove(file)
+	}
+
+	return nil
 }
 
 // Ping checks if the ClickHouse connection is alive

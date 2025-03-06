@@ -102,42 +102,57 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 1 {
-			return nil, http.StatusBadRequest, fmt.Errorf("you cannot have more than 2 chat in trial mode")
+		if len(chats) > 0 {
+			return nil, http.StatusBadRequest, fmt.Errorf("user already has a chat")
 		}
 	}
 
-	// Check if the database type is supported
-	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB && req.Connection.Type != constants.DatabaseTypeMySQL && req.Connection.Type != constants.DatabaseTypeClickhouse {
-		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL, YugabyteDB, MySQL and Clickhouse are supported for now")
+	// Validate database type
+	if !isValidDBType(req.Connection.Type) {
+		return nil, http.StatusBadRequest, fmt.Errorf("unsupported database type: %s", req.Connection.Type)
 	}
 
 	// Test connection without creating a persistent connection
 	err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
-		Type:     req.Connection.Type,
-		Host:     req.Connection.Host,
-		Port:     req.Connection.Port,
-		Username: &req.Connection.Username,
-		Password: req.Connection.Password,
-		Database: req.Connection.Database,
+		Type:           req.Connection.Type,
+		Host:           req.Connection.Host,
+		Port:           req.Connection.Port,
+		Username:       &req.Connection.Username,
+		Password:       req.Connection.Password,
+		Database:       req.Connection.Database,
+		UseSSL:         req.Connection.UseSSL,
+		SSLCertURL:     req.Connection.SSLCertURL,
+		SSLKeyURL:      req.Connection.SSLKeyURL,
+		SSLRootCertURL: req.Connection.SSLRootCertURL,
 	})
 	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
+		return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 	}
-	// Create connection object
+
+	// Create connection object with SSL configuration
 	connection := models.Connection{
-		Type:     req.Connection.Type,
-		Host:     req.Connection.Host,
-		Port:     req.Connection.Port,
-		Username: &req.Connection.Username,
-		Password: req.Connection.Password,
-		Database: req.Connection.Database,
-		Base:     models.NewBase(),
+		Type:           req.Connection.Type,
+		Host:           req.Connection.Host,
+		Port:           req.Connection.Port,
+		Username:       &req.Connection.Username,
+		Password:       req.Connection.Password,
+		Database:       req.Connection.Database,
+		UseSSL:         req.Connection.UseSSL,
+		SSLCertURL:     req.Connection.SSLCertURL,
+		SSLKeyURL:      req.Connection.SSLKeyURL,
+		SSLRootCertURL: req.Connection.SSLRootCertURL,
+		Base:           models.NewBase(),
+	}
+
+	// Encrypt connection details
+	if err := utils.EncryptConnection(&connection); err != nil {
+		log.Printf("Warning: Failed to encrypt connection details: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to secure connection details: %v", err)
 	}
 
 	// Create chat with connection
@@ -162,29 +177,40 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 1 {
-			return nil, http.StatusBadRequest, fmt.Errorf("you cannot have more than 2 chat in trial mode")
+		if len(chats) > 0 {
+			return nil, http.StatusBadRequest, fmt.Errorf("user already has a chat")
 		}
 	}
 
-	// Check if the database type is supported
-	if req.Connection.Type != constants.DatabaseTypePostgreSQL && req.Connection.Type != constants.DatabaseTypeYugabyteDB && req.Connection.Type != constants.DatabaseTypeMySQL && req.Connection.Type != constants.DatabaseTypeClickhouse {
-		return nil, http.StatusBadRequest, fmt.Errorf("only PostgreSQL, YugabyteDB, MySQL and Clickhouse are supported for now")
+	// Validate database type
+	if !isValidDBType(req.Connection.Type) {
+		return nil, http.StatusBadRequest, fmt.Errorf("unsupported database type: %s", req.Connection.Type)
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 	}
-	// Create connection object
+
+	// Create connection object with SSL configuration
 	connection := models.Connection{
-		Type:     req.Connection.Type,
-		Host:     req.Connection.Host,
-		Port:     req.Connection.Port,
-		Username: &req.Connection.Username,
-		Password: req.Connection.Password,
-		Database: req.Connection.Database,
-		Base:     models.NewBase(),
+		Type:           req.Connection.Type,
+		Host:           req.Connection.Host,
+		Port:           req.Connection.Port,
+		Username:       &req.Connection.Username,
+		Password:       req.Connection.Password,
+		Database:       req.Connection.Database,
+		UseSSL:         req.Connection.UseSSL,
+		SSLCertURL:     req.Connection.SSLCertURL,
+		SSLKeyURL:      req.Connection.SSLKeyURL,
+		SSLRootCertURL: req.Connection.SSLRootCertURL,
+		Base:           models.NewBase(),
+	}
+
+	// Encrypt connection details
+	if err := utils.EncryptConnection(&connection); err != nil {
+		log.Printf("Warning: Failed to encrypt connection details: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to secure connection details: %v", err)
 	}
 
 	// Create chat with connection
@@ -194,6 +220,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 	}
 	return s.buildChatResponse(chat), http.StatusCreated, nil
 }
+
 func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest) (*dtos.ChatResponse, uint32, error) {
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
@@ -205,42 +232,75 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
 	}
 
-	// Get existing chat
+	// Get the chat
 	chat, err := s.chatRepo.FindByID(chatObjID)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+		}
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 	}
-	if chat == nil {
-		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
-	}
+
+	// Check if the chat belongs to the user
 	if chat.UserID != userObjID {
-		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+		return nil, http.StatusForbidden, fmt.Errorf("chat does not belong to user")
 	}
 
+	// Check for connection changes
+	var credentialsChanged bool
 	if req.Connection != nil {
-		// Cannot change the database type
-		if req.Connection.Type != chat.Connection.Type {
-			return nil, http.StatusBadRequest, fmt.Errorf("cannot change the database type")
+		// Validate database type
+		if !isValidDBType(req.Connection.Type) {
+			return nil, http.StatusBadRequest, fmt.Errorf("unsupported database type: %s", req.Connection.Type)
 		}
 
+		// Create a copy of the existing connection and decrypt it for comparison
+		existingConn := chat.Connection
+		utils.DecryptConnection(&existingConn)
+
 		// Check if critical connection details have changed
-		credentialsChanged := chat.Connection.Database != req.Connection.Database ||
-			chat.Connection.Host != req.Connection.Host ||
-			chat.Connection.Port != req.Connection.Port ||
-			*chat.Connection.Username != req.Connection.Username ||
-			(req.Connection.Password != nil && *chat.Connection.Password != *req.Connection.Password)
+		credentialsChanged = existingConn.Database != req.Connection.Database ||
+			existingConn.Host != req.Connection.Host ||
+			existingConn.Port != req.Connection.Port ||
+			*existingConn.Username != req.Connection.Username ||
+			(req.Connection.Password != nil && existingConn.Password != nil && *existingConn.Password != *req.Connection.Password)
 
 		// Test connection without creating a persistent connection
 		err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
-			Type:     req.Connection.Type,
-			Host:     req.Connection.Host,
-			Port:     req.Connection.Port,
-			Username: &req.Connection.Username,
-			Password: req.Connection.Password,
-			Database: req.Connection.Database,
+			Type:           req.Connection.Type,
+			Host:           req.Connection.Host,
+			Port:           req.Connection.Port,
+			Username:       &req.Connection.Username,
+			Password:       req.Connection.Password,
+			Database:       req.Connection.Database,
+			UseSSL:         req.Connection.UseSSL,
+			SSLCertURL:     req.Connection.SSLCertURL,
+			SSLKeyURL:      req.Connection.SSLKeyURL,
+			SSLRootCertURL: req.Connection.SSLRootCertURL,
 		})
 		if err != nil {
-			return nil, http.StatusBadRequest, fmt.Errorf("connection failed: %v", err)
+			return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
+		}
+
+		// Create connection object with SSL configuration
+		connection := models.Connection{
+			Type:           req.Connection.Type,
+			Host:           req.Connection.Host,
+			Port:           req.Connection.Port,
+			Username:       &req.Connection.Username,
+			Password:       req.Connection.Password,
+			Database:       req.Connection.Database,
+			UseSSL:         req.Connection.UseSSL,
+			SSLCertURL:     req.Connection.SSLCertURL,
+			SSLKeyURL:      req.Connection.SSLKeyURL,
+			SSLRootCertURL: req.Connection.SSLRootCertURL,
+			Base:           models.NewBase(),
+		}
+
+		// Encrypt connection details
+		if err := utils.EncryptConnection(&connection); err != nil {
+			log.Printf("Warning: Failed to encrypt connection details: %v", err)
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to secure connection details: %v", err)
 		}
 
 		// If credentials changed, disconnect existing connection
@@ -252,16 +312,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			}
 		}
 
-		// Update chat fields
-		chat.Connection = models.Connection{
-			Type:     req.Connection.Type,
-			Host:     req.Connection.Host,
-			Port:     req.Connection.Port,
-			Username: &req.Connection.Username,
-			Password: req.Connection.Password,
-			Database: req.Connection.Database,
-			Base:     models.NewBase(),
-		}
+		chat.Connection = connection
 
 		// If credentials changed, reset selected collections
 		if credentialsChanged {
@@ -270,26 +321,27 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		}
 	}
 
-	if req.AutoExecuteQuery != nil {
-		log.Printf("ChatService -> Update -> AutoExecuteQuery: %v", *req.AutoExecuteQuery)
-		chat.AutoExecuteQuery = *req.AutoExecuteQuery
-	}
-
 	// Store the old selected collections value to check for changes
 	oldSelectedCollections := chat.SelectedCollections
 	// Flag to track if selected collections changed
 	selectedCollectionsChanged := false
 
 	// Update selected collections if provided
-	if req.SelectedCollections != nil && *req.SelectedCollections != "" {
+	if req.SelectedCollections != nil {
 		if oldSelectedCollections != *req.SelectedCollections {
 			selectedCollectionsChanged = true
 			log.Printf("ChatService -> Update -> Selected collections changed from '%s' to '%s'", oldSelectedCollections, *req.SelectedCollections)
 		}
 		chat.SelectedCollections = *req.SelectedCollections
-		log.Printf("ChatService -> Update -> Updated selected collections to: %s", *req.SelectedCollections)
 	}
 
+	// Update auto execute query if provided
+	if req.AutoExecuteQuery != nil {
+		log.Printf("ChatService -> Update -> AutoExecuteQuery: %v", *req.AutoExecuteQuery)
+		chat.AutoExecuteQuery = *req.AutoExecuteQuery
+	}
+
+	// Update the chat
 	if err := s.chatRepo.Update(chatObjID, chat); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update chat: %v", err)
 	}
@@ -1059,21 +1111,31 @@ func (s *chatService) ListMessages(userID, chatID string, page, pageSize int) (*
 
 // Helper methods for building responses
 func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
+	// Create a copy of the connection to avoid modifying the original
+	connectionCopy := chat.Connection
+
+	// Decrypt connection details for the response
+	utils.DecryptConnection(&connectionCopy)
+
 	return &dtos.ChatResponse{
 		ID:     chat.ID.Hex(),
 		UserID: chat.UserID.Hex(),
 		Connection: dtos.ConnectionResponse{
-			ID:       chat.ID.Hex(),
-			Type:     chat.Connection.Type,
-			Host:     chat.Connection.Host,
-			Port:     chat.Connection.Port,
-			Username: *chat.Connection.Username,
-			Database: chat.Connection.Database,
+			ID:             chat.ID.Hex(),
+			Type:           connectionCopy.Type,
+			Host:           connectionCopy.Host,
+			Port:           connectionCopy.Port,
+			Username:       *connectionCopy.Username,
+			Database:       connectionCopy.Database,
+			UseSSL:         connectionCopy.UseSSL,
+			SSLCertURL:     connectionCopy.SSLCertURL,
+			SSLKeyURL:      connectionCopy.SSLKeyURL,
+			SSLRootCertURL: connectionCopy.SSLRootCertURL,
 		},
 		SelectedCollections: chat.SelectedCollections,
+		CreatedAt:           chat.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:           chat.UpdatedAt.Format(time.RFC3339),
 		AutoExecuteQuery:    chat.AutoExecuteQuery,
-		CreatedAt:           chat.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:           chat.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 
@@ -1153,49 +1215,53 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 }
 
 func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error) {
+	log.Printf("ChatService -> ConnectDB -> Starting connection for chatID: %s, streamID: %s", chatID, streamID)
+
+	// Get the chat
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		return http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
 	}
 
-	chatDetails, err := s.chatRepo.FindByID(chatObjID)
+	chat, err := s.chatRepo.FindByID(chatObjID)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return http.StatusNotFound, fmt.Errorf("chat not found")
+		}
 		return http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 	}
 
-	log.Printf("ChatService -> ConnectDB -> chatDetails: %+v", chatDetails)
-
-	// Validate connection type
-	if !isValidDBType(chatDetails.Connection.Type) {
-		return http.StatusBadRequest, fmt.Errorf("unsupported database type")
+	// Check if the chat belongs to the user
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 	}
 
-	// Subscribe to connection status updates before connecting
-	s.dbManager.Subscribe(chatID, streamID)
-
-	// Attempt to connect
-	if err := s.dbManager.Connect(chatID, userID, streamID, dbmanager.ConnectionConfig{
-		Type:     chatDetails.Connection.Type,
-		Host:     chatDetails.Connection.Host,
-		Port:     chatDetails.Connection.Port,
-		Username: chatDetails.Connection.Username,
-		Password: chatDetails.Connection.Password,
-		Database: chatDetails.Connection.Database,
-	}); err != nil {
-		log.Printf("ChatService -> ConnectDB -> error: %v", err)
-		if strings.Contains(err.Error(), "already exists") {
-			return http.StatusOK, nil
-		}
-		return http.StatusBadRequest, err
+	if chat.UserID != userObjID {
+		return http.StatusForbidden, fmt.Errorf("chat does not belong to user")
 	}
 
-	log.Printf("ChatService -> ConnectDB -> connected to chat: %s", chatID)
+	// Decrypt connection details
+	utils.DecryptConnection(&chat.Connection)
 
-	// Send to stream handler
-	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-		Event: "db-connected",
-		Data:  "Database connected successfully",
-	})
+	// Create connection config with SSL configuration
+	config := dbmanager.ConnectionConfig{
+		Type:           chat.Connection.Type,
+		Host:           chat.Connection.Host,
+		Port:           chat.Connection.Port,
+		Username:       chat.Connection.Username,
+		Password:       chat.Connection.Password,
+		Database:       chat.Connection.Database,
+		UseSSL:         chat.Connection.UseSSL,
+		SSLCertURL:     chat.Connection.SSLCertURL,
+		SSLKeyURL:      chat.Connection.SSLKeyURL,
+		SSLRootCertURL: chat.Connection.SSLRootCertURL,
+	}
+
+	// Connect to the database
+	if err := s.dbManager.Connect(chatID, userID, streamID, config); err != nil {
+		return http.StatusBadRequest, fmt.Errorf("failed to connect to database: %v", err)
+	}
 
 	return http.StatusOK, nil
 }
@@ -1366,12 +1432,22 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 }
 
 func isValidDBType(dbType string) bool {
-	validTypes := []string{constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeMySQL, constants.DatabaseTypeMongoDB, constants.DatabaseTypeClickhouse} // Add more as supported
-	for _, t := range validTypes {
-		if t == dbType {
+	validTypes := []string{
+		constants.DatabaseTypePostgreSQL,
+		constants.DatabaseTypeYugabyteDB,
+		constants.DatabaseTypeMySQL,
+		constants.DatabaseTypeClickhouse,
+		constants.DatabaseTypeMongoDB,
+		constants.DatabaseTypeRedis,
+		constants.DatabaseTypeNeo4j,
+	}
+
+	for _, validType := range validTypes {
+		if dbType == validType {
 			return true
 		}
 	}
+
 	return false
 }
 

@@ -4,22 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	// Database drivers
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
-	_ "github.com/lib/pq"              // PostgreSQL/YugabyteDB Driver
+	mysqldriver "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq" // PostgreSQL/YugabyteDB Driver
 	"gorm.io/gorm"
 
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
 	"neobase-ai/pkg/redis"
 
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"crypto/tls"
+	"crypto/x509"
 )
 
 const (
@@ -1002,103 +1007,257 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 
 // TestConnection tests if the provided credentials are valid without creating a persistent connection
 func (m *Manager) TestConnection(config *ConnectionConfig) error {
+	var tempFiles []string
+
 	switch config.Type {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		var dsn string
-		if config.Password == nil {
-			dsn = fmt.Sprintf(
-				"host=%s port=%s user=%s dbname=%s sslmode=disable",
-				config.Host, config.Port, *config.Username, config.Database,
-			)
-		} else {
-			dsn = fmt.Sprintf(
-				"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-				config.Host, config.Port, *config.Username, *config.Password, config.Database,
-			)
+
+		// Base connection parameters
+		baseParams := fmt.Sprintf(
+			"host=%s port=%s user=%s dbname=%s",
+			config.Host, config.Port, *config.Username, config.Database,
+		)
+
+		// Add password if provided
+		if config.Password != nil {
+			baseParams += fmt.Sprintf(" password=%s", *config.Password)
 		}
+
+		// Configure SSL/TLS
+		if config.UseSSL {
+			// Always use verify-full mode for maximum security
+			baseParams += " sslmode=verify-full"
+
+			// Fetch certificates from URLs
+			certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			if err != nil {
+				return err
+			}
+
+			// Track temporary files for cleanup
+			tempFiles = certTempFiles
+
+			// Add certificate paths to connection string
+			if certPath != "" {
+				baseParams += fmt.Sprintf(" sslcert=%s", certPath)
+			}
+
+			if keyPath != "" {
+				baseParams += fmt.Sprintf(" sslkey=%s", keyPath)
+			}
+
+			if rootCertPath != "" {
+				baseParams += fmt.Sprintf(" sslrootcert=%s", rootCertPath)
+			}
+		} else {
+			baseParams += " sslmode=disable"
+		}
+
+		dsn = baseParams
+
+		// Open connection
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
+			// Clean up temporary files
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
 			return fmt.Errorf("failed to create connection: %v", err)
 		}
-		defer db.Close()
 
+		// Test connection
 		err = db.Ping()
-		if err != nil {
-			return fmt.Errorf("failed to connect: %v", err)
+
+		// Close connection
+		db.Close()
+
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
 		}
+
+		if err != nil {
+			return fmt.Errorf("failed to connect to database: %v", err)
+		}
+
+		return nil
 
 	case constants.DatabaseTypeMySQL:
 		var dsn string
-		if config.Password == nil {
-			dsn = fmt.Sprintf(
-				"%s@tcp(%s:%s)/%s",
-				*config.Username, config.Host, config.Port, config.Database,
-			)
-		} else {
+
+		// Base connection parameters
+		if config.Password != nil {
 			dsn = fmt.Sprintf(
 				"%s:%s@tcp(%s:%s)/%s",
 				*config.Username, *config.Password, config.Host, config.Port, config.Database,
 			)
+		} else {
+			dsn = fmt.Sprintf(
+				"%s@tcp(%s:%s)/%s",
+				*config.Username, config.Host, config.Port, config.Database,
+			)
 		}
+
+		// Add parameters
+		dsn += "?parseTime=true"
+
+		// Configure SSL/TLS
+		if config.UseSSL {
+			// Create a unique TLS config name
+			tlsConfigName := fmt.Sprintf("custom-test-%d", time.Now().UnixNano())
+
+			// Fetch certificates from URLs
+			certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			if err != nil {
+				return err
+			}
+
+			// Track temporary files for cleanup
+			tempFiles = certTempFiles
+
+			// Create TLS config
+			tlsConfig := &tls.Config{
+				ServerName: config.Host,
+				MinVersion: tls.VersionTLS12,
+			}
+
+			// Add client certificates if provided
+			if certPath != "" && keyPath != "" {
+				cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return fmt.Errorf("failed to load client certificates: %v", err)
+				}
+				tlsConfig.Certificates = []tls.Certificate{cert}
+			}
+
+			// Add CA certificate if provided
+			if rootCertPath != "" {
+				rootCertPool := x509.NewCertPool()
+				pem, err := ioutil.ReadFile(rootCertPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return fmt.Errorf("failed to read CA certificate: %v", err)
+				}
+				if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return fmt.Errorf("failed to append CA certificate")
+				}
+				tlsConfig.RootCAs = rootCertPool
+			}
+
+			// Register TLS config
+			mysqldriver.RegisterTLSConfig(tlsConfigName, tlsConfig)
+
+			// Add TLS config to DSN
+			dsn += "&tls=" + tlsConfigName
+		}
+
+		// Open connection
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
-			return fmt.Errorf("failed to create MySQL connection: %v", err)
+			// Clean up temporary files
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
+			return fmt.Errorf("failed to create connection: %v", err)
 		}
-		defer db.Close()
 
+		// Test connection
 		err = db.Ping()
-		if err != nil {
-			return fmt.Errorf("failed to connect to MySQL: %v", err)
+
+		// Close connection
+		db.Close()
+
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
 		}
+
+		if err != nil {
+			return fmt.Errorf("failed to connect to database: %v", err)
+		}
+
+		return nil
 
 	case constants.DatabaseTypeClickhouse:
 		var dsn string
-		if config.Password == nil {
-			dsn = fmt.Sprintf(
-				"clickhouse://%s@%s:%s/%s",
-				*config.Username, config.Host, config.Port, config.Database,
-			)
-		} else {
-			dsn = fmt.Sprintf(
-				"clickhouse://%s:%s@%s:%s/%s",
-				*config.Username, *config.Password, config.Host, config.Port, config.Database,
-			)
+
+		// Base connection parameters
+		protocol := "tcp"
+
+		// Configure SSL/TLS
+		if config.UseSSL {
+			// Fetch certificates from URLs
+			_, _, _, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			if err != nil {
+				return err
+			}
+
+			// Track temporary files for cleanup
+			tempFiles = certTempFiles
+
+			// Use secure protocol
+			protocol = "https"
 		}
+
+		// Build DSN
+		if config.Password != nil {
+			dsn = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
+				protocol, *config.Username, *config.Password, config.Host, config.Port, config.Database)
+		} else {
+			dsn = fmt.Sprintf("%s://%s@%s:%s/%s",
+				protocol, *config.Username, config.Host, config.Port, config.Database)
+		}
+
+		// Add parameters
+		dsn += "?dial_timeout=10s&read_timeout=20s"
+
+		// Add secure parameter if using SSL
+		if config.UseSSL {
+			dsn += "&secure=true"
+		}
+
+		// Open connection
 		db, err := sql.Open("clickhouse", dsn)
 		if err != nil {
-			return fmt.Errorf("failed to create ClickHouse connection: %v", err)
+			// Clean up temporary files
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
+			return fmt.Errorf("failed to create connection: %v", err)
 		}
-		defer db.Close()
 
+		// Test connection
 		err = db.Ping()
-		if err != nil {
-			return fmt.Errorf("failed to connect to ClickHouse: %v", err)
+
+		// Close connection
+		db.Close()
+
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
 		}
 
-	case constants.DatabaseTypeMongoDB:
-		uri := fmt.Sprintf(
-			"mongodb://%s:%s@%s:%s/%s",
-			*config.Username, *config.Password, config.Host, config.Port, config.Database,
-		)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 		if err != nil {
-			return fmt.Errorf("failed to create MongoDB connection: %v", err)
+			return fmt.Errorf("failed to connect to database: %v", err)
 		}
-		defer client.Disconnect(ctx)
 
-		err = client.Ping(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("failed to connect to MongoDB: %v", err)
-		}
+		return nil
 
 	default:
 		return fmt.Errorf("unsupported database type: %s", config.Type)
 	}
-
-	return nil
 }
 
 // FormatSchemaWithExamples formats the schema with example records for LLM
@@ -1291,4 +1450,84 @@ func (m *Manager) GetPoolMetrics() map[string]interface{} {
 		"total_connections": totalRefs,
 		"reuse_count":       m.poolMetrics.reuseCount,
 	}
+}
+
+// fetchCertificateFromURL downloads a certificate from a URL and stores it temporarily
+func fetchCertificateFromURL(url string) (string, error) {
+	// Create a temporary file
+	tmpFile, err := ioutil.TempFile("", "cert-*.pem")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temporary file: %v", err)
+	}
+	defer tmpFile.Close()
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// Fetch the certificate
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch certificate from URL: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch certificate, status: %s", resp.Status)
+	}
+
+	// Copy the certificate to the temporary file
+	_, err = io.Copy(tmpFile, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to save certificate: %v", err)
+	}
+
+	// Return the path to the temporary file
+	return tmpFile.Name(), nil
+}
+
+// prepareCertificatesFromURLs fetches certificates from URLs and returns their local paths
+func prepareCertificatesFromURLs(config ConnectionConfig) (certPath, keyPath, rootCertPath string, tempFiles []string, err error) {
+	// Fetch client certificate if URL provided
+	if config.SSLCertURL != nil && *config.SSLCertURL != "" {
+		certPath, err = fetchCertificateFromURL(*config.SSLCertURL)
+		if err != nil {
+			// Clean up any files already created
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
+			return "", "", "", nil, fmt.Errorf("failed to fetch client certificate: %v", err)
+		}
+		tempFiles = append(tempFiles, certPath)
+	}
+
+	// Fetch client key if URL provided
+	if config.SSLKeyURL != nil && *config.SSLKeyURL != "" {
+		keyPath, err = fetchCertificateFromURL(*config.SSLKeyURL)
+		if err != nil {
+			// Clean up any files already created
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
+			return "", "", "", nil, fmt.Errorf("failed to fetch client key: %v", err)
+		}
+		tempFiles = append(tempFiles, keyPath)
+	}
+
+	// Fetch CA certificate if URL provided
+	if config.SSLRootCertURL != nil && *config.SSLRootCertURL != "" {
+		rootCertPath, err = fetchCertificateFromURL(*config.SSLRootCertURL)
+		if err != nil {
+			// Clean up any files already created
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
+			return "", "", "", nil, fmt.Errorf("failed to fetch CA certificate: %v", err)
+		}
+		tempFiles = append(tempFiles, rootCertPath)
+	}
+
+	return certPath, keyPath, rootCertPath, tempFiles, nil
 }

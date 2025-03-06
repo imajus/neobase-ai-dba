@@ -32,6 +32,7 @@ type Connection struct {
 	SubLock        sync.RWMutex        // Lock for thread-safe subscriber operations
 	OnSchemaChange func(chatID string) // Callback for schema changes
 	ConfigKey      string              // Reference to the shared connection pool
+	TempFiles      []string            // Temporary certificate files to clean up on disconnect
 }
 
 // ConnectionConfig holds the configuration for a database connection
@@ -42,6 +43,12 @@ type ConnectionConfig struct {
 	Username *string `json:"username"`
 	Password *string `json:"password"`
 	Database string  `json:"database"`
+
+	// SSL/TLS Configuration
+	UseSSL         bool    `json:"use_ssl"`
+	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`      // URL to client certificate
+	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`       // URL to client key
+	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"` // URL to CA certificate
 }
 
 // SSEEvent represents an event to be sent via SSE
