@@ -221,7 +221,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		conn, err = driver.Connect(config)
 		if err != nil {
 			log.Printf("DBManager -> Connect -> Driver connection failed: %v", err)
-			return fmt.Errorf("failed to connect: %v", err)
+			return err
 		}
 
 		log.Printf("DBManager -> Connect -> Driver connection successful, creating new pool")
@@ -1078,7 +1078,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		}
 
 		if err != nil {
-			return fmt.Errorf("failed to connect to database: %v", err)
+			return err
 		}
 
 		return nil

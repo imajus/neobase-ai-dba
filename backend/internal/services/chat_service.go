@@ -1260,7 +1260,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 
 	// Connect to the database
 	if err := s.dbManager.Connect(chatID, userID, streamID, config); err != nil {
-		return http.StatusBadRequest, fmt.Errorf("failed to connect to database: %v", err)
+		return http.StatusBadRequest, err
 	}
 
 	return http.StatusOK, nil
@@ -1474,7 +1474,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		log.Printf("ChatService -> ExecuteQuery -> Database not connected, initiating connection")
 		status, err := s.ConnectDB(ctx, userID, chatID, req.StreamID)
 		if err != nil {
-			return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+			return nil, status, err
 		}
 		// Give a small delay for connection to stabilize
 		time.Sleep(1 * time.Second)
@@ -1872,7 +1872,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			log.Printf("ChatService -> RollbackQuery -> Database not connected, initiating connection")
 			status, err := s.ConnectDB(ctx, userID, chatID, req.StreamID)
 			if err != nil {
-				return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+				return nil, status, err
 			}
 			time.Sleep(1 * time.Second)
 		}
@@ -2141,7 +2141,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		log.Printf("ChatService -> RollbackQuery -> Database not connected, initiating connection")
 		status, err := s.ConnectDB(ctx, userID, chatID, req.StreamID)
 		if err != nil {
-			return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+			return nil, status, err
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -2768,7 +2768,7 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	if !s.dbManager.IsConnected(chatID) {
 		status, err := s.ConnectDB(ctx, userID, chatID, streamID)
 		if err != nil {
-			return nil, status, fmt.Errorf("failed to connect to database: %v", err)
+			return nil, status, err
 		}
 	}
 	log.Printf("ChatService -> GetQueryResults -> query.Pagination.PaginatedQuery: %+v", query.Pagination.PaginatedQuery)

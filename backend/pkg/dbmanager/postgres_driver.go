@@ -179,7 +179,7 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 			os.Remove(file)
 		}
 		db.Close()
-		return nil, fmt.Errorf("failed to connect to database: %v", err)
+		return nil, err
 	}
 
 	// Configure connection pool
