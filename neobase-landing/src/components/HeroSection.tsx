@@ -12,7 +12,7 @@ const HeroSection = () => {
           {/* Left Side - Hero Text */}
           <div className="md:w-1/2 space-y-4 sm:space-y-5 md:space-y-6 md:pr-8 z-10">
             <div className="inline-block neo-border bg-[#FFDB58] px-3 sm:px-4 py-1.5 sm:py-2 font-bold text-sm sm:text-sm">
-              #Open Source,  #AI Database Assistant
+              #Open-Source,  #AI Copilot for Database
             </div>
             <h1 className="text-4xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight">
               Where there's a Database.<br />

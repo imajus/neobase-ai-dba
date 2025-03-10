@@ -57,7 +57,7 @@ const Footer = () => {
         <div className="border-t border-gray-800 mt-8 pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400">
-              &copy; {currentYear} NeoBase - AI Database Assistant.
+              &copy; {currentYear} NeoBase - AI Copilot for Database
             </p>
             <div className="flex items-center text-gray-400 mt-4 md:mt-0">
               <span className="mr-1">Made with ❤️ by </span>

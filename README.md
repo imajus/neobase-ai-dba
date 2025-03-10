@@ -1,4 +1,4 @@
-# NeoBase - AI Database Assistant
+# NeoBase - AI Copilot for Database
 <img width="1707" alt="Screenshot 2025-02-10 at 7 12 19 PM" src="https://github.com/user-attachments/assets/50c36c8b-52f4-49c8-8b2b-d7b98279aa52" />
 
 
