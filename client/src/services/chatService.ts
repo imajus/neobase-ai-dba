@@ -93,7 +93,7 @@ const chatService = {
             return response.data.success;
         } catch (error: any) {
             console.error('Connect to connection error:', error);
-            throw new Error(error.response?.data?.error || 'Failed to connect to connection');
+            throw new Error(error.response?.data?.error || 'Failed to connect');
         }
     },
 

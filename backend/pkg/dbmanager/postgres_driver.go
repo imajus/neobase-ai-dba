@@ -8,7 +8,9 @@ import (
 	"log"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/utils"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -114,66 +116,123 @@ func (pc PostgresColumn) toColumnInfo() ColumnInfo {
 }
 
 func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Starting with config: %+v", config)
+	var dsn string
+	var tempFiles []string
 
-	// If username or password is nil, set it to empty string
-	if config.Username == nil {
-		config.Username = utils.ToStringPtr("")
-		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Set nil username to empty string")
+	// Base connection parameters
+	baseParams := fmt.Sprintf(
+		"host=%s port=%s user=%s dbname=%s",
+		config.Host, config.Port, *config.Username, config.Database,
+	)
+
+	// Add password if provided
+	if config.Password != nil {
+		baseParams += fmt.Sprintf(" password=%s", *config.Password)
 	}
-	if config.Password == nil {
-		config.Password = utils.ToStringPtr("")
-		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Set nil password to empty string")
+
+	// Configure SSL/TLS
+	if config.UseSSL {
+		// Always use verify-full mode for maximum security
+		baseParams += " sslmode=verify-full"
+
+		// Fetch certificates from URLs
+		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		if err != nil {
+			return nil, err
+		}
+
+		// Track temporary files for cleanup
+		tempFiles = certTempFiles
+
+		// Add certificate paths to connection string
+		if certPath != "" {
+			baseParams += fmt.Sprintf(" sslcert=%s", certPath)
+		}
+
+		if keyPath != "" {
+			baseParams += fmt.Sprintf(" sslkey=%s", keyPath)
+		}
+
+		if rootCertPath != "" {
+			baseParams += fmt.Sprintf(" sslrootcert=%s", rootCertPath)
+		}
+	} else {
+		baseParams += " sslmode=disable"
 	}
 
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		config.Host, config.Port, *config.Username, *config.Password, config.Database)
+	dsn = baseParams
 
-	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Attempting connection with DSN: %s", dsn)
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// Open connection
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection failed: %v", err)
-		return nil, fmt.Errorf("failed to connect to PostgreSQL: %v", err)
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		return nil, fmt.Errorf("failed to create connection: %v", err)
 	}
 
-	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> GORM connection successful")
-
-	// Configure connection pool
-	sqlDB, err := db.DB()
-	if err != nil {
-		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Failed to get underlying *sql.DB: %v", err)
+	// Test connection
+	if err := db.Ping(); err != nil {
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		db.Close()
 		return nil, err
 	}
 
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetMaxOpenConns(10)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	// Configure connection pool
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
 
-	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection pool configured")
+	// Create GORM DB
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: db,
+	}), &gorm.Config{})
 
-	// Test connection with ping
-	if err := sqlDB.Ping(); err != nil {
-		log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Ping failed: %v", err)
-		return nil, fmt.Errorf("ping failed: %v", err)
+	if err != nil {
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+		db.Close()
+		return nil, fmt.Errorf("failed to create GORM connection: %v", err)
 	}
 
-	log.Printf("PostgreSQL/YugabyteDB Driver -> Connect -> Connection verified with ping")
+	// Create connection object
+	conn := &Connection{
+		DB:          gormDB,
+		LastUsed:    time.Now(),
+		Status:      StatusConnected,
+		Config:      config,
+		Subscribers: make(map[string]bool),
+		SubLock:     sync.RWMutex{},
+		TempFiles:   tempFiles,
+	}
 
-	return &Connection{
-		DB:       db,
-		LastUsed: time.Now(),
-		Status:   StatusConnected,
-		Config:   config,
-	}, nil
+	return conn, nil
 }
 
 func (d *PostgresDriver) Disconnect(conn *Connection) error {
+	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get SQL DB: %v", err)
 	}
-	return sqlDB.Close()
+
+	// Close the connection
+	if err := sqlDB.Close(); err != nil {
+		return fmt.Errorf("failed to close connection: %v", err)
+	}
+
+	// Clean up temporary certificate files
+	for _, file := range conn.TempFiles {
+		os.Remove(file)
+	}
+
+	return nil
 }
 
 func (d *PostgresDriver) Ping(conn *Connection) error {

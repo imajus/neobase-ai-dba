@@ -295,7 +295,7 @@ export default function ChatWindow({
     } catch (error) {
       console.error('Failed to reconnect to database:', error);
       onConnectionStatusChange?.(chat.id, false, 'chat-window-reconnect');
-      toast.error('Failed to reconnect to database', {
+      toast.error('Failed to reconnect to database:'+error, {
         style: {
           background: '#ff4444',
           color: '#fff',
@@ -357,7 +357,7 @@ export default function ChatWindow({
 
   const connectToDatabase = async (chatId: string, streamId: string) => {
     try {
-      await axios.post(
+      const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/chats/${chatId}/connect`,
         { stream_id: streamId },
         {
@@ -367,9 +367,10 @@ export default function ChatWindow({
           }
         }
       );
-    } catch (error) {
-      console.error('Failed to connect to database:', error);
-      throw error;
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to connect to database:', error.response.data);
+      throw error.response.data.error;
     }
   };
 
@@ -582,7 +583,7 @@ export default function ChatWindow({
       }
     } catch (error) {
       console.error('Failed to edit query:', error);
-      toast.error('Failed to update query');
+      toast.error('Failed to update query: '+ error);
     } finally {
       setShowEditQueryConfirm({ show: false, messageId: null, queryId: null, query: null });
     }
@@ -718,7 +719,7 @@ export default function ChatWindow({
               message={{
                                     id: "welcome-message",
                                     type: "assistant",
-                                    content: "Welcome to NeoBase! Ask me anything about your database.\nPlease fetch your latest knowledge base by clicking the button below.",
+                                    content: "Welcome to NeoBase! Ask me anything about your database.\nYou can fetch your latest knowledge base by clicking the button below.",
                                     queries: [],
                                     created_at: new Date().toISOString(),
                                     updated_at: new Date().toISOString(),

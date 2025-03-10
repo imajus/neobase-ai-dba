@@ -6,6 +6,10 @@ export interface Connection {
     username: string;
     password?: string;
     database: string;
+    use_ssl?: boolean;
+    ssl_cert_url?: string;
+    ssl_key_url?: string;
+    ssl_root_cert_url?: string;
 }
 
 export interface Chat {

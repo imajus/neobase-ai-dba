@@ -23,6 +23,9 @@ interface FormErrors {
   port?: string;
   database?: string;
   username?: string;
+  ssl_cert_url?: string;
+  ssl_key_url?: string;
+  ssl_root_cert_url?: string;
 }
 
 export default function ConnectionModal({ 
@@ -40,18 +43,24 @@ export default function ConnectionModal({
     port: initialData?.connection.port || '',
     username: initialData?.connection.username || '',
     password: '',  // Password is never sent back from server
-    database: initialData?.connection.database || ''
+    database: initialData?.connection.database || '',
+    use_ssl: initialData?.connection.use_ssl || false,
+    ssl_cert_url: initialData?.connection.ssl_cert_url || '',
+    ssl_key_url: initialData?.connection.ssl_key_url || '',
+    ssl_root_cert_url: initialData?.connection.ssl_root_cert_url || ''
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
-  const [autoExecuteQuery, setAutoExecuteQuery] = useState<boolean>(initialData?.auto_execute_query || true);
+  const [autoExecuteQuery, setAutoExecuteQuery] = useState<boolean>(
+    initialData?.auto_execute_query !== undefined ? initialData.auto_execute_query : true
+  );
 
   // Update autoExecuteQuery when initialData changes
   useEffect(() => {
-    if (initialData) {
-      setAutoExecuteQuery(initialData.auto_execute_query || true);
+    if (initialData && initialData.auto_execute_query !== undefined) {
+      setAutoExecuteQuery(initialData.auto_execute_query);
     }
   }, [initialData]);
 
@@ -87,8 +96,42 @@ export default function ConnectionModal({
           return 'Username is required';
         }
         break;
+      case 'ssl_cert_url':
+        if (value.use_ssl && !value.ssl_cert_url?.trim()) {
+          return 'SSL Certificate URL is required when SSL is enabled';
+        }
+        if (value.ssl_cert_url && !isValidUrl(value.ssl_cert_url)) {
+          return 'Invalid URL format';
+        }
+        break;
+      case 'ssl_key_url':
+        if (value.use_ssl && !value.ssl_key_url?.trim()) {
+          return 'SSL Key URL is required when SSL is enabled';
+        }
+        if (value.ssl_key_url && !isValidUrl(value.ssl_key_url)) {
+          return 'Invalid URL format';
+        }
+        break;
+      case 'ssl_root_cert_url':
+        if (value.use_ssl && !value.ssl_root_cert_url?.trim()) {
+          return 'SSL Root Certificate URL is required when SSL is enabled';
+        }
+        if (value.ssl_root_cert_url && !isValidUrl(value.ssl_root_cert_url)) {
+          return 'Invalid URL format';
+        }
+        break;
       default:
         return '';
+    }
+  };
+
+  // Helper function to validate URLs
+  const isValidUrl = (url: string): boolean => {
+    try {
+      new URL(url);
+      return true;
+    } catch (e) {
+      return false;
     }
   };
 
@@ -101,6 +144,7 @@ export default function ConnectionModal({
     const newErrors: FormErrors = {};
     let hasErrors = false;
 
+    // Always validate these fields
     ['host', 'port', 'database', 'username'].forEach(field => {
       const error = validateField(field, formData);
       if (error) {
@@ -109,12 +153,28 @@ export default function ConnectionModal({
       }
     });
 
+    // Validate SSL fields if SSL is enabled
+    if (formData.use_ssl) {
+      ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
+        const error = validateField(field, formData);
+        if (error) {
+          newErrors[field as keyof FormErrors] = error;
+          hasErrors = true;
+        }
+      });
+    }
+
     setErrors(newErrors);
     setTouched({
       host: true,
       port: true,
       database: true,
       username: true,
+      ...(formData.use_ssl ? {
+        ssl_cert_url: true,
+        ssl_key_url: true,
+        ssl_root_cert_url: true
+      } : {})
     });
 
     if (hasErrors) {
@@ -242,19 +302,49 @@ export default function ConnectionModal({
         case 'DATABASE_PASSWORD':
           result.password = value;
           break;
+        case 'USE_SSL':
+          result.use_ssl = value.toLowerCase() === 'true';
+          break;
+        case 'SSL_CERT_URL':
+          result.ssl_cert_url = value;
+          break;
+        case 'SSL_KEY_URL':
+          result.ssl_key_url = value;
+          break;
+        case 'SSL_ROOT_CERT_URL':
+          result.ssl_root_cert_url = value;
+          break;
       }
     });
     return result;
   };
 
-  // Add this helper function to format connection details
   const formatConnectionString = (connection: Connection): string => {
-    return `DATABASE_TYPE=${connection.type}
+    let result = `DATABASE_TYPE=${connection.type}
 DATABASE_HOST=${connection.host}
 DATABASE_PORT=${connection.port}
 DATABASE_NAME=${connection.database}
 DATABASE_USERNAME=${connection.username}
 DATABASE_PASSWORD=`; // Mask password
+
+    // Add SSL configuration if enabled
+    if (connection.use_ssl) {
+      result += `\nUSE_SSL=true`;
+      
+      if (connection.ssl_cert_url) {
+        result += `\nSSL_CERT_URL=${connection.ssl_cert_url}`;
+      }
+      
+      if (connection.ssl_key_url) {
+        result += `\nSSL_KEY_URL=${connection.ssl_key_url}`;
+      }
+      
+      if (connection.ssl_root_cert_url) {
+        result += `\nSSL_ROOT_CERT_URL=${connection.ssl_root_cert_url}`;
+      }
+    }
+    
+    return result;
   };
 
   // Add a ref for the textarea
@@ -307,7 +397,11 @@ DATABASE_HOST=your-host.example.com
 DATABASE_PORT=5432
 DATABASE_NAME=your_database
 DATABASE_USERNAME=your_username
-DATABASE_PASSWORD=your_password`}
+DATABASE_PASSWORD=your_password
+USE_SSL=false
+SSL_CERT_URL=https://example.com/cert.pem
+SSL_KEY_URL=https://example.com/key.pem
+SSL_ROOT_CERT_URL=https://example.com/ca.pem`}
                 rows={6}
                 onChange={(e) => {
                   const parsed = parseConnectionString(e.target.value);
@@ -450,13 +544,13 @@ DATABASE_PASSWORD=your_password`}
               )}
             </div>
 
-            <div>
+            <div className="mb-4">
               <label className="block font-bold mb-2 text-lg">Password</label>
               <p className="text-gray-600 text-sm mb-2">Password for the database user</p>
               <input
                 type="password"
                 name="password"
-                value={formData.password}
+                value={formData.password || ''}
                 onChange={handleChange}
                 className="neo-input w-full"
                 placeholder="Enter your database password"
@@ -464,7 +558,118 @@ DATABASE_PASSWORD=your_password`}
               <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password</p>
             </div>
 
-            {/* Add Auto Execute Query toggle */}
+            {/* SSL Toggle */}
+            <div className="mb-4">
+              <label className="block font-bold mb-2 text-lg">SSL/TLS Security</label>
+              <p className="text-gray-600 text-sm mb-2">Enable secure connection to your database</p>
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="use_ssl"
+                  name="use_ssl"
+                  checked={formData.use_ssl || false}
+                  onChange={(e) => {
+                    const useSSL = e.target.checked;
+                    setFormData((prev) => ({
+                      ...prev,
+                      use_ssl: useSSL,
+                    }));
+                    
+                    // If enabling SSL, validate the SSL fields
+                    if (useSSL) {
+                      const newErrors = { ...errors };
+                      const newTouched = { ...touched };
+                      
+                      ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
+                        newTouched[field] = true;
+                        const error = validateField(field, {
+                          ...formData,
+                          use_ssl: true
+                        });
+                        if (error) {
+                          newErrors[field as keyof FormErrors] = error;
+                        } else {
+                          delete newErrors[field as keyof FormErrors];
+                        }
+                      });
+                      
+                      setErrors(newErrors);
+                      setTouched(newTouched);
+                    } else {
+                      // If disabling SSL, clear SSL field errors
+                      const newErrors = { ...errors };
+                      ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
+                        delete newErrors[field as keyof FormErrors];
+                      });
+                      setErrors(newErrors);
+                    }
+                  }}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="use_ssl" className="ml-2 block text-sm font-medium text-gray-700">
+                  Use SSL/TLS encryption
+                </label>
+              </div>
+            </div>
+
+            {/* SSL Certificate Fields - Only show when SSL is enabled */}
+            {formData.use_ssl && (
+              <div className="mb-4 p-4 border border-gray-200 rounded-md bg-gray-50">
+                <h4 className="font-bold mb-3 text-md">SSL/TLS Certificate Configuration</h4>
+                
+                <div className="mb-4">
+                  <label className="block font-medium mb-1 text-sm">SSL Certificate URL</label>
+                  <p className="text-gray-600 text-xs mb-1">URL to your client certificate file (.pem or .crt)</p>
+                  <input
+                    type="text"
+                    name="ssl_cert_url"
+                    value={formData.ssl_cert_url || ''}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    className={`neo-input w-full ${errors.ssl_cert_url && touched.ssl_cert_url ? 'border-red-500' : ''}`}
+                    placeholder="https://example.com/cert.pem"
+                  />
+                  {errors.ssl_cert_url && touched.ssl_cert_url && (
+                    <p className="text-red-500 text-xs mt-1">{errors.ssl_cert_url}</p>
+                  )}
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block font-medium mb-1 text-sm">SSL Key URL</label>
+                  <p className="text-gray-600 text-xs mb-1">URL to your private key file (.pem or .key)</p>
+                  <input
+                    type="text"
+                    name="ssl_key_url"
+                    value={formData.ssl_key_url || ''}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    className={`neo-input w-full ${errors.ssl_key_url && touched.ssl_key_url ? 'border-red-500' : ''}`}
+                    placeholder="https://example.com/key.pem"
+                  />
+                  {errors.ssl_key_url && touched.ssl_key_url && (
+                    <p className="text-red-500 text-xs mt-1">{errors.ssl_key_url}</p>
+                  )}
+                </div>
+                
+                <div className="mb-2">
+                  <label className="block font-medium mb-1 text-sm">SSL Root Certificate URL</label>
+                  <p className="text-gray-600 text-xs mb-1">URL to the CA certificate file (.pem or .crt)</p>
+                  <input
+                    type="text"
+                    name="ssl_root_cert_url"
+                    value={formData.ssl_root_cert_url || ''}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    className={`neo-input w-full ${errors.ssl_root_cert_url && touched.ssl_root_cert_url ? 'border-red-500' : ''}`}
+                    placeholder="https://example.com/ca.pem"
+                  />
+                  {errors.ssl_root_cert_url && touched.ssl_root_cert_url && (
+                    <p className="text-red-500 text-xs mt-1">{errors.ssl_root_cert_url}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="my-6 pt-4 border-t border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
@@ -476,8 +681,8 @@ DATABASE_PASSWORD=your_password`}
                     type="checkbox" 
                     className="sr-only peer" 
                     checked={autoExecuteQuery}
-                    onChange={() => {
-                      const newValue = !autoExecuteQuery;
+                    onChange={(e) => {
+                      const newValue = e.target.checked;
                       setAutoExecuteQuery(newValue);
                       if (initialData && onUpdateAutoExecuteQuery) {
                         onUpdateAutoExecuteQuery(initialData.id, newValue);
@@ -538,7 +743,10 @@ DATABASE_PASSWORD=your_password`}
       {showSelectTablesModal && initialData && (
         <SelectTablesModal
           chat={initialData}
-          onClose={() => setShowSelectTablesModal(false)}
+          onClose={() => {
+            setShowSelectTablesModal(false);
+            onClose();
+          }}
           onSave={handleUpdateSelectedCollections}
         />
       )}
