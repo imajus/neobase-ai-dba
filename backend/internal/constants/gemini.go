@@ -39,7 +39,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, give String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -65,9 +65,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
     }
   ]
 }
@@ -104,7 +102,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, give String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -131,10 +129,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ],
-      "exampleResultString": "String representation of the example result"
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
     }
   ]
 }
@@ -171,7 +166,7 @@ const GeminiClickhousePrompt = `You are NeoBase AI, a senior ClickHouse database
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, give String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -201,10 +196,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ],
-      "exampleResultString": "String representation of the example result"
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text.[{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
     }
   ]
 }
@@ -241,7 +233,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, give String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -268,10 +260,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ],
-      "exampleResultString": "String representation of the example result"
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
     }
   ]
 }

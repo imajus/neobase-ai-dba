@@ -1017,21 +1017,15 @@ export default function MessageTile({
                                                     <Braces className="w-4 h-4" />
                                                 </button>
                                                 <div className="w-px h-4 bg-gray-700 mx-2" />
-                                                <button
-                                                    onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2))}
-                                                    className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
-                                                    title="Copy result"
-                                                >
-                                                    <Copy className="w-4 h-4" />
-                                                </button>
                                                 {shouldShowRollback && (
                                                     !queryState.isExecuting ? (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                                setRollbackState({ show: true, queryId });
-                                                                setTimeout(() => {
+                                                        <>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    setRollbackState({ show: true, queryId });
+                                                                    setTimeout(() => {
                                                                     window.scrollTo(window.scrollX, window.scrollY);
                                                                 }, 0);
                                                             }}
@@ -1040,10 +1034,13 @@ export default function MessageTile({
                                                         >
                                                             <History className="w-4 h-4" />
                                                         </button>
+                                                        <div className="w-px h-4 bg-gray-700 mx-2" />
+                                                        </>
                                                     ) : (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
+                                                        <>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
                                                                 e.stopPropagation();
 
                                                                 // Abort the API call if it's in progress
@@ -1077,8 +1074,17 @@ export default function MessageTile({
                                                         >
                                                             <XCircle className="w-4 h-4" />
                                                         </button>
+                                                        <div className="w-px h-4 bg-gray-700 mx-2" />
+                                                        </>
                                                     )
                                                 )}
+                                                <button
+                                                    onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2))}
+                                                    className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
+                                                    title="Copy result"
+                                                >
+                                                    <Copy className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         </div>}
                                     </div>

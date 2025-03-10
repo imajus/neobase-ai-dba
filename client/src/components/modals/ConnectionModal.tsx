@@ -53,12 +53,14 @@ export default function ConnectionModal({
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
-  const [autoExecuteQuery, setAutoExecuteQuery] = useState<boolean>(initialData?.auto_execute_query || true);
+  const [autoExecuteQuery, setAutoExecuteQuery] = useState<boolean>(
+    initialData?.auto_execute_query !== undefined ? initialData.auto_execute_query : true
+  );
 
   // Update autoExecuteQuery when initialData changes
   useEffect(() => {
-    if (initialData) {
-      setAutoExecuteQuery(initialData.auto_execute_query || true);
+    if (initialData && initialData.auto_execute_query !== undefined) {
+      setAutoExecuteQuery(initialData.auto_execute_query);
     }
   }, [initialData]);
 

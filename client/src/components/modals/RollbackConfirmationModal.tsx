@@ -27,7 +27,7 @@ export default function RollbackConfirmationModal({
 
                 <div className="p-6">
                     <p className="text-gray-600 mb-6">
-                        Are you sure you want to rollback the changes made by this query? This will revert to the example state.
+                        Are you sure you want to rollback the changes made by this query? This will run a reverse query to revert the changes.
                     </p>
 
                     <div className="flex gap-4">
