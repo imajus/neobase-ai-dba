@@ -17,7 +17,7 @@ const SupportedTechnologiesSection: React.FC = () => {
     { name: 'Neo4j', isSupported: false, priority: 3 },
     { name: 'Redis', isSupported: false, priority: 4 },
     { name: 'Clickhouse', isSupported: true, priority: 5 },
-    { name: 'Cassandra', isSupported: true, priority: 6 }
+    { name: 'Cassandra', isSupported: false, priority: 6 }
   ];
 
   const llmClients: Technology[] = [
