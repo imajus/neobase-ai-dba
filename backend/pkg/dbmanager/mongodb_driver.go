@@ -3,7 +3,6 @@ package dbmanager
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"crypto/x509"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -165,7 +166,10 @@ func (d *MongoDBDriver) getCollectionDetails(ctx context.Context, wrapper *Mongo
 	}
 
 	// Sample documents to infer schema
-	opts := options.Find().SetLimit(100) // Sample up to 100 documents
+	sampleLimit := int64(50) // Sample up to 50 documents
+	log.Printf("MongoDBDriver -> getCollectionDetails -> Will sample up to %d documents from collection %s for schema inference", sampleLimit, collName)
+
+	opts := options.Find().SetLimit(sampleLimit)
 	cursor, err := wrapper.Client.Database(wrapper.Database).Collection(collName).Find(ctx, bson.M{}, opts)
 	if err != nil {
 		return collection, fmt.Errorf("failed to sample documents: %v", err)
@@ -177,6 +181,8 @@ func (d *MongoDBDriver) getCollectionDetails(ctx context.Context, wrapper *Mongo
 	if err := cursor.All(ctx, &documents); err != nil {
 		return collection, fmt.Errorf("failed to decode documents: %v", err)
 	}
+
+	log.Printf("MongoDBDriver -> getCollectionDetails -> Retrieved exactly %d documents from collection %s for schema inference", len(documents), collName)
 
 	// Store a sample document
 	if len(documents) > 0 {
@@ -444,8 +450,12 @@ func (d *MongoDBDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, 
 	// Ensure limit is reasonable
 	if limit <= 0 {
 		limit = 3 // Default to 3 records
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> Using default limit of 3 records for collection %s", collection)
 	} else if limit > 10 {
 		limit = 10 // Cap at 10 records to avoid large data transfers
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> Capping limit to maximum of 10 records for collection %s", collection)
+	} else {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> Using requested limit of %d records for collection %s", limit, collection)
 	}
 
 	// Get the MongoDB wrapper
@@ -488,6 +498,9 @@ func (d *MongoDBDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, 
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating documents: %v", err)
 	}
+
+	// Log the exact number of records fetched
+	log.Printf("MongoDBDriver -> FetchExampleRecords -> Retrieved exactly %d example records from collection %s", len(results), collection)
 
 	// If no records found, return empty slice
 	if len(results) == 0 {
@@ -539,26 +552,57 @@ func NewMongoDBDriver() DatabaseDriver {
 
 // Connect establishes a connection to a MongoDB database
 func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	log.Printf("MongoDBDriver -> Connect -> Connecting to MongoDB at %s:%s", config.Host, config.Port)
+	var tempFiles []string
+	log.Printf("MongoDBDriver -> Connect -> Connecting to MongoDB at %s:%v", config.Host, config.Port)
 
 	var uri string
-	var tempFiles []string
+	port := "27017" // Default port for MongoDB
 
 	// Check if we're using SRV records (mongodb+srv://)
-	isSRV := strings.Contains(config.Host, ".mongodb.net")
+	// Only check for .mongodb.net in non-encrypted hosts
+	isSRV := false
+	if !strings.Contains(config.Host, "+") && !strings.Contains(config.Host, "/") && !strings.Contains(config.Host, "=") {
+		isSRV = strings.Contains(config.Host, ".mongodb.net")
+	}
+
 	protocol := "mongodb"
 	if isSRV {
 		protocol = "mongodb+srv"
-		log.Printf("MongoDBDriver -> Connect -> MongoDB Atlas connection detected, using %s protocol", protocol)
 	}
 
-	// Base connection parameters
+	// Validate port value if not using SRV
+	if !isSRV && config.Port != nil {
+		// Log the port value for debugging
+		log.Printf("MongoDBDriver -> Connect -> Port value before validation: %v", *config.Port)
+
+		// Check if port is empty
+		if *config.Port == "" {
+			log.Printf("MongoDBDriver -> Connect -> Port is empty, using default port 27017")
+		} else {
+			port = *config.Port
+
+			// Skip port validation for encrypted ports (containing base64 characters)
+			if strings.Contains(port, "+") || strings.Contains(port, "/") || strings.Contains(port, "=") {
+				log.Printf("MongoDBDriver -> Connect -> Port appears to be encrypted, skipping validation")
+			} else {
+				// Verify port is numeric for non-encrypted ports
+				if _, err := strconv.Atoi(port); err != nil {
+					log.Printf("MongoDBDriver -> Connect -> Invalid port value: %v, error: %v", port, err)
+					return nil, fmt.Errorf("invalid port value: %v, must be a number", port)
+				}
+			}
+		}
+	}
+
+	// Base connection parameters with authentication
 	if config.Username != nil && *config.Username != "" {
 		// URL encode username and password to handle special characters
 		encodedUsername := url.QueryEscape(*config.Username)
-		encodedPassword := url.QueryEscape(*config.Password)
+		var encodedPassword string
+		if config.Password != nil {
+			encodedPassword = url.QueryEscape(*config.Password)
+		}
 
-		// With authentication
 		if isSRV {
 			// For SRV records, don't include port
 			uri = fmt.Sprintf("%s://%s:%s@%s/%s",
@@ -566,7 +610,7 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		} else {
 			// Include port for standard connections
 			uri = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-				protocol, encodedUsername, encodedPassword, config.Host, *config.Port, config.Database)
+				protocol, encodedUsername, encodedPassword, config.Host, port, config.Database)
 		}
 	} else {
 		// Without authentication
@@ -575,17 +619,36 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 			uri = fmt.Sprintf("%s://%s/%s", protocol, config.Host, config.Database)
 		} else {
 			// Include port for standard connections
-			uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, *config.Port, config.Database)
+			uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, port, config.Database)
 		}
 	}
+
+	// Log the final URI (with sensitive parts masked)
+	maskedUri := uri
+	if config.Password != nil && *config.Password != "" {
+		maskedUri = strings.Replace(maskedUri, *config.Password, "********", -1)
+	}
+	log.Printf("MongoDBDriver -> Connect -> Connection URI: %s", maskedUri)
 
 	// Add connection options
 	if isSRV {
 		uri += "?retryWrites=true&w=majority"
+	} else {
+		// For non-SRV connections, add a shorter server selection timeout
+		uri += "?serverSelectionTimeoutMS=5000"
+	}
+
+	// Configure client options
+	clientOptions := options.Client().ApplyURI(uri)
+
+	// Set a shorter connection timeout for encrypted connections
+	if strings.Contains(config.Host, "+") || strings.Contains(config.Host, "/") || strings.Contains(config.Host, "=") {
+		clientOptions.SetConnectTimeout(5 * time.Second)
+		clientOptions.SetServerSelectionTimeout(5 * time.Second)
+		log.Printf("MongoDBDriver -> Connect -> Using shorter timeouts for encrypted connection")
 	}
 
 	// Configure SSL/TLS
-	clientOptions := options.Client().ApplyURI(uri)
 	if config.UseSSL {
 		// Fetch certificates from URLs
 		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
@@ -639,7 +702,7 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 
 		clientOptions.SetTLSConfig(tlsConfig)
 	} else {
-		// Disable SSL
+		// Disable SSL verification for encrypted connections
 		clientOptions.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
 	}
 
@@ -691,7 +754,7 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		// Other fields will be set by the manager
 	}
 
-	log.Printf("MongoDBDriver -> Connect -> Successfully connected to MongoDB at %s:%s", config.Host, config.Port)
+	log.Printf("MongoDBDriver -> Connect -> Successfully connected to MongoDB at %s:%v", config.Host, config.Port)
 	return conn, nil
 }
 
@@ -809,8 +872,29 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					}
 				}
 
+				// Check if collection already exists
+				collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+							Code:    "EXECUTION_ERROR",
+						},
+					}
+				}
+
+				// If collection already exists, return an error
+				if len(collections) > 0 {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+							Code:    "COLLECTION_EXISTS",
+						},
+					}
+				}
+
 				// Execute the createCollection operation
-				err := wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
+				err = wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
 				if err != nil {
 					return &QueryExecutionResult{
 						Error: &dtos.QueryError{
@@ -881,6 +965,8 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	if closeParenIndex < len(operationWithParams)-1 {
 		// There might be modifiers after the closing parenthesis
 		modifiersStr := operationWithParams[closeParenIndex+1:]
+
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Modifiers string: %s", modifiersStr)
 
 		// Extract limit modifier
 		limitRegex := regexp.MustCompile(`\.limit\((\d+)\)`)
@@ -963,39 +1049,85 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 		// Create find options from modifiers
 		findOptions := options.Find()
-		if limit, ok := modifiers["limit"].(int); ok {
-			findOptions.SetLimit(int64(limit))
-		}
+
+		// Log all modifiers for debugging
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Modifiers: %+v", modifiers)
+
+		// Apply skip before limit to ensure correct pagination
 		if skip, ok := modifiers["skip"].(int); ok {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting skip: %d", skip)
 			findOptions.SetSkip(int64(skip))
 		}
+
+		if limit, ok := modifiers["limit"].(int); ok {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting limit: %d", limit)
+			findOptions.SetLimit(int64(limit))
+		}
+
 		if sortStr, ok := modifiers["sort"].(string); ok {
 			// Parse sort string into bson.D
 			// Example: {field: 1} or {field: -1}
 			var sort bson.D
 			if err := json.Unmarshal([]byte(sortStr), &sort); err != nil {
 				// Try to handle MongoDB syntax
-				jsonSortStr, err := processMongoDBQueryParams(sortStr)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
-				}
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Error parsing sort as JSON: %v, trying MongoDB syntax conversion", err)
 
-				if err := json.Unmarshal([]byte(jsonSortStr), &sort); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
+				// Add quotes to field names if missing
+				re := regexp.MustCompile(`\{([^:{}]+):\s*(-?\d+)\}`)
+				convertedSortStr := re.ReplaceAllString(sortStr, `{"$1": $2}`)
+
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Converted sort string: %s", convertedSortStr)
+
+				// Try parsing again
+				if err := json.Unmarshal([]byte(convertedSortStr), &sort); err != nil {
+					log.Printf("MongoDBDriver -> ExecuteQuery -> Error parsing converted sort: %v", err)
+
+					// As a last resort, try to manually create the sort document
+					fieldParts := strings.Split(strings.Trim(sortStr, "{}"), ":")
+					if len(fieldParts) == 2 {
+						field := strings.TrimSpace(fieldParts[0])
+						// Remove quotes if present
+						field = strings.Trim(field, "\"' ")
+
+						orderStr := strings.TrimSpace(fieldParts[1])
+						var order int
+						if orderStr == "-1" {
+							order = -1
+						} else {
+							order = 1
+						}
+
+						sort = bson.D{{Key: field, Value: order}}
+						log.Printf("MongoDBDriver -> ExecuteQuery -> Manually created sort document: %v", sort)
+					} else {
+						jsonSortStr, err := processMongoDBQueryParams(sortStr)
+						if err != nil {
+							return &QueryExecutionResult{
+								Error: &dtos.QueryError{
+									Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
+									Code:    "INVALID_PARAMETERS",
+								},
+							}
+						}
+
+						if err := json.Unmarshal([]byte(jsonSortStr), &sort); err != nil {
+							return &QueryExecutionResult{
+								Error: &dtos.QueryError{
+									Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
+									Code:    "INVALID_PARAMETERS",
+								},
+							}
+						}
 					}
 				}
 			}
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final sort document: %v", sort)
 			findOptions.SetSort(sort)
 		}
+
+		// Log the final find options for debugging
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Find options: Skip=%v, Limit=%v",
+			findOptions.Skip, findOptions.Limit)
 
 		// Execute the find operation with options
 		cursor, err := collection.Find(ctx, filter, findOptions)
@@ -1019,6 +1151,9 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				},
 			}
 		}
+
+		// Log the exact number of documents retrieved
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Retrieved exactly %d documents from collection %s", len(results), collectionName)
 
 		result = results
 
@@ -1100,6 +1235,16 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Execute the insertOne operation
 		insertResult, err := collection.InsertOne(ctx, document)
 		if err != nil {
+			// Check for duplicate key error
+			if mongo.IsDuplicateKeyError(err) {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: "Document with the same unique key already exists",
+						Code:    "DUPLICATE_KEY",
+					},
+				}
+			}
+
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
 					Message: fmt.Sprintf("Failed to execute insertOne operation: %v", err),
@@ -1256,6 +1401,11 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					Code:    "EXECUTION_ERROR",
 				},
 			}
+		}
+
+		// Check if any document was matched
+		if updateResult.MatchedCount == 0 {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> No document matched the filter criteria for updateOne")
 		}
 
 		result = map[string]interface{}{
@@ -1425,6 +1575,11 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			}
 		}
 
+		// Check if any document was deleted
+		if deleteResult.DeletedCount == 0 {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> No document matched the filter criteria for deleteOne")
+		}
+
 		result = map[string]interface{}{
 			"deletedCount": deleteResult.DeletedCount,
 		}
@@ -1437,6 +1592,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
+
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
 			if err != nil {
 				return &QueryExecutionResult{
@@ -1602,6 +1758,16 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// We're simplifying this implementation to avoid complex option handling
 		err := collection.Database().CreateCollection(ctx, collectionName)
 		if err != nil {
+			// Check if collection already exists
+			if strings.Contains(err.Error(), "already exists") {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+						Code:    "COLLECTION_EXISTS",
+					},
+				}
+			}
+
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
 					Message: fmt.Sprintf("Failed to create collection: %v", err),
@@ -1618,6 +1784,44 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	case "dropCollection":
 		// Execute the dropCollection operation
 		err := collection.Drop(ctx)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to drop collection: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"ok":      1,
+			"message": fmt.Sprintf("Collection '%s' dropped successfully", collectionName),
+		}
+
+	case "drop":
+		// Check if collection exists before dropping
+		collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		// If collection doesn't exist, return an error
+		if len(collections) == 0 {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Collection '%s' does not exist", collectionName),
+					Code:    "COLLECTION_NOT_FOUND",
+				},
+			}
+		}
+
+		// Execute the drop operation
+		err = collection.Drop(ctx)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -1845,7 +2049,29 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					}
 				}
 
-				err := wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
+				// Check if collection already exists
+				collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+							Code:    "EXECUTION_ERROR",
+						},
+					}
+				}
+
+				// If collection already exists, return an error
+				if len(collections) > 0 {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+							Code:    "COLLECTION_EXISTS",
+						},
+					}
+				}
+
+				// Execute the createCollection operation
+				err = wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
 				if err != nil {
 					return &QueryExecutionResult{
 						Error: &dtos.QueryError{
@@ -1917,6 +2143,8 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// There might be modifiers after the closing parenthesis
 		modifiersStr := operationWithParams[closeParenIndex+1:]
 
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Modifiers string: %s", modifiersStr)
+
 		// Extract limit modifier
 		limitRegex := regexp.MustCompile(`\.limit\((\d+)\)`)
 		if limitMatches := limitRegex.FindStringSubmatch(modifiersStr); len(limitMatches) > 1 {
@@ -1963,83 +2191,133 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	switch operation {
 	case "find":
 		// Parse the parameters as a BSON filter
-		var filter bson.M
-		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
 
-			// Process the query parameters to handle MongoDB syntax
-			jsonStr, err := processMongoDBQueryParams(paramsStr)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
+		// Process the query parameters
+		processedParams, err := processMongoDBQueryParams(paramsStr)
+		if err != nil {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing query parameters: %v", err)
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Code:    "INVALID_QUERY",
+					Message: "invalid query",
+					Details: err.Error(),
+				},
 			}
-
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
-
-			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			// Handle ObjectId in the filter
-			if err := processObjectIds(filter); err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			// Log the final filter for debugging
-			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
-		// Create find options from modifiers
+		// Parse the filter
+		var filter map[string]interface{}
+		if err := bson.UnmarshalExtJSON([]byte(processedParams), true, &filter); err != nil {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing filter: %v", err)
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Code:    "INVALID_FILTER",
+					Message: "invalid filter",
+					Details: err.Error(),
+				},
+			}
+		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %+v", filter)
+
+		// Process ObjectIds in the filter
+		if err := processObjectIds(filter); err != nil {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing ObjectIds: %v", err)
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Code:    "INVALID_OBJECTID",
+					Message: "invalid ObjectId",
+					Details: err.Error(),
+				},
+			}
+		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %+v", filter)
+
+		// Extract modifiers from the query string
+		modifiers := extractModifiers(query)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Modifiers: %+v", modifiers)
+
+		// Create find options
 		findOptions := options.Find()
-		if limit, ok := modifiers["limit"].(int); ok {
-			findOptions.SetLimit(int64(limit))
-		}
-		if skip, ok := modifiers["skip"].(int); ok {
-			findOptions.SetSkip(int64(skip))
-		}
-		if sortStr, ok := modifiers["sort"].(string); ok {
-			// Parse sort string into bson.D
-			// Example: {field: 1} or {field: -1}
-			var sort bson.D
-			if err := json.Unmarshal([]byte(sortStr), &sort); err != nil {
-				// Try to handle MongoDB syntax
-				jsonSortStr, err := processMongoDBQueryParams(sortStr)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
-				}
 
-				if err := json.Unmarshal([]byte(jsonSortStr), &sort); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
+		// Set the limit option if provided
+		if modifiers.Limit > 0 {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting limit: %d", modifiers.Limit)
+			findOptions.SetLimit(modifiers.Limit)
+		}
+
+		// Set the skip option if provided
+		if modifiers.Skip > 0 {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting skip: %d", modifiers.Skip)
+			findOptions.SetSkip(modifiers.Skip)
+		}
+
+		// Set the sort option if provided
+		if modifiers.Sort != "" {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting sort: %s", modifiers.Sort)
+
+			// First try to parse as JSON
+			var sortDoc bson.D
+			err = bson.UnmarshalExtJSON([]byte(modifiers.Sort), true, &sortDoc)
+			if err != nil {
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing sort as JSON: %v, trying MongoDB syntax conversion", err)
+
+				// Add quotes to field names if missing
+				re := regexp.MustCompile(`\{([^:{}]+):\s*(-?\d+)\}`)
+				convertedSortStr := re.ReplaceAllString(modifiers.Sort, `{"$1": $2}`)
+
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted sort string: %s", convertedSortStr)
+
+				// Try parsing again
+				if err := bson.UnmarshalExtJSON([]byte(convertedSortStr), true, &sortDoc); err != nil {
+					log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing converted sort: %v", err)
+
+					// As a last resort, try to manually create the sort document
+					fieldParts := strings.Split(strings.Trim(modifiers.Sort, "{}"), ":")
+					if len(fieldParts) == 2 {
+						field := strings.TrimSpace(fieldParts[0])
+						// Remove quotes if present
+						field = strings.Trim(field, "\"' ")
+
+						orderStr := strings.TrimSpace(fieldParts[1])
+						var order int
+						if orderStr == "-1" {
+							order = -1
+						} else {
+							order = 1
+						}
+
+						sortDoc = bson.D{{Key: field, Value: order}}
+						log.Printf("MongoDBTransaction -> ExecuteQuery -> Manually created sort document: %v", sortDoc)
+					} else {
+						jsonSortStr, err := processMongoDBQueryParams(modifiers.Sort)
+						if err != nil {
+							return &QueryExecutionResult{
+								Error: &dtos.QueryError{
+									Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
+									Code:    "INVALID_PARAMETERS",
+								},
+							}
+						}
+
+						if err := bson.UnmarshalExtJSON([]byte(jsonSortStr), true, &sortDoc); err != nil {
+							return &QueryExecutionResult{
+								Error: &dtos.QueryError{
+									Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
+									Code:    "INVALID_PARAMETERS",
+								},
+							}
+						}
 					}
 				}
 			}
-			findOptions.SetSort(sort)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final sort document: %v", sortDoc)
+			findOptions.SetSort(sortDoc)
 		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Find options: Skip=%v, Limit=%v", findOptions.Skip, findOptions.Limit)
 
 		// Execute the find operation with options
 		cursor, err := collection.Find(ctx, filter, findOptions)
@@ -2063,6 +2341,9 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				},
 			}
 		}
+
+		// Log the exact number of documents retrieved
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Retrieved exactly %d documents from collection %s", len(results), collectionName)
 
 		result = results
 
@@ -2144,6 +2425,16 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// Execute the insertOne operation
 		insertResult, err := collection.InsertOne(ctx, document)
 		if err != nil {
+			// Check for duplicate key error
+			if mongo.IsDuplicateKeyError(err) {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: "Document with the same unique key already exists",
+						Code:    "DUPLICATE_KEY",
+					},
+				}
+			}
+
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
 					Message: fmt.Sprintf("Failed to execute insertOne operation: %v", err),
@@ -2300,6 +2591,11 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Code:    "EXECUTION_ERROR",
 				},
 			}
+		}
+
+		// Check if any document was matched
+		if updateResult.MatchedCount == 0 {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> No document matched the filter criteria for updateOne")
 		}
 
 		result = map[string]interface{}{
@@ -2467,6 +2763,11 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Code:    "EXECUTION_ERROR",
 				},
 			}
+		}
+
+		// Check if any document was deleted
+		if deleteResult.DeletedCount == 0 {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> No document matched the filter criteria for deleteOne")
 		}
 
 		result = map[string]interface{}{
@@ -2646,6 +2947,16 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// We're simplifying this implementation to avoid complex option handling
 		err := collection.Database().CreateCollection(ctx, collectionName)
 		if err != nil {
+			// Check if collection already exists
+			if strings.Contains(err.Error(), "already exists") {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+						Code:    "COLLECTION_EXISTS",
+					},
+				}
+			}
+
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
 					Message: fmt.Sprintf("Failed to create collection: %v", err),
@@ -2662,6 +2973,44 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	case "dropCollection":
 		// Execute the dropCollection operation
 		err := collection.Drop(ctx)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to drop collection: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"ok":      1,
+			"message": fmt.Sprintf("Collection '%s' dropped successfully", collectionName),
+		}
+
+	case "drop":
+		// Check if collection exists before dropping
+		collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		// If collection doesn't exist, return an error
+		if len(collections) == 0 {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Collection '%s' does not exist", collectionName),
+					Code:    "COLLECTION_NOT_FOUND",
+				},
+			}
+		}
+
+		// Execute the drop operation
+		err = collection.Drop(ctx)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -2721,13 +3070,28 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	// Log the original string for debugging
 	log.Printf("Original MongoDB query params: %s", paramsStr)
 
-	// Check if the parameter string incorrectly includes the closing parenthesis and modifiers
-	// This can happen if the query is like: find({"make": "Toyota"}).limit(50)
-	// and we extract {"make": "Toyota"}).limit(50 as the parameter string
+	// Extract modifiers from the query string
+	var modifiersStr string
 	if idx := strings.Index(paramsStr, "})."); idx != -1 {
-		// Only keep the part before the closing parenthesis
+		// Save the modifiers part for later processing
+		modifiersStr = paramsStr[idx+1:]
+		// Only keep the filter part
 		paramsStr = paramsStr[:idx+1]
-		log.Printf("Fixed parameter string by removing modifiers: %s", paramsStr)
+		log.Printf("Extracted filter part: %s", paramsStr)
+		log.Printf("Extracted modifiers part: %s", modifiersStr)
+	}
+
+	// Check for offset_size in skip() - this is a special case for pagination
+	// offset_size is a placeholder that will be replaced with the actual offset value
+	// by the chat service when executing paginated queries.
+	// For example, db.posts.find({}).skip(offset_size).limit(50) will become
+	// db.posts.find({}).skip(50).limit(50) when requesting the second page with page size 50.
+	// This replacement happens in the chat_service.go GetQueryResults function.
+	if modifiersStr != "" {
+		skipRegex := regexp.MustCompile(`\.skip\(offset_size\)`)
+		if skipRegex.MatchString(modifiersStr) {
+			log.Printf("Found offset_size in skip(), this will be replaced by the actual offset value")
+		}
 	}
 
 	// First, handle MongoDB operators at the beginning of objects
@@ -2758,58 +3122,20 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 
 	// Handle field names that might not be quoted
 	re := regexp.MustCompile(`(\w+):\s*`)
-	jsonStr := re.ReplaceAllString(paramsStr, "\"$1\": ")
+	paramsStr = re.ReplaceAllString(paramsStr, `"$1": `)
 
-	// Restore $oid
-	jsonStr = strings.ReplaceAll(jsonStr, "__MONGODB_OID__", "$oid")
+	// Handle single quotes for string values
+	// Use a standard approach instead of negative lookbehind which isn't supported in Go
+	singleQuoteRegex := regexp.MustCompile(`'([^']*)'`)
+	paramsStr = singleQuoteRegex.ReplaceAllString(paramsStr, `"$1"`)
 
-	// Log the final processed string for debugging
-	log.Printf("Final processed MongoDB query params: %s", jsonStr)
-
-	// Handle MongoDB operators
-	operatorReplacements := map[string]string{
-		// Comparison operators
-		"$eq":  "\"$eq\"",
-		"$gt":  "\"$gt\"",
-		"$gte": "\"$gte\"",
-		"$in":  "\"$in\"",
-		"$lt":  "\"$lt\"",
-		"$lte": "\"$lte\"",
-		"$ne":  "\"$ne\"",
-		"$nin": "\"$nin\"",
-
-		// Logical operators
-		"$and": "\"$and\"",
-		"$not": "\"$not\"",
-		"$nor": "\"$nor\"",
-		"$or":  "\"$or\"",
-
-		// Element operators
-		"$exists": "\"$exists\"",
-		"$type":   "\"$type\"",
-
-		// Array operators
-		"$all":       "\"$all\"",
-		"$elemMatch": "\"$elemMatch\"",
-		"$size":      "\"$size\"",
-
-		// Update operators
-		"$set":      "\"$set\"",
-		"$unset":    "\"$unset\"",
-		"$inc":      "\"$inc\"",
-		"$push":     "\"$push\"",
-		"$pull":     "\"$pull\"",
-		"$addToSet": "\"$addToSet\"",
-	}
-
-	for operator, replacement := range operatorReplacements {
-		jsonStr = strings.ReplaceAll(jsonStr, operator+":", replacement+":")
-	}
+	// Restore $oid from placeholder
+	paramsStr = strings.ReplaceAll(paramsStr, "__MONGODB_OID__", "$oid")
 
 	// Log the final processed string for debugging
-	log.Printf("Final MongoDB query params after all processing: %s", jsonStr)
+	log.Printf("Final processed MongoDB query params: %s", paramsStr)
 
-	return jsonStr, nil
+	return paramsStr, nil
 }
 
 // processObjectIds processes ObjectId syntax in MongoDB queries
@@ -2851,7 +3177,74 @@ func processObjectIds(filter map[string]interface{}) error {
 
 	// Log the output filter for debugging
 	filterJSON, _ = json.Marshal(filter)
-	log.Printf("processObjectIds output: %s", string(filterJSON))
+	// log.Printf("processObjectIds output: %s", string(filterJSON))
 
 	return nil
+}
+
+// Add this new function to extract modifiers from the query string
+// Add this after the processObjectIds function
+func extractModifiers(query string) struct {
+	Skip  int64
+	Limit int64
+	Sort  string
+} {
+	modifiers := struct {
+		Skip  int64
+		Limit int64
+		Sort  string
+	}{}
+
+	// Check if the query string is empty or doesn't contain any modifiers
+	if query == "" || !strings.Contains(query, ".") {
+		return modifiers
+	}
+
+	// Extract skip
+	skipRegex := regexp.MustCompile(`\.skip\((\d+)\)`)
+	skipMatches := skipRegex.FindStringSubmatch(query)
+	if len(skipMatches) > 1 {
+		skip, err := strconv.ParseInt(skipMatches[1], 10, 64)
+		if err == nil {
+			modifiers.Skip = skip
+		}
+	}
+
+	// Extract limit
+	limitRegex := regexp.MustCompile(`\.limit\((\d+)\)`)
+	limitMatches := limitRegex.FindStringSubmatch(query)
+	if len(limitMatches) > 1 {
+		limit, err := strconv.ParseInt(limitMatches[1], 10, 64)
+		if err == nil {
+			modifiers.Limit = limit
+		}
+	}
+
+	// Extract sort - improved to handle complex sort expressions
+	sortRegex := regexp.MustCompile(`\.sort\(([^)]+)\)`)
+	sortMatches := sortRegex.FindStringSubmatch(query)
+	if len(sortMatches) > 1 {
+		// Get the raw sort expression
+		sortExpr := sortMatches[1]
+
+		// Check if it's a valid JSON object already
+		if strings.HasPrefix(sortExpr, "{") && strings.HasSuffix(sortExpr, "}") {
+			modifiers.Sort = sortExpr
+		} else {
+			// Try to convert to a valid JSON object
+			// This handles cases like "field" or field without quotes
+			sortExpr = strings.Trim(sortExpr, "\"' ")
+			if !strings.HasPrefix(sortExpr, "{") {
+				// Simple field name, default to ascending order
+				modifiers.Sort = fmt.Sprintf(`{"%s": 1}`, sortExpr)
+			} else {
+				// It's already an object-like expression
+				modifiers.Sort = sortExpr
+			}
+		}
+
+		log.Printf("extractModifiers -> Extracted sort expression: %s", modifiers.Sort)
+	}
+
+	return modifiers
 }

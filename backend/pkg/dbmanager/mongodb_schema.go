@@ -72,8 +72,8 @@ func (f *MongoDBSchemaFetcher) GetSchema(ctx context.Context, db DBExecutor, sel
 
 	// Process each collection
 	for _, collName := range targetCollections {
-		// Sample documents from collection
-		samples, err := executor.SampleCollection(ctx, collName, 100)
+		// Sample documents from collection, 50 is the default sample size
+		samples, err := executor.SampleCollection(ctx, collName, 50)
 		if err != nil {
 			log.Printf("MongoDBSchemaFetcher -> GetSchema -> Error sampling collection %s: %v", collName, err)
 			continue

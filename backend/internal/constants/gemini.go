@@ -55,7 +55,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. set_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. always generate this query whenever there can be large volume of data or fetching data"
           },
         },
        "tables": "users,orders",
@@ -119,7 +119,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
           },
         },
        "tables": "users,orders",
@@ -186,7 +186,7 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
           },
         },
        "tables": "users,orders",
@@ -250,7 +250,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
           },
         },
        "tables": "users,orders",
@@ -346,7 +346,7 @@ json
       "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
           },
         },
        "tables": "users,orders",

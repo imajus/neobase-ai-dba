@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -972,7 +973,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 		defer close(done)
 		log.Printf("Manager -> ExecuteQuery -> Executing query: %v", query)
 		result = tx.ExecuteQuery(execCtx, conn, query, queryType)
-		log.Printf("Manager -> ExecuteQuery -> Result: %v", result)
+		// log.Printf("Manager -> ExecuteQuery -> Result: %v", result)
 		if result.Error != nil {
 			queryErr = result.Error
 		}
@@ -1035,6 +1036,12 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 						conn.OnSchemaChange(conn.ChatID)
 					}
 				}
+			case constants.DatabaseTypeMongoDB:
+				if queryType == "CREATE_COLLECTION" || queryType == "DROP_COLLECTION" {
+					if conn.OnSchemaChange != nil {
+						conn.OnSchemaChange(conn.ChatID)
+					}
+				}
 			}
 		}()
 
@@ -1049,11 +1056,18 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	switch config.Type {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		var dsn string
+		port := "5432" // Default port
+		if config.Type == constants.DatabaseTypeYugabyteDB {
+			port = "5433" // Default port
+		}
 
+		if config.Port != nil && *config.Port != "" {
+			port = *config.Port
+		}
 		// Base connection parameters
 		baseParams := fmt.Sprintf(
 			"host=%s port=%s user=%s dbname=%s",
-			config.Host, config.Port, *config.Username, config.Database,
+			config.Host, port, *config.Username, config.Database,
 		)
 
 		// Add password if provided
@@ -1122,17 +1136,22 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 
 	case constants.DatabaseTypeMySQL:
 		var dsn string
+		port := "3306" // Default port for MySQL
+
+		if config.Port != nil && *config.Port != "" {
+			port = *config.Port
+		}
 
 		// Base connection parameters
 		if config.Password != nil {
 			dsn = fmt.Sprintf(
 				"%s:%s@tcp(%s:%s)/%s",
-				*config.Username, *config.Password, config.Host, config.Port, config.Database,
+				*config.Username, *config.Password, config.Host, port, config.Database,
 			)
 		} else {
 			dsn = fmt.Sprintf(
 				"%s@tcp(%s:%s)/%s",
-				*config.Username, config.Host, config.Port, config.Database,
+				*config.Username, config.Host, port, config.Database,
 			)
 		}
 
@@ -1229,6 +1248,11 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 
 	case constants.DatabaseTypeClickhouse:
 		var dsn string
+		port := "9000" // Default port for ClickHouse
+
+		if config.Port != nil && *config.Port != "" {
+			port = *config.Port
+		}
 
 		// Base connection parameters
 		protocol := "tcp"
@@ -1251,10 +1275,10 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		// Build DSN
 		if config.Password != nil {
 			dsn = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-				protocol, *config.Username, *config.Password, config.Host, config.Port, config.Database)
+				protocol, *config.Username, *config.Password, config.Host, port, config.Database)
 		} else {
 			dsn = fmt.Sprintf("%s://%s@%s:%s/%s",
-				protocol, *config.Username, config.Host, config.Port, config.Database)
+				protocol, *config.Username, config.Host, port, config.Database)
 		}
 
 		// Add parameters
@@ -1296,12 +1320,36 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		log.Printf("DBManager -> TestConnection -> Testing MongoDB connection at %s:%s", config.Host, config.Port)
 
 		var uri string
+		port := "27017" // Default port for MongoDB
 
 		// Check if we're using SRV records (mongodb+srv://)
 		isSRV := strings.Contains(config.Host, ".mongodb.net")
 		protocol := "mongodb"
 		if isSRV {
 			protocol = "mongodb+srv"
+		}
+
+		// Validate port value if not using SRV
+		if !isSRV && config.Port != nil {
+			// Log the port value for debugging
+			log.Printf("DBManager -> TestConnection -> Port value before validation: %v", *config.Port)
+
+			// Check if port is empty
+			if *config.Port == "" {
+				log.Printf("DBManager -> TestConnection -> Port is empty, using default port 27017")
+			} else {
+				port = *config.Port
+
+				// Only validate port as numeric if it doesn't contain base64 characters
+				// (which would indicate it's encrypted)
+				if !strings.Contains(port, "+") && !strings.Contains(port, "/") && !strings.Contains(port, "=") {
+					// Verify port is numeric
+					if _, err := strconv.Atoi(port); err != nil {
+						log.Printf("DBManager -> TestConnection -> Non-numeric port value: %v, might be encrypted", port)
+						// Don't return error for potentially encrypted ports
+					}
+				}
+			}
 		}
 
 		// Base connection parameters with authentication
@@ -1317,7 +1365,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 			} else {
 				// Include port for standard connections
 				uri = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-					protocol, encodedUsername, encodedPassword, config.Host, config.Port, config.Database)
+					protocol, encodedUsername, encodedPassword, config.Host, port, config.Database)
 			}
 		} else {
 			// Without authentication
@@ -1326,9 +1374,16 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 				uri = fmt.Sprintf("%s://%s/%s", protocol, config.Host, config.Database)
 			} else {
 				// Include port for standard connections
-				uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, config.Port, config.Database)
+				uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, port, config.Database)
 			}
 		}
+
+		// Log the final URI (with sensitive parts masked)
+		maskedUri := uri
+		if config.Password != nil && *config.Password != "" {
+			maskedUri = strings.Replace(maskedUri, *config.Password, "********", -1)
+		}
+		log.Printf("DBManager -> TestConnection -> Connection URI: %s", maskedUri)
 
 		// Add connection options
 		if isSRV {
@@ -1601,11 +1656,15 @@ func generateConfigKey(config ConnectionConfig) string {
 		username = *config.Username
 	}
 
+	port := ""
+	if config.Port != nil {
+		port = *config.Port
+	}
 	// Create a unique key based on connection details
 	key := fmt.Sprintf("%s:%s:%s:%s:%s",
 		config.Type,
 		config.Host,
-		config.Port,
+		port,
 		username,
 		config.Database)
 

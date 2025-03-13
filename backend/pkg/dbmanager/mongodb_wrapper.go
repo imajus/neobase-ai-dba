@@ -337,8 +337,10 @@ func (e *MongoDBExecutor) SampleCollection(ctx context.Context, collectionName s
 	// Ensure sample size is reasonable
 	if sampleSize <= 0 {
 		sampleSize = 10
+		log.Printf("MongoDBExecutor -> SampleCollection -> Using default sample size of 10 documents")
 	} else if sampleSize > 1000 {
 		sampleSize = 1000
+		log.Printf("MongoDBExecutor -> SampleCollection -> Capping sample size to maximum of 1000 documents")
 	}
 
 	// If sample size is greater than document count, adjust it
@@ -346,6 +348,8 @@ func (e *MongoDBExecutor) SampleCollection(ctx context.Context, collectionName s
 		sampleSize = int(count)
 		log.Printf("MongoDBExecutor -> SampleCollection -> Adjusted sample size to %d to match document count", sampleSize)
 	}
+
+	log.Printf("MongoDBExecutor -> SampleCollection -> Will attempt to sample exactly %d documents from collection %s", sampleSize, collectionName)
 
 	// Try two approaches: first with $sample, then with find if that fails
 
@@ -387,7 +391,7 @@ func (e *MongoDBExecutor) SampleCollection(ctx context.Context, collectionName s
 		return nil, fmt.Errorf("failed to decode sample results: %v", err)
 	}
 
-	log.Printf("MongoDBExecutor -> SampleCollection -> Sampled %d documents from collection %s", len(results), collectionName)
+	log.Printf("MongoDBExecutor -> SampleCollection -> Successfully sampled exactly %d documents from collection %s", len(results), collectionName)
 	return results, nil
 }
 

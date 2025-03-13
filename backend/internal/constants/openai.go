@@ -55,7 +55,7 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
           },
         },
        “tables”: “users,orders”,
@@ -353,7 +353,7 @@ json
         { "column1": "example_value1", "column2": "example_value2" }
       ],
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
           },
         },
       "collections": "users,orders",
@@ -406,7 +406,7 @@ const OpenAIPostgresLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
                            }
                        }
                    },
@@ -495,7 +495,7 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
                            }
                        }
                    },
@@ -584,7 +584,7 @@ const OpenAIMySQLLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
                            }
                        }
                    },
@@ -685,7 +685,7 @@ const OpenAIClickhouseLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). Always generate this query whenever there can be large volume of data or fetching data"
                            }
                        }
                    },
@@ -774,7 +774,7 @@ var OpenAIMongoDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50)."
+                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). (.skip(offset_size) should come before .limit(50)), always generate this query whenever there can be large volume of data or fetching data"
                            }
                        }
                    },
