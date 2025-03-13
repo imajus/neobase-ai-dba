@@ -8,4 +8,5 @@ const (
 	DatabaseTypeRedis      = "redis"
 	DatabaseTypeNeo4j      = "neo4j"
 	DatabaseTypeClickhouse = "clickhouse"
+	DatabaseTypeCassandra  = "cassandra"
 )

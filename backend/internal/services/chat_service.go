@@ -648,7 +648,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		if !synchronous || allowSSEUpdates {
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  map[string]string{"error": err.Error()},
+				Data:  map[string]string{"error": "Error: " + err.Error()},
 			})
 		}
 		return nil, fmt.Errorf("failed to generate LLM response: %v", err)
@@ -672,7 +672,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-error",
-			Data:  map[string]string{"error": err.Error()},
+			Data:  map[string]string{"error": "Error: " + err.Error()},
 		})
 	}
 
@@ -730,6 +730,10 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			var tables *string
 			if queryMap["tables"] != nil {
 				tables = utils.ToStringPtr(queryMap["tables"].(string))
+			}
+
+			if queryMap["collections"] != nil {
+				tables = utils.ToStringPtr(queryMap["collections"].(string))
 			}
 			var queryType *string
 			if queryMap["queryType"] != nil {
@@ -1215,9 +1219,7 @@ func (s *chatService) CancelProcessing(userID, chatID, streamID string) {
 }
 
 func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, streamID string) (uint32, error) {
-	log.Printf("ChatService -> ConnectDB -> Starting connection for chatID: %s, streamID: %s", chatID, streamID)
-
-	// Get the chat
+	// Get chat
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		return http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
@@ -1231,7 +1233,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		return http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 	}
 
-	// Check if the chat belongs to the user
+	// Check if chat belongs to user
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return http.StatusBadRequest, fmt.Errorf("invalid user ID format")
@@ -1241,11 +1243,34 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		return http.StatusForbidden, fmt.Errorf("chat does not belong to user")
 	}
 
+	// Check if connection details are present
+	if chat.Connection.Host == "" || chat.Connection.Database == "" {
+		return http.StatusBadRequest, fmt.Errorf("connection details are incomplete")
+	}
+
 	// Decrypt connection details
 	utils.DecryptConnection(&chat.Connection)
 
-	// Create connection config with SSL configuration
-	config := dbmanager.ConnectionConfig{
+	// Ensure port has a default value if empty
+	if chat.Connection.Port == nil || *chat.Connection.Port == "" {
+		var defaultPort string
+		switch chat.Connection.Type {
+		case constants.DatabaseTypePostgreSQL:
+			defaultPort = "5432"
+		case constants.DatabaseTypeYugabyteDB:
+			defaultPort = "5433"
+		case constants.DatabaseTypeMySQL:
+			defaultPort = "3306"
+		case constants.DatabaseTypeClickhouse:
+			defaultPort = "9000"
+		case constants.DatabaseTypeMongoDB:
+			defaultPort = "27017"
+		}
+		chat.Connection.Port = &defaultPort
+	}
+
+	// Connect to database
+	err = s.dbManager.Connect(chatID, userID, streamID, dbmanager.ConnectionConfig{
 		Type:           chat.Connection.Type,
 		Host:           chat.Connection.Host,
 		Port:           chat.Connection.Port,
@@ -1256,11 +1281,10 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		SSLCertURL:     chat.Connection.SSLCertURL,
 		SSLKeyURL:      chat.Connection.SSLKeyURL,
 		SSLRootCertURL: chat.Connection.SSLRootCertURL,
-	}
+	})
 
-	// Connect to the database
-	if err := s.dbManager.Connect(chatID, userID, streamID, config); err != nil {
-		return http.StatusBadRequest, err
+	if err != nil {
+		return http.StatusBadRequest, fmt.Errorf("failed to connect: %v", err)
 	}
 
 	return http.StatusOK, nil
@@ -1416,9 +1440,15 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 	isConnected := s.dbManager.IsConnected(chatID)
 
 	// Convert port string to int
-	port, err := strconv.Atoi(connInfo.Config.Port)
-	if err != nil {
-		port = 0 // Default value if conversion fails
+	var port *int
+	if connInfo.Config.Port != nil {
+		portVal, err := strconv.Atoi(*connInfo.Config.Port)
+		if err != nil {
+			defaultPort := 0
+			port = &defaultPort // Default value if conversion fails
+		} else {
+			port = &portVal
+		}
 	}
 
 	return &dtos.ConnectionStatusResponse{
@@ -1703,6 +1733,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		if msg.Queries != nil {
 			for i := range *msg.Queries {
 				if (*msg.Queries)[i].ID == query.ID {
+					log.Printf("ChatService -> ExecuteQuery -> updating query: %v", (*msg.Queries)[i])
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
@@ -1712,7 +1743,10 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						}
 						(*msg.Queries)[i].Pagination.TotalRecordsCount = totalRecordsCount
 					}
+					log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %v", result.ResultJSON)
+					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult before update: %v", (*msg.Queries)[i].ExecutionResult)
 					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
+					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult after update: %v", (*msg.Queries)[i].ExecutionResult)
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
 							Code:    result.Error.Code,
@@ -1727,7 +1761,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			}
 		}
 
-		log.Printf("ChatService -> ExecuteQuery -> Updating message")
+		log.Printf("ChatService -> ExecuteQuery -> Updating message %v", msg)
+		if msg.Queries != nil {
+			for _, query := range *msg.Queries {
+				log.Printf("ChatService -> ExecuteQuery -> updated query: %v", query)
+			}
+		}
 		// Save updated message
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
@@ -2488,6 +2527,7 @@ func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID,
 	// Use llmCtx for LLM processing
 	go func() {
 		defer func() {
+			log.Printf("ProcessLLMResponseAndRunQuery -> activeProcesses: %v", s.activeProcesses)
 			s.processesMu.Lock()
 			delete(s.activeProcesses, streamID)
 			s.processesMu.Unlock()
@@ -2532,7 +2572,24 @@ func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID,
 						log.Printf("ProcessLLMResponseAndRunQuery -> Query executed successfully: %v", executionResult)
 						query.IsExecuted = true
 						query.ExecutionTime = executionResult.ExecutionTime
-						query.ExecutionResult = executionResult.ExecutionResult.(map[string]interface{})
+
+						// Handle different result types (MongoDB returns array, SQL databases return map)
+						switch resultType := executionResult.ExecutionResult.(type) {
+						case map[string]interface{}:
+							// For SQL databases (PostgreSQL, MySQL, etc.)
+							query.ExecutionResult = resultType
+						case []interface{}:
+							// For MongoDB which returns array results
+							query.ExecutionResult = map[string]interface{}{
+								"results": resultType,
+							}
+						default:
+							// For any other type, wrap it in a map
+							query.ExecutionResult = map[string]interface{}{
+								"result": executionResult.ExecutionResult,
+							}
+						}
+
 						query.Error = executionResult.Error
 						if query.Pagination != nil && executionResult.TotalRecordsCount != nil {
 							query.Pagination.TotalRecordsCount = *executionResult.TotalRecordsCount
@@ -2780,9 +2837,6 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
 	}
 
-	log.Printf("ChatService -> GetQueryResults -> result: %+v", result)
-	log.Printf("ChatService -> GetQueryResults -> result.ResultJSON: %+v", result.ResultJSON)
-
 	var formattedResultJSON interface{}
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
@@ -2803,7 +2857,7 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		formattedResultJSON = resultMapFormatting
 	}
 
-	log.Printf("ChatService -> GetQueryResults -> formattedResultJSON: %+v", formattedResultJSON)
+	// log.Printf("ChatService -> GetQueryResults -> formattedResultJSON: %+v", formattedResultJSON)
 
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "query-paginated-results",
@@ -2880,8 +2934,10 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 					qMap["is_edited"] = true
 					qMap["is_executed"] = false
 					if qMap["pagination"] != nil {
-						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+						if qMap["pagination"].(map[string]interface{})["paginated_query"] != nil {
+							currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
+							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+						}
 					}
 					queriesVal[i] = qMap
 					break
@@ -2983,6 +3039,11 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		if err != nil {
 			log.Printf("ChatService -> GetAllTables -> Error finding chat: %v", err)
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+		}
+
+		if chat != nil {
+			// Try to decrypt the connection details
+			utils.DecryptConnection(&chat.Connection)
 		}
 
 		if chat == nil {

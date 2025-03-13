@@ -122,7 +122,10 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	// Base connection parameters
 	baseParams := fmt.Sprintf(
 		"host=%s port=%s user=%s dbname=%s",
-		config.Host, config.Port, *config.Username, config.Database,
+		config.Host,
+		*config.Port, // Dereference the port pointer
+		*config.Username,
+		config.Database,
 	)
 
 	// Add password if provided
