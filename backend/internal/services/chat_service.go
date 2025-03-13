@@ -731,6 +731,10 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			if queryMap["tables"] != nil {
 				tables = utils.ToStringPtr(queryMap["tables"].(string))
 			}
+
+			if queryMap["collections"] != nil {
+				tables = utils.ToStringPtr(queryMap["collections"].(string))
+			}
 			var queryType *string
 			if queryMap["queryType"] != nil {
 				queryType = utils.ToStringPtr(queryMap["queryType"].(string))

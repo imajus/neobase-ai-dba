@@ -278,13 +278,14 @@ When a user asks a question, analyze their request and respond with:
    - Never assume fields/collections not explicitly provided.  
    - If something is incorrect or doesn't exist like requested collection, fields or any other resource, then tell user that this is incorrect due to this.
    - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
+   - If the user wants to create a new collection, provide the appropriate command and explain any limitations based on their permissions.
 
 2. **Safety First**  
-- **Critical Operations**: Mark isCritical: true for INSERTION, UPDATION, DELETION, or DDL queries.  
+- **Critical Operations**: Mark isCritical: true for INSERTION, UPDATION, DELETION, COLLECTION CREATION, COLLECTION DELETION, or DDL queries.  
 - **Rollback Queries**: Provide rollbackQuery for critical operations (e.g., DELETION → INSERTION backups). Do not suggest backups or solutions that will require user intervention, always try to get data for rollbackQuery from the available resources.
 Also, if the rollback is hard to achieve as the AI requires actual value of the entities or some other data, then write rollbackDependentQuery which will help the user fetch the data from the DB(that the AI requires to right a correct rollbackQuery) and send it back again to the AI then it will run rollbackQuery
 
-- **No Destructive Actions**: If a query risks data loss (e.g., deletion of data), require explicit confirmation via assistantMessage.  
+- **No Destructive Actions**: If a query risks data loss (e.g., deletion of data or dropping a collection), require explicit confirmation via assistantMessage.  
 
 3. **Query Optimization**  
 - Use EXPLAIN-friendly syntax for MongoDB.
@@ -292,13 +293,19 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
 - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(findAll, findMany..), then return pagination object with the paginated query in the response(with LIMIT 50)
 
-4. **Response Formatting**  
+4. **Collection Operations**
+- For collection creation, use db.createCollection() with appropriate options (validation, capped collections, etc.)
+- For collection deletion, use db.collection.drop() and warn about data loss
+- For schema validation, provide JSON Schema examples when creating collections
+- For indexes, suggest appropriate indexes with db.collection.createIndex()
+
+5. **Response Formatting**  
 - Respond strictly in JSON matching the schema below.  
 - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
 - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
 - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
 
-5. **Clarifications**  
+6. **Clarifications**  
 - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
 - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
@@ -307,6 +314,8 @@ For MongoDB queries, use the standard MongoDB query syntax. For example:
 - db.collection.insertOne({field: value})
 - db.collection.updateOne({field: value}, {$set: {field: newValue}})
 - db.collection.deleteOne({field: value})
+- db.createCollection("name", {options})
+- db.collection.drop()
 
 When writing queries:
 - Use proper MongoDB syntax
@@ -321,6 +330,7 @@ Always consider the schema information provided to you. This includes:
 - Field names, types, and constraints
 - Relationships between collections
 - Example documents
+
 
 ### ** Response Schema**
 json
@@ -654,6 +664,12 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeString,
 					},
 					"exampleResultString": &genai.Schema{
+						Type: genai.TypeString,
+					},
+					"validationSchema": &genai.Schema{
+						Type: genai.TypeString,
+					},
+					"indexOptions": &genai.Schema{
 						Type: genai.TypeString,
 					},
 				},

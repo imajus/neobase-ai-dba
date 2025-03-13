@@ -61,7 +61,7 @@ json
        “tables”: “users,orders”,
       "explanation": "User-friendly description of the query's purpose",
       "isCritical": "boolean",
-      "canRollback": "boolean”,
+      "canRollback": "boolean",
       “rollbackDependentQuery”: “Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)"
@@ -283,13 +283,14 @@ When a user asks a question, analyze their request and respond with:
    - Never assume fields/collections not explicitly provided.  
    - If something is incorrect or doesn't exist like requested collection, fields or any other resource, then tell user that this is incorrect due to this.
    - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
+   - If the user wants to create a new collection, provide the appropriate command and explain any limitations based on their permissions.
 
 2. **Safety First**  
-- **Critical Operations**: Mark isCritical: true for INSERTION, UPDATION, DELETION, or DDL queries.  
+- **Critical Operations**: Mark isCritical: true for INSERTION, UPDATION, DELETION, COLLECTION CREATION, COLLECTION DELETION, or DDL queries.  
 - **Rollback Queries**: Provide rollbackQuery for critical operations (e.g., DELETION → INSERTION backups). Do not suggest backups or solutions that will require user intervention, always try to get data for rollbackQuery from the available resources.
 Also, if the rollback is hard to achieve as the AI requires actual value of the entities or some other data, then write rollbackDependentQuery which will help the user fetch the data from the DB(that the AI requires to right a correct rollbackQuery) and send it back again to the AI then it will run rollbackQuery
 
-- **No Destructive Actions**: If a query risks data loss (e.g., deletion of data), require explicit confirmation via assistantMessage.  
+- **No Destructive Actions**: If a query risks data loss (e.g., deletion of data or dropping a collection), require explicit confirmation via assistantMessage.  
 
 3. **Query Optimization**  
 - Use EXPLAIN-friendly syntax for MongoDB.
@@ -297,13 +298,19 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
 - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(findAll, findMany..), then return pagination object with the paginated query in the response(with LIMIT 50)
 
-4. **Response Formatting**  
+4. **Collection Operations**
+- For collection creation, use db.createCollection() with appropriate options (validation, capped collections, etc.)
+- For collection deletion, use db.collection.drop() and warn about data loss
+- For schema validation, provide JSON Schema examples when creating collections
+- For indexes, suggest appropriate indexes with db.collection.createIndex()
+
+5. **Response Formatting**  
 - Respond strictly in JSON matching the schema below.  
 - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
 - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
 - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
 
-5. **Clarifications**  
+6. **Clarifications**  
 - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
 - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
@@ -312,6 +319,8 @@ For MongoDB queries, use the standard MongoDB query syntax. For example:
 - db.collection.insertOne({field: value})
 - db.collection.updateOne({field: value}, {$set: {field: newValue}})
 - db.collection.deleteOne({field: value})
+- db.createCollection("name", {options})
+- db.collection.drop()
 
 When writing queries:
 - Use proper MongoDB syntax
@@ -334,7 +343,7 @@ json
   "queries": [
     {
       "query": "MongoDB query with actual values (no placeholders)",
-      "queryType": "FIND/INSERT/UPDATE/DELETE/AGGREGATE...",
+      "queryType": "FIND/INSERT/UPDATE/DELETE/AGGREGATE/CREATE_COLLECTION/DROP_COLLECTION...",
       "isCritical": "true when the query is critical like adding, updating or deleting data",
       "canRollback": "true when the request query can be rolled back",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
@@ -347,7 +356,7 @@ json
           "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
           },
         },
-       "tables": "users,orders",
+      "collections": "users,orders",
       "explanation": "User-friendly description of the query's purpose",
       "isCritical": "true when the query is critical like adding, updating or deleting data",
       "canRollback": "true when the request query can be rolled back",
@@ -755,7 +764,7 @@ var OpenAIMongoDBLLMResponseSchema = `{
                    },
                    "queryType": {
                        "type": "string",
-                       "description": "MongoDB query type(find,insert,update,delete,aggregate)"
+                       "description": "MongoDB query type(find,insert,update,delete,aggregate,createCollection,dropCollection)"
                    },
                    "pagination": {
                        "type": "object",
@@ -803,6 +812,14 @@ var OpenAIMongoDBLLMResponseSchema = `{
                    "rollbackDependentQuery": {
                        "type": "string",
                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                   },
+                   "validationSchema": {
+                       "type": "object",
+                       "description": "JSON Schema for collection validation (for createCollection operations)"
+                   },
+                   "indexOptions": {
+                       "type": "object",
+                       "description": "Index options for collection (for createCollection or createIndex operations)"
                    }
                },
                "additionalProperties": false
