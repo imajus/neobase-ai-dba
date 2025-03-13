@@ -9,6 +9,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: neobase
       MONGO_INITDB_ROOT_PASSWORD: neobase
+      MONGO_INITDB_DATABASE: neobase
     volumes:
       - neobase-mongodb-data:/data/db
     networks:

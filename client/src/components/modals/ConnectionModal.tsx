@@ -75,8 +75,8 @@ export default function ConnectionModal({
         }
         break;
       case 'port':
+        // For MongoDB, port is optional and can be empty
         if (value.type === 'mongodb') {
-          value.port = '';
           return '';
         }
         if (!value.port) {

@@ -49,17 +49,20 @@ services:
 
   neobase-example-mongodb:
     image: mongo:latest
-    container_name: neobase-mongodb
+    container_name: neobase-example-mongodb
     restart: always
     ports:
       - 27017:27017
     environment:
       MONGO_INITDB_ROOT_USERNAME: example_user
       MONGO_INITDB_ROOT_PASSWORD: example_password
+      MONGO_INITDB_DATABASE: example_db
     volumes:
       - mongodb-data:/data/db
     networks:
       - neobase-network
+    
+
 volumes:
   postgres-data:
   clickhouse-data:
