@@ -451,6 +451,7 @@ SSL_ROOT_CERT_URL=https://example.com/ca.pem`}
                     { value: 'mysql', label: 'MySQL' },
                     { value: 'clickhouse', label: 'ClickHouse' },
                     { value: 'mongodb', label: 'MongoDB' },
+                    { value: 'cassandra', label: 'Cassandra (Coming Soon)' },
                     { value: 'redis', label: 'Redis (Coming Soon)' },
                     { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
                   ].map(option => (

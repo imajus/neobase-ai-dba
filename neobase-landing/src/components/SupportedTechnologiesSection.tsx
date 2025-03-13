@@ -12,11 +12,12 @@ const SupportedTechnologiesSection: React.FC = () => {
   const databases: Technology[] = [
     { name: 'PostgreSQL', isSupported: true },
     { name: 'YugabyteDB', isSupported: true },
-    { name: 'MongoDB', isSupported: false, priority: 1 },
+    { name: 'MongoDB', isSupported: true, priority: 1 },
     { name: 'MySQL', isSupported: true, priority: 2 },
     { name: 'Neo4j', isSupported: false, priority: 3 },
     { name: 'Redis', isSupported: false, priority: 4 },
-    { name: 'Clickhouse', isSupported: true, priority: 5 }
+    { name: 'Clickhouse', isSupported: true, priority: 5 },
+    { name: 'Cassandra', isSupported: true, priority: 6 }
   ];
 
   const llmClients: Technology[] = [

@@ -1,5 +1,5 @@
 interface DatabaseLogoProps {
-  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j';
+  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra';
   size?: number;
   className?: string;
 }
@@ -12,7 +12,8 @@ const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
   mongodb: `${import.meta.env.VITE_FRONTEND_BASE_URL}mongodb-logo.svg`,
   redis: `${import.meta.env.VITE_FRONTEND_BASE_URL}redis-logo.svg`,
   clickhouse: `${import.meta.env.VITE_FRONTEND_BASE_URL}clickhouse-logo.svg`,
-  neo4j: `${import.meta.env.VITE_FRONTEND_BASE_URL}neo4j-logo.png`
+  neo4j: `${import.meta.env.VITE_FRONTEND_BASE_URL}neo4j-logo.png`,
+  cassandra: `${import.meta.env.VITE_FRONTEND_BASE_URL}cassandra-logo.png`
 };
 
 export default function DatabaseLogo({ type, size = 24, className = '' }: DatabaseLogoProps) {
