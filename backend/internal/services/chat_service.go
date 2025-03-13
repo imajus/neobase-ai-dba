@@ -2912,8 +2912,10 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 					qMap["is_edited"] = true
 					qMap["is_executed"] = false
 					if qMap["pagination"] != nil {
-						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+						if qMap["pagination"].(map[string]interface{})["paginated_query"] != nil {
+							currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
+							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+						}
 					}
 					queriesVal[i] = qMap
 					break

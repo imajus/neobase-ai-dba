@@ -882,6 +882,19 @@ export default function MessageTile({
                                     Edited
                                 </span>
                             )}
+                            {query.is_rolled_back ? (
+                                <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded">
+                                    Rolled Back
+                                </span>
+                            ) : query.is_executed ? (
+                                <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
+                                    Executed
+                                </span>
+                            ) : (
+                                <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">
+                                    Not Executed
+                                </span>
+                            )}
                         </div>
                         <div className="flex items-center">
                             {(
