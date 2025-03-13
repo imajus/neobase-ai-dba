@@ -9,7 +9,8 @@ type LLMResponse struct {
 // QueryInfo represents a single query in the LLM response
 type QueryInfo struct {
 	Query                  string                    `json:"query"`
-	Tables                 string                    `json:"tables,omitempty"`
+	Tables                 *string                   `json:"tables,omitempty"`
+	Collection             *string                   `json:"collection,omitempty"`
 	QueryType              string                    `json:"queryType"`
 	Pagination             *Pagination               `json:"pagination,omitempty"`
 	IsCritical             bool                      `json:"isCritical"`

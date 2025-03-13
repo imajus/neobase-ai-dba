@@ -69,8 +69,10 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 	if queries == nil {
 		return nil
 	}
+
 	queriesDto := make([]Query, len(*queries))
 	for i, query := range *queries {
+		log.Printf("ToQueryDto -> model query: %v", query)
 		var exampleResult []interface{}
 		var executionResult map[string]interface{}
 
@@ -87,7 +89,17 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 		if query.ExecutionResult != nil {
 			err := json.Unmarshal([]byte(*query.ExecutionResult), &executionResult)
 			if err != nil {
-				executionResult = map[string]interface{}{}
+				log.Printf("ToQueryDto -> error unmarshalling executionResult: %v", err)
+				// Try unmarshalling the executionResult as a []interface{}
+				var executionResultArray []interface{}
+				err = json.Unmarshal([]byte(*query.ExecutionResult), &executionResultArray)
+				if err != nil {
+					log.Printf("ToQueryDto -> error unmarshalling executionResult as []interface{}: %v", err)
+					executionResult = map[string]interface{}{}
+				}
+				executionResult = map[string]interface{}{
+					"results": executionResultArray,
+				}
 			}
 		}
 

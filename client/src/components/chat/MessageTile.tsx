@@ -374,6 +374,9 @@ export default function MessageTile({
         if (queryIndex === -1) return;
 
         try {
+            // Close the dialog immediately
+            setRollbackState({ show: false, queryId: null });
+            
             // Create new AbortController for this query
             abortControllerRef.current[queryId] = new AbortController();
             onQueryUpdate(() => {
@@ -388,7 +391,8 @@ export default function MessageTile({
             console.log('rolledBack', response);
 
             if (response?.success) {
-                setMessage({
+                // Update the message with the new rolled back data
+                const updatedMessage = {
                     ...message,
                     queries: message.queries?.map(q => q.id === queryId ? {
                         ...q,
@@ -398,14 +402,60 @@ export default function MessageTile({
                         execution_time: response?.data?.execution_time,
                         error: response?.data?.error,
                     } : q)
-                });
+                };
+                
+                setMessage(updatedMessage);
+                
+                // Also update the query results state to show the new data
+                if (response?.data?.execution_result) {
+                    // Store the raw execution result
+                    const executionResult = response.data.execution_result;
+                    
+                    // Calculate total records based on the type of execution result
+                    let totalRecords = 1;
+                    if (Array.isArray(executionResult)) {
+                        totalRecords = executionResult.length;
+                    } else if (executionResult && typeof executionResult === 'object') {
+                        if ('results' in executionResult && Array.isArray((executionResult as any).results)) {
+                            totalRecords = (executionResult as any).results.length;
+                        }
+                    }
+                    
+                    // Update the query results state with the new data
+                    setQueryResults(prev => ({
+                        ...prev,
+                        [queryId]: {
+                            ...prev[queryId],
+                            data: executionResult,
+                            loading: false,
+                            error: null,
+                            currentPage: 1,
+                            totalRecords: totalRecords
+                        }
+                    }));
+                    
+                    // Update the page data cache
+                    if (!pageDataCacheRef.current[queryId]) {
+                        pageDataCacheRef.current[queryId] = {};
+                    }
+                    
+                    pageDataCacheRef.current[queryId][1] = {
+                        data: executionResult,
+                        totalRecords: totalRecords
+                    };
+                }
+                
                 toast('Changes reverted', {
                     ...toastStyle,
                     icon: '↺',
                 });
+                
                 onQueryUpdate(() => {
                     if (message.queries) {
                         message.queries[queryIndex].is_rolled_back = true;
+                        message.queries[queryIndex].execution_time = response?.data?.execution_time;
+                        message.queries[queryIndex].error = response?.data?.error;
+                        message.queries[queryIndex].execution_result = response?.data?.execution_result;
                     }
                 });
             }
@@ -418,7 +468,6 @@ export default function MessageTile({
                     [queryId]: { isExecuting: false, isExample: true, isRolledBack: false }
                 }));
             });
-            setRollbackState({ show: false, queryId: null });
             delete abortControllerRef.current[queryId];
         }
     };
@@ -740,13 +789,18 @@ export default function MessageTile({
         }
 
         if (result && typeof result === 'object') {
-            if ('results' in result) {
+            if ('results' in result && Array.isArray(result.results)) {
                 return result.results;
+            }
+            if ('rowsAffected' in result || 'message' in result) {
+                // For DML queries that return rowsAffected or message
+                return [result];
             }
             // If no results property found, try to convert the object itself to array
             return [result];
         }
 
+        // For primitive values or other types
         return [result];
     };
 

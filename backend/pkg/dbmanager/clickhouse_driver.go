@@ -139,10 +139,10 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 	// Build DSN
 	if config.Password != nil {
 		dsn = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-			protocol, *config.Username, *config.Password, config.Host, config.Port, config.Database)
+			protocol, *config.Username, *config.Password, config.Host, *config.Port, config.Database)
 	} else {
 		dsn = fmt.Sprintf("%s://%s@%s:%s/%s",
-			protocol, *config.Username, config.Host, config.Port, config.Database)
+			protocol, *config.Username, config.Host, *config.Port, config.Database)
 	}
 
 	// Add parameters

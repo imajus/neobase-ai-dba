@@ -115,7 +115,7 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 			Connection: dtos.CreateConnectionRequest{
 				Type:     config.Env.ExampleDatabaseType,
 				Host:     config.Env.ExampleDatabaseHost,
-				Port:     config.Env.ExampleDatabasePort,
+				Port:     utils.ToStringPtr(config.Env.ExampleDatabasePort),
 				Database: config.Env.ExampleDatabaseName,
 				Username: config.Env.ExampleDatabaseUsername,
 				Password: utils.ToStringPtr(config.Env.ExampleDatabasePassword),

@@ -7,7 +7,7 @@ import (
 type Connection struct {
 	Type     string  `bson:"type" json:"type"`
 	Host     string  `bson:"host" json:"host"`
-	Port     string  `bson:"port" json:"port"`
+	Port     *string `bson:"port" json:"port"`
 	Username *string `bson:"username" json:"username"`
 	Password *string `bson:"password" json:"-"` // Hide in JSON
 	Database string  `bson:"database" json:"database"`

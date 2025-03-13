@@ -1416,9 +1416,15 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 	isConnected := s.dbManager.IsConnected(chatID)
 
 	// Convert port string to int
-	port, err := strconv.Atoi(connInfo.Config.Port)
-	if err != nil {
-		port = 0 // Default value if conversion fails
+	var port *int
+	if connInfo.Config.Port != nil {
+		portVal, err := strconv.Atoi(*connInfo.Config.Port)
+		if err != nil {
+			defaultPort := 0
+			port = &defaultPort // Default value if conversion fails
+		} else {
+			port = &portVal
+		}
 	}
 
 	return &dtos.ConnectionStatusResponse{
@@ -1703,6 +1709,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		if msg.Queries != nil {
 			for i := range *msg.Queries {
 				if (*msg.Queries)[i].ID == query.ID {
+					log.Printf("ChatService -> ExecuteQuery -> updating query: %v", (*msg.Queries)[i])
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
@@ -1712,7 +1719,10 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						}
 						(*msg.Queries)[i].Pagination.TotalRecordsCount = totalRecordsCount
 					}
+					log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %v", result.ResultJSON)
+					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult before update: %v", (*msg.Queries)[i].ExecutionResult)
 					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
+					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult after update: %v", (*msg.Queries)[i].ExecutionResult)
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
 							Code:    result.Error.Code,
@@ -1727,7 +1737,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			}
 		}
 
-		log.Printf("ChatService -> ExecuteQuery -> Updating message")
+		log.Printf("ChatService -> ExecuteQuery -> Updating message %v", msg)
+		if msg.Queries != nil {
+			for _, query := range *msg.Queries {
+				log.Printf("ChatService -> ExecuteQuery -> updated query: %v", query)
+			}
+		}
 		// Save updated message
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
@@ -2532,7 +2547,24 @@ func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID,
 						log.Printf("ProcessLLMResponseAndRunQuery -> Query executed successfully: %v", executionResult)
 						query.IsExecuted = true
 						query.ExecutionTime = executionResult.ExecutionTime
-						query.ExecutionResult = executionResult.ExecutionResult.(map[string]interface{})
+
+						// Handle different result types (MongoDB returns array, SQL databases return map)
+						switch resultType := executionResult.ExecutionResult.(type) {
+						case map[string]interface{}:
+							// For SQL databases (PostgreSQL, MySQL, etc.)
+							query.ExecutionResult = resultType
+						case []interface{}:
+							// For MongoDB which returns array results
+							query.ExecutionResult = map[string]interface{}{
+								"results": resultType,
+							}
+						default:
+							// For any other type, wrap it in a map
+							query.ExecutionResult = map[string]interface{}{
+								"result": executionResult.ExecutionResult,
+							}
+						}
+
 						query.Error = executionResult.Error
 						if query.Pagination != nil && executionResult.TotalRecordsCount != nil {
 							query.Pagination.TotalRecordsCount = *executionResult.TotalRecordsCount

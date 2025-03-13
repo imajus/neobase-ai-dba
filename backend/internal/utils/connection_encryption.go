@@ -24,11 +24,13 @@ func EncryptConnection(conn *models.Connection) error {
 		return fmt.Errorf("failed to encrypt host: %v", err)
 	}
 
-	// Encrypt port
-	if encryptedPort, err := encrypt(conn.Port, key); err == nil {
-		conn.Port = encryptedPort
-	} else {
-		return fmt.Errorf("failed to encrypt port: %v", err)
+	// Encrypt port if present
+	if conn.Port != nil {
+		if encryptedPort, err := encrypt(*conn.Port, key); err == nil {
+			*conn.Port = encryptedPort
+		} else {
+			return fmt.Errorf("failed to encrypt port: %v", err)
+		}
 	}
 
 	// Encrypt username if present
@@ -96,11 +98,13 @@ func DecryptConnection(conn *models.Connection) {
 		log.Printf("Warning: Failed to decrypt host, using as-is: %v", err)
 	}
 
-	// Decrypt port
-	if decryptedPort, err := decrypt(conn.Port, key); err == nil {
-		conn.Port = decryptedPort
-	} else {
-		log.Printf("Warning: Failed to decrypt port, using as-is: %v", err)
+	// Decrypt port if present
+	if conn.Port != nil {
+		if decryptedPort, err := decrypt(*conn.Port, key); err == nil {
+			*conn.Port = decryptedPort
+		} else {
+			log.Printf("Warning: Failed to decrypt port, using as-is: %v", err)
+		}
 	}
 
 	// Decrypt username if present

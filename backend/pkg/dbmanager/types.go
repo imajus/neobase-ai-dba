@@ -21,6 +21,7 @@ const (
 // Connection represents an active database connection
 type Connection struct {
 	DB             *gorm.DB
+	MongoDBObj     interface{} // MongoDB client object
 	LastUsed       time.Time
 	Status         ConnectionStatus
 	Error          string
@@ -39,7 +40,7 @@ type Connection struct {
 type ConnectionConfig struct {
 	Type     string  `json:"type"`
 	Host     string  `json:"host"`
-	Port     string  `json:"port"`
+	Port     *string `json:"port"`
 	Username *string `json:"username"`
 	Password *string `json:"password"`
 	Database string  `json:"database"`

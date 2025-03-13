@@ -102,12 +102,12 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	if config.Password != nil {
 		dsn = fmt.Sprintf(
 			"%s:%s@tcp(%s:%s)/%s",
-			*config.Username, *config.Password, config.Host, config.Port, config.Database,
+			*config.Username, *config.Password, config.Host, *config.Port, config.Database,
 		)
 	} else {
 		dsn = fmt.Sprintf(
 			"%s@tcp(%s:%s)/%s",
-			*config.Username, config.Host, config.Port, config.Database,
+			*config.Username, config.Host, *config.Port, config.Database,
 		)
 	}
 

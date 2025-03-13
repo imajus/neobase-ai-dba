@@ -626,6 +626,42 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 			checksums[tableName] = checksum
 		}
 		return checksums, nil
+	case constants.DatabaseTypeMongoDB:
+		// Implement MongoDB checksum calculation
+		checksums := make(map[string]string)
+
+		// Get schema directly from the database
+		schema, err := db.GetSchema(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema: %v", err)
+		}
+
+		// Calculate checksums for each collection (table)
+		for collectionName, collection := range schema.Tables {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("getTableChecksums -> context cancelled: %v", err)
+				return nil, err
+			}
+
+			// Convert collection definition to string for checksum
+			// MongoDB may not have foreign keys or constraints like SQL databases,
+			// but we include them in the checksum calculation for consistency
+			collectionStr := fmt.Sprintf("%s:%v:%v:%v:%v",
+				collectionName,
+				collection.Columns,
+				collection.Indexes,
+				collection.ForeignKeys,
+				collection.Constraints,
+			)
+
+			// Calculate checksum using crypto/md5
+			hasher := md5.New()
+			hasher.Write([]byte(collectionStr))
+			checksum := hex.EncodeToString(hasher.Sum(nil))
+			checksums[collectionName] = checksum
+		}
+		return checksums, nil
 	}
 
 	return nil, fmt.Errorf("unsupported database type: %s", dbType)
@@ -1609,6 +1645,11 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 	sm.RegisterFetcher("clickhouse", func(db DBExecutor) SchemaFetcher {
 		return NewClickHouseSchemaFetcher(db)
 	})
+
+	// Register MongoDB schema fetcher
+	sm.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
+		return NewMongoDBSchemaFetcher(db)
+	})
 }
 
 // Update the CompareSchemasDetailed function to be more precise
@@ -2060,4 +2101,7 @@ func (sm *SchemaManager) registerDefaultSimplifiers() {
 
 	// Register ClickHouse simplifier
 	sm.RegisterSimplifier("clickhouse", &ClickHouseSimplifier{})
+
+	// Register MongoDB simplifier
+	sm.RegisterSimplifier("mongodb", &MongoDBSimplifier{})
 }

@@ -17,6 +17,8 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 			return OpenAIMySQLLLMResponseSchema
 		case DatabaseTypeClickhouse:
 			return OpenAIClickhouseLLMResponseSchema
+		case DatabaseTypeMongoDB:
+			return OpenAIMongoDBLLMResponseSchema
 		default:
 			return OpenAIPostgresLLMResponseSchema
 		}
@@ -30,6 +32,8 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 			return GeminiMySQLLLMResponseSchema
 		case DatabaseTypeClickhouse:
 			return GeminiClickhouseLLMResponseSchema
+		case DatabaseTypeMongoDB:
+			return GeminiMongoDBLLMResponseSchema
 		default:
 			return GeminiPostgresLLMResponseSchema
 		}
@@ -50,6 +54,8 @@ func GetSystemPrompt(provider string, dbType string) string {
 			return OpenAIYugabyteDBPrompt
 		case DatabaseTypeClickhouse:
 			return OpenAIClickhousePrompt
+		case DatabaseTypeMongoDB:
+			return OpenAIMongoDBPrompt
 		default:
 			return OpenAIPostgreSQLPrompt // Default to PostgreSQL
 		}
@@ -63,6 +69,8 @@ func GetSystemPrompt(provider string, dbType string) string {
 			return GeminiMySQLPrompt
 		case DatabaseTypeClickhouse:
 			return GeminiClickhousePrompt
+		case DatabaseTypeMongoDB:
+			return GeminiMongoDBPrompt
 		default:
 			return GeminiPostgreSQLPrompt // Default to PostgreSQL
 		}

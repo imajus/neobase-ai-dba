@@ -60,7 +60,7 @@ const SupportedTechnologiesSection: React.FC = () => {
         {Array.from({ length: 3 }).map((_, i) => (
           <img 
             key={`mongo-${i}`}
-            src="/mongodb-logo.png" 
+            src="/mongodb-logo.svg" 
             alt="" 
             className="absolute w-10 sm:w-12 md:w-14 h-10 sm:h-12 md:h-14 animate-float opacity-10"
             style={{

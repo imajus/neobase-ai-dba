@@ -279,7 +279,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
                 <div className="space-y-2 max-h-[40vh] overflow-y-auto neo-border p-4 rounded-lg">
                   {filteredTables.length === 0 ? (
                     <div className="text-center py-4 text-gray-500">
-                      {searchQuery ? 'No tables match your search' : 'No tables found in database'}
+                      {searchQuery ? 'No tables/collections match your search' : 'No tables/collections found in database'}
                     </div>
                   ) : (
                     filteredTables.map(table => (

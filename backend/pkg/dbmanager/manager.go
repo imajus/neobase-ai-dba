@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -25,6 +26,10 @@ import (
 
 	"crypto/tls"
 	"crypto/x509"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
 const (
@@ -41,12 +46,13 @@ type cleanupMetrics struct {
 
 // DatabasePool represents a shared database connection with reference counting
 type DatabasePool struct {
-	DB       *sql.DB
-	GORMDB   *gorm.DB
-	RefCount int
-	Config   ConnectionConfig
-	LastUsed time.Time
-	Mutex    sync.Mutex // For thread-safe reference counting
+	DB         *sql.DB
+	GORMDB     *gorm.DB
+	RefCount   int
+	Config     ConnectionConfig
+	LastUsed   time.Time
+	Mutex      sync.Mutex // For thread-safe reference counting
+	MongoDBObj interface{}
 }
 
 // Manager handles database connections
@@ -125,6 +131,10 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 	// Add ClickHouse schema fetcher registration
 	m.RegisterFetcher("clickhouse", func(db DBExecutor) SchemaFetcher {
 		return NewClickHouseSchemaFetcher(db)
+	})
+
+	m.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
+		return NewMongoDBSchemaFetcher(db)
 	})
 
 	m.registerDefaultDrivers()
@@ -233,6 +243,11 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 			RefCount: 1,
 			Config:   config,
 			LastUsed: time.Now(),
+		}
+
+		// For MongoDB, store the MongoDB client in the pool
+		if config.Type == "mongodb" {
+			newPool.MongoDBObj = conn.MongoDBObj
 		}
 
 		m.dbPoolsMu.Lock()
@@ -400,6 +415,17 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 		return NewMySQLWrapper(conn.DB, m, chatID), nil
 	case constants.DatabaseTypeClickhouse:
 		return NewClickHouseWrapper(conn.DB, m, chatID), nil
+	case constants.DatabaseTypeMongoDB:
+		// For MongoDB, we use the MongoDBObj field instead of DB
+		_, ok := conn.MongoDBObj.(*MongoDBWrapper)
+		if !ok {
+			return nil, fmt.Errorf("invalid MongoDB connection")
+		}
+		executor, err := NewMongoDBExecutor(conn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create MongoDB executor: %v", err)
+		}
+		return executor, nil
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", conn.Config.Type)
 	}
@@ -809,7 +835,18 @@ func (m *Manager) IsConnected(chatID string) bool {
 		return false
 	}
 
-	// Try a simple ping to check if connection is alive
+	// For MongoDB connections
+	if conn.Config.Type == "mongodb" {
+		if wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper); ok && wrapper != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			err := wrapper.Client.Ping(ctx, nil)
+			return err == nil
+		}
+		return false
+	}
+
+	// For SQL connections
 	if conn.DB != nil {
 		sqlDB, err := conn.DB.DB()
 		if err != nil {
@@ -1255,6 +1292,140 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 
 		return nil
 
+	case constants.DatabaseTypeMongoDB:
+		log.Printf("DBManager -> TestConnection -> Testing MongoDB connection at %s:%s", config.Host, config.Port)
+
+		var uri string
+
+		// Check if we're using SRV records (mongodb+srv://)
+		isSRV := strings.Contains(config.Host, ".mongodb.net")
+		protocol := "mongodb"
+		if isSRV {
+			protocol = "mongodb+srv"
+		}
+
+		// Base connection parameters with authentication
+		if config.Username != nil && *config.Username != "" {
+			// URL encode username and password to handle special characters
+			encodedUsername := url.QueryEscape(*config.Username)
+			encodedPassword := url.QueryEscape(*config.Password)
+
+			if isSRV {
+				// For SRV records, don't include port
+				uri = fmt.Sprintf("%s://%s:%s@%s/%s",
+					protocol, encodedUsername, encodedPassword, config.Host, config.Database)
+			} else {
+				// Include port for standard connections
+				uri = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
+					protocol, encodedUsername, encodedPassword, config.Host, config.Port, config.Database)
+			}
+		} else {
+			// Without authentication
+			if isSRV {
+				// For SRV records, don't include port
+				uri = fmt.Sprintf("%s://%s/%s", protocol, config.Host, config.Database)
+			} else {
+				// Include port for standard connections
+				uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, config.Port, config.Database)
+			}
+		}
+
+		// Add connection options
+		if isSRV {
+			uri += "?retryWrites=true&w=majority"
+		}
+
+		// Configure client options
+		clientOptions := options.Client().ApplyURI(uri)
+
+		// Configure SSL/TLS
+		if config.UseSSL {
+			// Fetch certificates from URLs
+			certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			if err != nil {
+				return err
+			}
+
+			// Track temporary files for cleanup
+			tempFiles = certTempFiles
+
+			// Configure TLS
+			tlsConfig := &tls.Config{
+				InsecureSkipVerify: false, // Always verify certificates
+			}
+
+			// Add client certificates if provided
+			if certPath != "" && keyPath != "" {
+				cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return fmt.Errorf("failed to load client certificates: %v", err)
+				}
+				tlsConfig.Certificates = []tls.Certificate{cert}
+			}
+
+			// Add root CA if provided
+			if rootCertPath != "" {
+				rootCA, err := os.ReadFile(rootCertPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return fmt.Errorf("failed to read root CA: %v", err)
+				}
+
+				rootCertPool := x509.NewCertPool()
+				if ok := rootCertPool.AppendCertsFromPEM(rootCA); !ok {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return fmt.Errorf("failed to parse root CA certificate")
+				}
+
+				tlsConfig.RootCAs = rootCertPool
+			}
+
+			clientOptions.SetTLSConfig(tlsConfig)
+		}
+
+		// Connect to MongoDB with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		client, err := mongo.Connect(ctx, clientOptions)
+		if err != nil {
+			// Clean up temporary files
+			for _, file := range tempFiles {
+				os.Remove(file)
+			}
+			log.Printf("DBManager -> TestConnection -> Error connecting to MongoDB: %v", err)
+			return fmt.Errorf("failed to connect to MongoDB: %v", err)
+		}
+
+		// Ping the database to verify connection
+		err = client.Ping(ctx, readpref.Primary())
+
+		// Disconnect regardless of ping result
+		client.Disconnect(ctx)
+
+		// Clean up temporary files
+		for _, file := range tempFiles {
+			os.Remove(file)
+		}
+
+		if err != nil {
+			log.Printf("DBManager -> TestConnection -> Error pinging MongoDB: %v", err)
+			return fmt.Errorf("failed to ping MongoDB: %v", err)
+		}
+
+		log.Printf("DBManager -> TestConnection -> Successfully connected to MongoDB")
+		return nil
+
 	default:
 		return fmt.Errorf("unsupported database type: %s", config.Type)
 	}
@@ -1413,6 +1584,14 @@ func (m *Manager) registerDefaultDrivers() {
 
 	// Register ClickHouse driver
 	m.RegisterDriver("clickhouse", NewClickHouseDriver())
+
+	// Register MongoDB driver
+	m.RegisterDriver("mongodb", NewMongoDBDriver())
+
+	// Register MongoDB schema fetcher
+	m.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
+		return NewMongoDBSchemaFetcher(db)
+	})
 }
 
 // generateConfigKey creates a unique string key for a database configuration

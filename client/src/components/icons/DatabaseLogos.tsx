@@ -9,7 +9,7 @@ const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
   postgresql: `${import.meta.env.VITE_FRONTEND_BASE_URL}postgresql-logo.png`,
   yugabytedb: `${import.meta.env.VITE_FRONTEND_BASE_URL}yugabytedb-logo.svg`,
   mysql: `${import.meta.env.VITE_FRONTEND_BASE_URL}mysql-logo.png`,
-  mongodb: `${import.meta.env.VITE_FRONTEND_BASE_URL}mongodb-logo.png`,
+  mongodb: `${import.meta.env.VITE_FRONTEND_BASE_URL}mongodb-logo.svg`,
   redis: `${import.meta.env.VITE_FRONTEND_BASE_URL}redis-logo.svg`,
   clickhouse: `${import.meta.env.VITE_FRONTEND_BASE_URL}clickhouse-logo.svg`,
   neo4j: `${import.meta.env.VITE_FRONTEND_BASE_URL}neo4j-logo.png`

@@ -3,7 +3,7 @@ package dtos
 type CreateConnectionRequest struct {
 	Type     string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j"`
 	Host     string  `json:"host" binding:"required"`
-	Port     string  `json:"port" binding:"required"`
+	Port     *string `json:"port"`
 	Username string  `json:"username" binding:"required"`
 	Password *string `json:"password"`
 	Database string  `json:"database" binding:"required"`
@@ -16,12 +16,12 @@ type CreateConnectionRequest struct {
 }
 
 type ConnectionResponse struct {
-	ID       string `json:"id" binding:"required"`
-	Type     string `json:"type" binding:"required"`
-	Host     string `json:"host" binding:"required"`
-	Port     string `json:"port" binding:"required"`
-	Username string `json:"username" binding:"required"`
-	Database string `json:"database" binding:"required"`
+	ID       string  `json:"id" binding:"required"`
+	Type     string  `json:"type" binding:"required"`
+	Host     string  `json:"host" binding:"required"`
+	Port     *string `json:"port"`
+	Username string  `json:"username" binding:"required"`
+	Database string  `json:"database" binding:"required"`
 	// Password not exposed in response
 
 	// SSL/TLS Configuration

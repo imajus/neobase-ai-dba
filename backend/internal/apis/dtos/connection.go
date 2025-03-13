@@ -4,7 +4,7 @@ type ConnectionStatusResponse struct {
 	IsConnected bool   `json:"is_connected"`
 	Type        string `json:"type"`
 	Host        string `json:"host"`
-	Port        int    `json:"port"`
+	Port        *int   `json:"port"`
 	Database    string `json:"database"`
 	Username    string `json:"username"`
 }

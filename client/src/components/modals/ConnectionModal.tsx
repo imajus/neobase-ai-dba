@@ -75,9 +75,14 @@ export default function ConnectionModal({
         }
         break;
       case 'port':
-        if (!value.port.trim()) {
+        if (value.type === 'mongodb') {
+          value.port = '';
+          return '';
+        }
+        if (!value.port) {
           return 'Port is required';
         }
+        
         const port = parseInt(value.port);
         if (isNaN(port) || port < 1 || port > 65535) {
           return 'Port must be between 1 and 65535';
@@ -445,7 +450,7 @@ SSL_ROOT_CERT_URL=https://example.com/ca.pem`}
                     { value: 'yugabytedb', label: 'YugabyteDB' },
                     { value: 'mysql', label: 'MySQL' },
                     { value: 'clickhouse', label: 'ClickHouse' },
-                    { value: 'mongodb', label: 'MongoDB (Coming Soon)' },
+                    { value: 'mongodb', label: 'MongoDB' },
                     { value: 'redis', label: 'Redis (Coming Soon)' },
                     { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
                   ].map(option => (
@@ -492,7 +497,6 @@ SSL_ROOT_CERT_URL=https://example.com/ca.pem`}
                 onBlur={handleBlur}
                 className={`neo-input w-full ${errors.port && touched.port ? 'border-neo-error' : ''}`}
                 placeholder="e.g., 5432 (PostgreSQL), 3306 (MySQL), 27017 (MongoDB)"
-                required
               />
               {errors.port && touched.port && (
                 <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
@@ -555,7 +559,7 @@ SSL_ROOT_CERT_URL=https://example.com/ca.pem`}
                 className="neo-input w-full"
                 placeholder="Enter your database password"
               />
-              <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password</p>
+              <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
             </div>
 
             {/* SSL Toggle */}
