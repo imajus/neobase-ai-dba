@@ -813,14 +813,6 @@ var OpenAIMongoDBLLMResponseSchema = `{
                        "type": "string",
                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
                    },
-                   "validationSchema": {
-                       "type": "object",
-                       "description": "JSON Schema for collection validation (for createCollection operations)"
-                   },
-                   "indexOptions": {
-                       "type": "object",
-                       "description": "Index options for collection (for createCollection or createIndex operations)"
-                   }
                },
                "additionalProperties": false
            },

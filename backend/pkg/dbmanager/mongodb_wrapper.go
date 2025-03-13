@@ -81,6 +81,71 @@ func (e *MongoDBExecutor) QueryRows(query string, dest *[]map[string]interface{}
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
 
+	// Handle special operations that don't operate on collections
+	if operation == "createCollection" {
+		// For createCollection, we need to handle it differently
+		// The format is db.createCollection("name", {options})
+
+		// Extract the collection name (removing quotes)
+		params := strings.SplitN(paramsStr, ",", 2)
+		collName := strings.Trim(params[0], "\" '")
+
+		// Create options if provided
+		var createOptions *options.CreateCollectionOptions
+		if len(params) > 1 {
+			// Parse the options
+			var optionsMap map[string]interface{}
+			if err := json.Unmarshal([]byte(params[1]), &optionsMap); err != nil {
+				return fmt.Errorf("failed to parse collection options: %v", err)
+			}
+
+			// Handle validator if present
+			if validator, ok := optionsMap["validator"]; ok {
+				createOptions = options.CreateCollection()
+
+				// Convert validator to bson.D
+				validatorBson, err := convertToBsonD(validator)
+				if err != nil {
+					return fmt.Errorf("failed to convert validator to BSON: %v", err)
+				}
+
+				createOptions.SetValidator(validatorBson)
+			}
+
+			// Handle other options like capped, size, etc.
+			if capped, ok := optionsMap["capped"].(bool); ok && capped {
+				if createOptions == nil {
+					createOptions = options.CreateCollection()
+				}
+				createOptions.SetCapped(true)
+
+				if size, ok := optionsMap["size"].(float64); ok {
+					createOptions.SetSizeInBytes(int64(size))
+				}
+
+				if maxDocuments, ok := optionsMap["max"].(float64); ok {
+					createOptions.SetMaxDocuments(int64(maxDocuments))
+				}
+			}
+		}
+
+		// Execute the createCollection operation
+		err := e.wrapper.Client.Database(e.wrapper.Database).CreateCollection(context.Background(), collName, createOptions)
+		if err != nil {
+			return fmt.Errorf("failed to create collection: %v", err)
+		}
+
+		// Set the result
+		*dest = []map[string]interface{}{
+			{
+				"ok":      1,
+				"message": fmt.Sprintf("Collection '%s' created successfully", collName),
+			},
+		}
+
+		return nil
+	}
+
 	// Get the MongoDB collection
 	collection := e.wrapper.Client.Database(e.wrapper.Database).Collection(collectionName)
 
@@ -219,6 +284,24 @@ func convertMongoDBValue(value interface{}) interface{} {
 	default:
 		return v
 	}
+}
+
+// convertToBsonD converts an interface{} to bson.D
+func convertToBsonD(data interface{}) (bson.D, error) {
+	// First convert to JSON
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal to JSON: %v", err)
+	}
+
+	// Then unmarshal to bson.D
+	var result bson.D
+	err = bson.UnmarshalExtJSON(jsonData, true, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal to BSON: %v", err)
+	}
+
+	return result, nil
 }
 
 // ListCollections lists all collections in the MongoDB database

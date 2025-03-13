@@ -339,7 +339,7 @@ json
   "queries": [
     {
       "query": "MongoDB query with actual values (no placeholders)",
-      "queryType": "FIND/INSERT/UPDATE/DELETE/AGGREGATE...",
+      "queryType": "FIND/INSERT/UPDATE/DELETE/AGGREGATE/CREATE_COLLECTION/DROP_COLLECTION...",
       "isCritical": "true when the query is critical like adding, updating or deleting data",
       "canRollback": "true when the request query can be rolled back",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",

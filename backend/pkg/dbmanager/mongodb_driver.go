@@ -11,6 +11,8 @@ import (
 	"neobase-ai/internal/utils"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -754,25 +756,97 @@ func (d *MongoDBDriver) IsAlive(conn *Connection) bool {
 
 // ExecuteQuery executes a MongoDB query
 func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
-	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
 	startTime := time.Now()
+	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
 
-	// Get the MongoDB wrapper from the connection
+	// Get the MongoDB wrapper
 	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
 	if !ok {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "Invalid MongoDB connection",
-				Code:    "INVALID_CONNECTION",
+				Code:    "CONNECTION_ERROR",
 			},
 		}
 	}
 
-	// Parse the MongoDB query
-	// MongoDB queries are expected in the format: db.collection.operation({...})
-	// For example: db.users.find({name: "John"})
+	// Parse the query
+	// Example: db.collection.find({name: "John"})
 	parts := strings.SplitN(query, ".", 3)
 	if len(parts) < 3 || !strings.HasPrefix(parts[0], "db") {
+		// Special case for createCollection which has a different format
+		// Example: db.createCollection("collectionName", {...})
+		if strings.Contains(query, "createCollection") {
+			createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
+			matches := createCollectionRegex.FindStringSubmatch(query)
+			if len(matches) >= 3 {
+				collectionName := matches[1]
+				optionsStr := strings.TrimSpace(matches[2])
+
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
+
+				// Process the options
+				var options bson.M
+				if optionsStr != "" {
+					// Process the options to handle MongoDB syntax
+					jsonStr, err := processMongoDBQueryParams(optionsStr)
+					if err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process collection options: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+
+					if err := json.Unmarshal([]byte(jsonStr), &options); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to parse collection options: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+				}
+
+				// Execute the createCollection operation
+				err := wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to create collection: %v", err),
+							Code:    "EXECUTION_ERROR",
+						},
+					}
+				}
+
+				result := map[string]interface{}{
+					"ok":      1,
+					"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+				}
+
+				// Convert the result to JSON
+				resultJSON, err := json.Marshal(result)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+							Code:    "JSON_ERROR",
+						},
+					}
+				}
+
+				executionTime := int(time.Since(startTime).Milliseconds())
+				log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
+				return &QueryExecutionResult{
+					Result:        result,
+					ResultJSON:    string(resultJSON),
+					ExecutionTime: executionTime,
+				}
+			}
+		}
+
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
@@ -798,8 +872,41 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 	}
 
+	// Extract the operation and parameters
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
+
+	// Handle query modifiers like .limit(), .skip(), etc.
+	modifiers := make(map[string]interface{})
+	if closeParenIndex < len(operationWithParams)-1 {
+		// There might be modifiers after the closing parenthesis
+		modifiersStr := operationWithParams[closeParenIndex+1:]
+
+		// Extract limit modifier
+		limitRegex := regexp.MustCompile(`\.limit\((\d+)\)`)
+		if limitMatches := limitRegex.FindStringSubmatch(modifiersStr); len(limitMatches) > 1 {
+			if limit, err := strconv.Atoi(limitMatches[1]); err == nil {
+				modifiers["limit"] = limit
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Found limit modifier: %d", limit)
+			}
+		}
+
+		// Extract skip modifier
+		skipRegex := regexp.MustCompile(`\.skip\((\d+)\)`)
+		if skipMatches := skipRegex.FindStringSubmatch(modifiersStr); len(skipMatches) > 1 {
+			if skip, err := strconv.Atoi(skipMatches[1]); err == nil {
+				modifiers["skip"] = skip
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Found skip modifier: %d", skip)
+			}
+		}
+
+		// Extract sort modifier
+		sortRegex := regexp.MustCompile(`\.sort\(([^)]+)\)`)
+		if sortMatches := sortRegex.FindStringSubmatch(modifiersStr); len(sortMatches) > 1 {
+			modifiers["sort"] = sortMatches[1]
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Found sort modifier: %s", sortMatches[1])
+		}
+	}
 
 	// Get the MongoDB collection
 	collection := wrapper.Client.Database(wrapper.Database).Collection(collectionName)
@@ -814,16 +921,84 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse query parameters: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
-		// Execute the find operation
-		cursor, err := collection.Find(ctx, filter)
+		// Create find options from modifiers
+		findOptions := options.Find()
+		if limit, ok := modifiers["limit"].(int); ok {
+			findOptions.SetLimit(int64(limit))
+		}
+		if skip, ok := modifiers["skip"].(int); ok {
+			findOptions.SetSkip(int64(skip))
+		}
+		if sortStr, ok := modifiers["sort"].(string); ok {
+			// Parse sort string into bson.D
+			// Example: {field: 1} or {field: -1}
+			var sort bson.D
+			if err := json.Unmarshal([]byte(sortStr), &sort); err != nil {
+				// Try to handle MongoDB syntax
+				jsonSortStr, err := processMongoDBQueryParams(sortStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonSortStr), &sort); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+			findOptions.SetSort(sort)
+		}
+
+		// Execute the find operation with options
+		cursor, err := collection.Find(ctx, filter, findOptions)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -851,12 +1026,44 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse query parameters: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
 		// Execute the findOne operation
@@ -902,18 +1109,36 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 
 		result = map[string]interface{}{
-			"_id": insertResult.InsertedID,
+			"insertedId": insertResult.InsertedID,
 		}
 
 	case "insertMany":
 		// Parse the parameters as an array of BSON documents
 		var documents []interface{}
 		if err := json.Unmarshal([]byte(paramsStr), &documents); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse documents: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB documents: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process documents: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted documents: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &documents); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse documents after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
@@ -929,7 +1154,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 
 		result = map[string]interface{}{
-			"_ids":          insertResult.InsertedIDs,
+			"insertedIds":   insertResult.InsertedIDs,
 			"insertedCount": len(insertResult.InsertedIDs),
 		}
 
@@ -946,22 +1171,79 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			}
 		}
 
+		// Process filter with MongoDB syntax
+		filterStr := params[0]
+		updateStr := params[1]
+
+		// Process the filter to handle MongoDB syntax
 		var filter bson.M
-		var update bson.M
-		if err := json.Unmarshal([]byte(params[0]), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonFilterStr, err := processMongoDBQueryParams(filterStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
+
+			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
-		if err := json.Unmarshal([]byte(params[1]), &update); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse update: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+
+		// Process update with MongoDB syntax
+		var update bson.M
+		if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonUpdateStr, err := processMongoDBQueryParams(updateStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process update parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
+
+			if err := json.Unmarshal([]byte(jsonUpdateStr), &update); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse update after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
@@ -995,22 +1277,79 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			}
 		}
 
+		// Process filter with MongoDB syntax
+		filterStr := params[0]
+		updateStr := params[1]
+
+		// Process the filter to handle MongoDB syntax
 		var filter bson.M
-		var update bson.M
-		if err := json.Unmarshal([]byte(params[0]), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonFilterStr, err := processMongoDBQueryParams(filterStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
+
+			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
-		if err := json.Unmarshal([]byte(params[1]), &update); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse update: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+
+		// Process update with MongoDB syntax
+		var update bson.M
+		if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonUpdateStr, err := processMongoDBQueryParams(updateStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process update parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
+
+			if err := json.Unmarshal([]byte(jsonUpdateStr), &update); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse update after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
@@ -1035,12 +1374,44 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
 		// Execute the deleteOne operation
@@ -1062,12 +1433,44 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and operators like $or
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after conversion: %s", string(filterJSON))
 		}
 
 		// Execute the deleteMany operation
@@ -1089,18 +1492,57 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Parse the parameters as a pipeline
 		var pipeline []bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse aggregation pipeline: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process aggregation pipeline: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse aggregation pipeline after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Process ObjectIds in each stage of the pipeline
+			for _, stage := range pipeline {
+				if err := processObjectIds(stage); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process ObjectIds in aggregation pipeline: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Log the final pipeline for debugging
+			pipelineJSON, _ := json.Marshal(pipeline)
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after ObjectId conversion: %s", string(pipelineJSON))
 		}
 
 		// Convert []bson.M to mongo.Pipeline
 		mongoPipeline := make(mongo.Pipeline, len(pipeline))
 		for i, stage := range pipeline {
-			mongoPipeline[i] = bson.D{{Key: "$match", Value: stage}}
+			// Convert each stage to bson.D
+			stageD := bson.D{}
+			for k, v := range stage {
+				stageD = append(stageD, bson.E{Key: k, Value: v})
+			}
+			mongoPipeline[i] = stageD
 		}
 
 		// Execute the aggregate operation
@@ -1155,6 +1597,41 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			"count": count,
 		}
 
+	case "createCollection":
+		// Execute the createCollection operation with default options
+		// We're simplifying this implementation to avoid complex option handling
+		err := collection.Database().CreateCollection(ctx, collectionName)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to create collection: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"ok":      1,
+			"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+		}
+
+	case "dropCollection":
+		// Execute the dropCollection operation
+		err := collection.Drop(ctx)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to drop collection: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"ok":      1,
+			"message": fmt.Sprintf("Collection '%s' dropped successfully", collectionName),
+		}
+
 	default:
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
@@ -1175,9 +1652,14 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 	}
 
-	// Create a result map
-	resultMap := map[string]interface{}{
-		"result": result,
+	var resultMap map[string]interface{}
+	if tempResultMap, ok := result.(map[string]interface{}); ok {
+		// Create a result map
+		resultMap = tempResultMap
+	} else {
+		resultMap = map[string]interface{}{
+			"results": result,
+		}
 	}
 
 	executionTime := int(time.Since(startTime).Milliseconds())
@@ -1241,12 +1723,11 @@ func (tx *MongoDBTransaction) Commit() error {
 		return fmt.Errorf("cannot commit transaction with error: %v", tx.Error)
 	}
 
-	// Create a context with the session
+	// Create a context
 	ctx := context.Background()
-	sessionCtx := mongo.NewSessionContext(ctx, tx.Session)
 
 	// Commit the transaction
-	err := tx.Session.CommitTransaction(sessionCtx)
+	err := tx.Session.CommitTransaction(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to commit MongoDB transaction: %v", err)
 	}
@@ -1269,12 +1750,11 @@ func (tx *MongoDBTransaction) Rollback() error {
 		return nil
 	}
 
-	// Create a context with the session
+	// Create a context
 	ctx := context.Background()
-	sessionCtx := mongo.NewSessionContext(ctx, tx.Session)
 
 	// Abort the transaction
-	err := tx.Session.AbortTransaction(sessionCtx)
+	err := tx.Session.AbortTransaction(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to abort MongoDB transaction: %v", err)
 	}
@@ -1314,14 +1794,94 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
-	// Create a context with the session
-	sessionCtx := mongo.NewSessionContext(ctx, tx.Session)
-
 	// Parse the MongoDB query
 	// MongoDB queries are expected in the format: db.collection.operation({...})
 	// For example: db.users.find({name: "John"})
 	parts := strings.SplitN(query, ".", 3)
 	if len(parts) < 3 || !strings.HasPrefix(parts[0], "db") {
+		// Special case for createCollection which has a different format
+		// Example: db.createCollection("collectionName", {...})
+		if strings.Contains(query, "createCollection") {
+			createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
+			matches := createCollectionRegex.FindStringSubmatch(query)
+			if len(matches) >= 3 {
+				collectionName := matches[1]
+				optionsStr := strings.TrimSpace(matches[2])
+
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
+
+				// Process the options
+				var options bson.M
+				if optionsStr != "" {
+					// Process the options to handle MongoDB syntax
+					jsonStr, err := processMongoDBQueryParams(optionsStr)
+					if err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process collection options: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+
+					if err := json.Unmarshal([]byte(jsonStr), &options); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to parse collection options: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+				}
+
+				// Execute the createCollection operation
+				wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
+				if !ok {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: "Invalid MongoDB connection",
+							Code:    "CONNECTION_ERROR",
+						},
+					}
+				}
+
+				err := wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to create collection: %v", err),
+							Code:    "EXECUTION_ERROR",
+						},
+					}
+				}
+
+				result := map[string]interface{}{
+					"ok":      1,
+					"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+				}
+
+				// Convert the result to JSON
+				resultJSON, err := json.Marshal(result)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+							Code:    "JSON_ERROR",
+						},
+					}
+				}
+
+				executionTime := int(time.Since(startTime).Milliseconds())
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
+				return &QueryExecutionResult{
+					Result:        result,
+					ResultJSON:    string(resultJSON),
+					ExecutionTime: executionTime,
+				}
+			}
+		}
+
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
@@ -1347,48 +1907,158 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
+	// Extract the operation and parameters
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
 
+	// Handle query modifiers like .limit(), .skip(), etc.
+	modifiers := make(map[string]interface{})
+	if closeParenIndex < len(operationWithParams)-1 {
+		// There might be modifiers after the closing parenthesis
+		modifiersStr := operationWithParams[closeParenIndex+1:]
+
+		// Extract limit modifier
+		limitRegex := regexp.MustCompile(`\.limit\((\d+)\)`)
+		if limitMatches := limitRegex.FindStringSubmatch(modifiersStr); len(limitMatches) > 1 {
+			if limit, err := strconv.Atoi(limitMatches[1]); err == nil {
+				modifiers["limit"] = limit
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Found limit modifier: %d", limit)
+			}
+		}
+
+		// Extract skip modifier
+		skipRegex := regexp.MustCompile(`\.skip\((\d+)\)`)
+		if skipMatches := skipRegex.FindStringSubmatch(modifiersStr); len(skipMatches) > 1 {
+			if skip, err := strconv.Atoi(skipMatches[1]); err == nil {
+				modifiers["skip"] = skip
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Found skip modifier: %d", skip)
+			}
+		}
+
+		// Extract sort modifier
+		sortRegex := regexp.MustCompile(`\.sort\(([^)]+)\)`)
+		if sortMatches := sortRegex.FindStringSubmatch(modifiersStr); len(sortMatches) > 1 {
+			modifiers["sort"] = sortMatches[1]
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Found sort modifier: %s", sortMatches[1])
+		}
+	}
+
 	// Get the MongoDB collection
-	collection := tx.Wrapper.Client.Database(tx.Wrapper.Database).Collection(collectionName)
+	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
+	if !ok {
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "Invalid MongoDB connection",
+				Code:    "CONNECTION_ERROR",
+			},
+		}
+	}
+	collection := wrapper.Client.Database(wrapper.Database).Collection(collectionName)
 
 	var result interface{}
 	var err error
 
-	log.Printf("MongoDBDriver -> ExecuteQuery -> operation: %s", operation)
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> operation: %s", operation)
 	// Execute the operation based on the type
 	switch operation {
 	case "find":
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse query parameters: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
-		// Execute the find operation within the transaction
-		cursor, err := collection.Find(sessionCtx, filter)
+		// Create find options from modifiers
+		findOptions := options.Find()
+		if limit, ok := modifiers["limit"].(int); ok {
+			findOptions.SetLimit(int64(limit))
+		}
+		if skip, ok := modifiers["skip"].(int); ok {
+			findOptions.SetSkip(int64(skip))
+		}
+		if sortStr, ok := modifiers["sort"].(string); ok {
+			// Parse sort string into bson.D
+			// Example: {field: 1} or {field: -1}
+			var sort bson.D
+			if err := json.Unmarshal([]byte(sortStr), &sort); err != nil {
+				// Try to handle MongoDB syntax
+				jsonSortStr, err := processMongoDBQueryParams(sortStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonSortStr), &sort); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+			findOptions.SetSort(sort)
+		}
+
+		// Execute the find operation with options
+		cursor, err := collection.Find(ctx, filter, findOptions)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute find operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute find operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
 		}
-		defer cursor.Close(sessionCtx)
+		defer cursor.Close(ctx)
 
 		// Decode the results
 		var results []bson.M
-		if err := cursor.All(sessionCtx, &results); err != nil {
+		if err := cursor.All(ctx, &results); err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode results in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to decode results: %v", err),
 					Code:    "DECODE_ERROR",
 				},
 			}
@@ -1400,17 +2070,49 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse query parameters: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
-		// Execute the findOne operation within the transaction
+		// Execute the findOne operation
 		var doc bson.M
-		err = collection.FindOne(sessionCtx, filter).Decode(&doc)
+		err = collection.FindOne(ctx, filter).Decode(&doc)
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
 				// No documents found, return empty result
@@ -1418,7 +2120,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			} else {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to execute findOne operation in transaction: %v", err),
+						Message: fmt.Sprintf("Failed to execute findOne operation: %v", err),
 						Code:    "EXECUTION_ERROR",
 					},
 				}
@@ -1439,46 +2141,64 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			}
 		}
 
-		// Execute the insertOne operation within the transaction
-		insertResult, err := collection.InsertOne(sessionCtx, document)
+		// Execute the insertOne operation
+		insertResult, err := collection.InsertOne(ctx, document)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute insertOne operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute insertOne operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
 		}
 
 		result = map[string]interface{}{
-			"_ids": insertResult.InsertedID,
+			"insertedId": insertResult.InsertedID,
 		}
 
 	case "insertMany":
 		// Parse the parameters as an array of BSON documents
 		var documents []interface{}
 		if err := json.Unmarshal([]byte(paramsStr), &documents); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse documents: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB documents: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process documents: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted documents: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &documents); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse documents after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
-		// Execute the insertMany operation within the transaction
-		insertResult, err := collection.InsertMany(sessionCtx, documents)
+		// Execute the insertMany operation
+		insertResult, err := collection.InsertMany(ctx, documents)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute insertMany operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute insertMany operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
 		}
 
 		result = map[string]interface{}{
-			"_ids":          insertResult.InsertedIDs,
+			"insertedIds":   insertResult.InsertedIDs,
 			"insertedCount": len(insertResult.InsertedIDs),
 		}
 
@@ -1495,31 +2215,88 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			}
 		}
 
+		// Process filter with MongoDB syntax
+		filterStr := params[0]
+		updateStr := params[1]
+
+		// Process the filter to handle MongoDB syntax
 		var filter bson.M
-		var update bson.M
-		if err := json.Unmarshal([]byte(params[0]), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonFilterStr, err := processMongoDBQueryParams(filterStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
+
+			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
-		if err := json.Unmarshal([]byte(params[1]), &update); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse update: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+
+		// Process update with MongoDB syntax
+		var update bson.M
+		if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonUpdateStr, err := processMongoDBQueryParams(updateStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process update parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
+
+			if err := json.Unmarshal([]byte(jsonUpdateStr), &update); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse update after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
-		// Execute the updateOne operation within the transaction
-		updateResult, err := collection.UpdateOne(sessionCtx, filter, update)
+		// Execute the updateOne operation
+		updateResult, err := collection.UpdateOne(ctx, filter, update)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute updateOne operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute updateOne operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
@@ -1528,7 +2305,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		result = map[string]interface{}{
 			"matchedCount":  updateResult.MatchedCount,
 			"modifiedCount": updateResult.ModifiedCount,
-			"_ids":          updateResult.UpsertedID,
+			"upsertedId":    updateResult.UpsertedID,
 		}
 
 	case "updateMany":
@@ -1544,31 +2321,88 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			}
 		}
 
+		// Process filter with MongoDB syntax
+		filterStr := params[0]
+		updateStr := params[1]
+
+		// Process the filter to handle MongoDB syntax
 		var filter bson.M
-		var update bson.M
-		if err := json.Unmarshal([]byte(params[0]), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonFilterStr, err := processMongoDBQueryParams(filterStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
+
+			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
-		if err := json.Unmarshal([]byte(params[1]), &update); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse update: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+
+		// Process update with MongoDB syntax
+		var update bson.M
+		if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonUpdateStr, err := processMongoDBQueryParams(updateStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process update parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
+
+			if err := json.Unmarshal([]byte(jsonUpdateStr), &update); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse update after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
-		// Execute the updateMany operation within the transaction
-		updateResult, err := collection.UpdateMany(sessionCtx, filter, update)
+		// Execute the updateMany operation
+		updateResult, err := collection.UpdateMany(ctx, filter, update)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute updateMany operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute updateMany operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
@@ -1577,27 +2411,59 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		result = map[string]interface{}{
 			"matchedCount":  updateResult.MatchedCount,
 			"modifiedCount": updateResult.ModifiedCount,
-			"_ids":          updateResult.UpsertedID,
+			"upsertedId":    updateResult.UpsertedID,
 		}
 
 	case "deleteOne":
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
-		// Execute the deleteOne operation within the transaction
-		deleteResult, err := collection.DeleteOne(sessionCtx, filter)
+		// Execute the deleteOne operation
+		deleteResult, err := collection.DeleteOne(ctx, filter)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute deleteOne operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute deleteOne operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
@@ -1611,20 +2477,52 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and operators like $or
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId in the filter
+			if err := processObjectIds(filter); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Log the final filter for debugging
+			filterJSON, _ := json.Marshal(filter)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after conversion: %s", string(filterJSON))
 		}
 
-		// Execute the deleteMany operation within the transaction
-		deleteResult, err := collection.DeleteMany(sessionCtx, filter)
+		// Execute the deleteMany operation
+		deleteResult, err := collection.DeleteMany(ctx, filter)
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute deleteMany operation in transaction: %v", err),
+					Message: fmt.Sprintf("Failed to execute deleteMany operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
@@ -1634,10 +2532,154 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			"deletedCount": deleteResult.DeletedCount,
 		}
 
+	case "aggregate":
+		// Parse the parameters as a pipeline
+		var pipeline []bson.M
+		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
+			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process aggregation pipeline: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse aggregation pipeline after conversion: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Process ObjectIds in each stage of the pipeline
+			for _, stage := range pipeline {
+				if err := processObjectIds(stage); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process ObjectIds in aggregation pipeline: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Log the final pipeline for debugging
+			pipelineJSON, _ := json.Marshal(pipeline)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after ObjectId conversion: %s", string(pipelineJSON))
+		}
+
+		// Convert []bson.M to mongo.Pipeline
+		mongoPipeline := make(mongo.Pipeline, len(pipeline))
+		for i, stage := range pipeline {
+			// Convert each stage to bson.D
+			stageD := bson.D{}
+			for k, v := range stage {
+				stageD = append(stageD, bson.E{Key: k, Value: v})
+			}
+			mongoPipeline[i] = stageD
+		}
+
+		// Execute the aggregate operation
+		cursor, err := collection.Aggregate(ctx, mongoPipeline)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to execute aggregate operation: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+		defer cursor.Close(ctx)
+
+		// Decode the results
+		var results []bson.M
+		if err := cursor.All(ctx, &results); err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to decode aggregation results: %v", err),
+					Code:    "DECODE_ERROR",
+				},
+			}
+		}
+
+		result = results
+
+	case "countDocuments":
+		// Parse the parameters as a BSON filter
+		var filter bson.M
+		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to parse filter: %v", err),
+					Code:    "INVALID_PARAMETERS",
+				},
+			}
+		}
+
+		// Execute the countDocuments operation
+		count, err := collection.CountDocuments(ctx, filter)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to execute countDocuments operation: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"count": count,
+		}
+
+	case "createCollection":
+		// Execute the createCollection operation with default options
+		// We're simplifying this implementation to avoid complex option handling
+		err := collection.Database().CreateCollection(ctx, collectionName)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to create collection: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"ok":      1,
+			"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+		}
+
+	case "dropCollection":
+		// Execute the dropCollection operation
+		err := collection.Drop(ctx)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to drop collection: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		result = map[string]interface{}{
+			"ok":      1,
+			"message": fmt.Sprintf("Collection '%s' dropped successfully", collectionName),
+		}
+
 	default:
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: fmt.Sprintf("Unsupported MongoDB operation in transaction: %s", operation),
+				Message: fmt.Sprintf("Unsupported MongoDB operation: %s", operation),
 				Code:    "UNSUPPORTED_OPERATION",
 			},
 		}
@@ -1654,17 +2696,162 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
-	// Create a result map
-	resultMap := map[string]interface{}{
-		"result": result,
+	var resultMap map[string]interface{}
+	if tempResultMap, ok := result.(map[string]interface{}); ok {
+		// Create a result map
+		resultMap = tempResultMap
+	} else {
+		resultMap = map[string]interface{}{
+			"results": result,
+		}
 	}
 
 	executionTime := int(time.Since(startTime).Milliseconds())
-	log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in transaction in %d ms", executionTime)
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
 
 	return &QueryExecutionResult{
 		Result:        resultMap,
 		ResultJSON:    string(resultJSON),
 		ExecutionTime: executionTime,
 	}
+}
+
+// processMongoDBQueryParams processes MongoDB query parameters
+func processMongoDBQueryParams(paramsStr string) (string, error) {
+	// Log the original string for debugging
+	log.Printf("Original MongoDB query params: %s", paramsStr)
+
+	// Check if the parameter string incorrectly includes the closing parenthesis and modifiers
+	// This can happen if the query is like: find({"make": "Toyota"}).limit(50)
+	// and we extract {"make": "Toyota"}).limit(50 as the parameter string
+	if idx := strings.Index(paramsStr, "})."); idx != -1 {
+		// Only keep the part before the closing parenthesis
+		paramsStr = paramsStr[:idx+1]
+		log.Printf("Fixed parameter string by removing modifiers: %s", paramsStr)
+	}
+
+	// First, handle MongoDB operators at the beginning of objects
+	// For example: {$or: [...]} -> {"$or": [...]}
+	operatorPattern := regexp.MustCompile(`\{\s*(\$[a-zA-Z]+):\s*`)
+	paramsStr = operatorPattern.ReplaceAllString(paramsStr, `{"$1": `)
+
+	// Handle ObjectId syntax: ObjectId('...') -> {"$oid":"..."}
+	// This pattern matches both ObjectId('...') and ObjectId("...")
+	objectIdPattern := regexp.MustCompile(`ObjectId\(['"]([^'"]+)['"]\)`)
+	paramsStr = objectIdPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Extract the ObjectId value
+		re := regexp.MustCompile(`ObjectId\(['"]([^'"]+)['"]\)`)
+		matches := re.FindStringSubmatch(match)
+		if len(matches) < 2 {
+			return match
+		}
+
+		// Return the proper JSON format for ObjectId
+		return fmt.Sprintf(`{"$oid":"%s"}`, matches[1])
+	})
+
+	// Log the processed string for debugging
+	log.Printf("After ObjectId replacement: %s", paramsStr)
+
+	// Temporarily replace $oid with a placeholder to prevent it from being modified
+	paramsStr = strings.ReplaceAll(paramsStr, "$oid", "__MONGODB_OID__")
+
+	// Handle field names that might not be quoted
+	re := regexp.MustCompile(`(\w+):\s*`)
+	jsonStr := re.ReplaceAllString(paramsStr, "\"$1\": ")
+
+	// Restore $oid
+	jsonStr = strings.ReplaceAll(jsonStr, "__MONGODB_OID__", "$oid")
+
+	// Log the final processed string for debugging
+	log.Printf("Final processed MongoDB query params: %s", jsonStr)
+
+	// Handle MongoDB operators
+	operatorReplacements := map[string]string{
+		// Comparison operators
+		"$eq":  "\"$eq\"",
+		"$gt":  "\"$gt\"",
+		"$gte": "\"$gte\"",
+		"$in":  "\"$in\"",
+		"$lt":  "\"$lt\"",
+		"$lte": "\"$lte\"",
+		"$ne":  "\"$ne\"",
+		"$nin": "\"$nin\"",
+
+		// Logical operators
+		"$and": "\"$and\"",
+		"$not": "\"$not\"",
+		"$nor": "\"$nor\"",
+		"$or":  "\"$or\"",
+
+		// Element operators
+		"$exists": "\"$exists\"",
+		"$type":   "\"$type\"",
+
+		// Array operators
+		"$all":       "\"$all\"",
+		"$elemMatch": "\"$elemMatch\"",
+		"$size":      "\"$size\"",
+
+		// Update operators
+		"$set":      "\"$set\"",
+		"$unset":    "\"$unset\"",
+		"$inc":      "\"$inc\"",
+		"$push":     "\"$push\"",
+		"$pull":     "\"$pull\"",
+		"$addToSet": "\"$addToSet\"",
+	}
+
+	for operator, replacement := range operatorReplacements {
+		jsonStr = strings.ReplaceAll(jsonStr, operator+":", replacement+":")
+	}
+
+	// Log the final processed string for debugging
+	log.Printf("Final MongoDB query params after all processing: %s", jsonStr)
+
+	return jsonStr, nil
+}
+
+// processObjectIds processes ObjectId syntax in MongoDB queries
+func processObjectIds(filter map[string]interface{}) error {
+	// Log the input filter for debugging
+	filterJSON, _ := json.Marshal(filter)
+	log.Printf("processObjectIds input: %s", string(filterJSON))
+
+	for key, value := range filter {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// Check if this is an ObjectId
+			if oidStr, ok := v["$oid"].(string); ok && len(v) == 1 {
+				// Convert to ObjectID
+				oid, err := primitive.ObjectIDFromHex(oidStr)
+				if err != nil {
+					return fmt.Errorf("invalid ObjectId: %v", err)
+				}
+				filter[key] = oid
+				log.Printf("Converted ObjectId %s to %v", oidStr, oid)
+			} else {
+				// Recursively process nested maps
+				if err := processObjectIds(v); err != nil {
+					return err
+				}
+			}
+		case []interface{}:
+			// Process arrays
+			for i, item := range v {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if err := processObjectIds(itemMap); err != nil {
+						return err
+					}
+					v[i] = itemMap
+				}
+			}
+		}
+	}
+
+	// Log the output filter for debugging
+	filterJSON, _ = json.Marshal(filter)
+	log.Printf("processObjectIds output: %s", string(filterJSON))
+
+	return nil
 }

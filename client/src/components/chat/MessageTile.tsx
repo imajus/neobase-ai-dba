@@ -314,14 +314,20 @@ export default function MessageTile({
                     totalRecords
                 };
                 onQueryUpdate(() => {
-
+                    if (!response.data.execution_result) {
+                        console.log('response.data.execution_result is empty', response.data.execution_result);
+                    }
                     setMessage({
                         ...message,
                         queries: message.queries?.map(q => q.id === queryId ? {
                             ...q,
                             is_executed: response.data.is_executed,
                             is_rolled_back: response.data.is_rolled_back,
-                            execution_result: response.data.execution_result,
+                            execution_result: !response.data.execution_result || 
+                                (typeof response.data.execution_result === 'object' && 
+                                Object.keys(response.data.execution_result).length === 0) 
+                                ? null 
+                                : response.data.execution_result,
                             execution_time: response.data.execution_time,
                             error: response.data.error,
                             total_records_count: response.data.total_records_count,

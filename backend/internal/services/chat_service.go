@@ -648,7 +648,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		if !synchronous || allowSSEUpdates {
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  map[string]string{"error": err.Error()},
+				Data:  map[string]string{"error": "Error: " + err.Error()},
 			})
 		}
 		return nil, fmt.Errorf("failed to generate LLM response: %v", err)
@@ -672,7 +672,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-error",
-			Data:  map[string]string{"error": err.Error()},
+			Data:  map[string]string{"error": "Error: " + err.Error()},
 		})
 	}
 
