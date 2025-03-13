@@ -102,8 +102,8 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 0 {
-			return nil, http.StatusBadRequest, fmt.Errorf("user already has a chat")
+		if len(chats) > 1 {
+			return nil, http.StatusBadRequest, fmt.Errorf("user cannot have more than 2 chats")
 		}
 	}
 
@@ -177,8 +177,8 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 0 {
-			return nil, http.StatusBadRequest, fmt.Errorf("user already has a chat")
+		if len(chats) > 1 {
+			return nil, http.StatusBadRequest, fmt.Errorf("user cannot have more than 2 chats")
 		}
 	}
 
