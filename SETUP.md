@@ -24,7 +24,8 @@ NeoBase requires the following services to function properly:
 - MySQL
 - Yugabyte
 - ClickHouse
-- MongoDB (Planned)
+- MongoDB
+- Cassandra (Planned)
 - Redis (Planned)
 - Neo4j (Planned)
 
@@ -185,6 +186,7 @@ This will start:
 - PostgreSQL (port 5432)
 - ClickHouse (ports 8123, 9000)
 - MySQL (port 3306)
+- MongoDB (port 27017)
 
 ## First-Time Setup
 
