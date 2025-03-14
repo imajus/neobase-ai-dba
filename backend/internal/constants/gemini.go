@@ -5,7 +5,7 @@ import "github.com/google/generative-ai-go/genai"
 const (
 	GeminiModel               = "gemini-2.0-flash"
 	GeminiTemperature         = 1
-	GeminiMaxCompletionTokens = 3072
+	GeminiMaxCompletionTokens = 30000
 )
 
 const GeminiPostgreSQLPrompt = `You are NeoBase AI, a senior PostgreSQL database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
@@ -39,7 +39,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -65,7 +65,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
   ]
 }
@@ -102,7 +102,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at, Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -129,7 +129,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
   ]
 }
@@ -166,7 +166,7 @@ const GeminiClickhousePrompt = `You are NeoBase AI, a senior ClickHouse database
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at, Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -233,7 +233,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
+   - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -260,7 +260,7 @@ json
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
   ]
 }
@@ -303,7 +303,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - Respond strictly in JSON matching the schema below.  
 - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
 - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-- In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
+- In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field, if a field contains too much data, then give less data from that field
 
 6. **Clarifications**  
 - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -355,7 +355,7 @@ json
       "canRollback": "true when the request query can be rolled back",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
       "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable)",
-      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
+      "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
   ]
 }
@@ -367,7 +367,8 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 	Required: []string{"assistantMessage"},
 	Properties: map[string]*genai.Schema{
 		"queries": &genai.Schema{
-			Type: genai.TypeArray,
+			Type:        genai.TypeArray,
+			Description: "An array of queries that the AI has generated. Return queries only when it makes sense to return a query, otherwise return empty array.",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
@@ -411,7 +412,8 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeString,
 					},
 					"exampleResultString": &genai.Schema{
-						Type: genai.TypeString,
+						Type:        genai.TypeString,
+						Description: "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
 					},
 				},
 			},
@@ -428,7 +430,8 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 	Required: []string{"assistantMessage"},
 	Properties: map[string]*genai.Schema{
 		"queries": &genai.Schema{
-			Type: genai.TypeArray,
+			Type:        genai.TypeArray,
+			Description: "An array of queries that the AI has generated. Return queries only when it makes sense to return a query, otherwise return empty array.",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
@@ -472,7 +475,8 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeString,
 					},
 					"exampleResultString": &genai.Schema{
-						Type: genai.TypeString,
+						Type:        genai.TypeString,
+						Description: "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
 					},
 				},
 			},
@@ -489,7 +493,8 @@ var GeminiMySQLLLMResponseSchema = &genai.Schema{
 	Required: []string{"assistantMessage"},
 	Properties: map[string]*genai.Schema{
 		"queries": &genai.Schema{
-			Type: genai.TypeArray,
+			Type:        genai.TypeArray,
+			Description: "An array of queries that the AI has generated. Return queries only when it makes sense to return a query, otherwise return empty array.",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
@@ -533,7 +538,8 @@ var GeminiMySQLLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeString,
 					},
 					"exampleResultString": &genai.Schema{
-						Type: genai.TypeString,
+						Type:        genai.TypeString,
+						Description: "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
 					},
 				},
 			},
@@ -550,7 +556,8 @@ var GeminiClickhouseLLMResponseSchema = &genai.Schema{
 	Required: []string{"assistantMessage"},
 	Properties: map[string]*genai.Schema{
 		"queries": &genai.Schema{
-			Type: genai.TypeArray,
+			Type:        genai.TypeArray,
+			Description: "An array of queries that the AI has generated. Return queries only when it makes sense to return a query, otherwise return empty array.",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
@@ -603,7 +610,8 @@ var GeminiClickhouseLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeString,
 					},
 					"exampleResultString": &genai.Schema{
-						Type: genai.TypeString,
+						Type:        genai.TypeString,
+						Description: "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
 					},
 				},
 			},
@@ -620,7 +628,8 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 	Required: []string{"assistantMessage"},
 	Properties: map[string]*genai.Schema{
 		"queries": &genai.Schema{
-			Type: genai.TypeArray,
+			Type:        genai.TypeArray,
+			Description: "An array of queries that the AI has generated. Return queries only when it makes sense to return a query, otherwise return empty array.",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
@@ -664,7 +673,8 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 						Type: genai.TypeString,
 					},
 					"exampleResultString": &genai.Schema{
-						Type: genai.TypeString,
+						Type:        genai.TypeString,
+						Description: "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
 					},
 					"validationSchema": &genai.Schema{
 						Type: genai.TypeString,

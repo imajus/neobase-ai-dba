@@ -3,7 +3,7 @@ package constants
 const (
 	OpenAIModel               = "gpt-4o"
 	OpenAITemperature         = 1
-	OpenAIMaxCompletionTokens = 3072
+	OpenAIMaxCompletionTokens = 30000
 )
 
 // Database-specific system prompts for LLM
@@ -39,7 +39,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, always try to give latest date such as created_at.
+   - In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -67,7 +67,7 @@ json
       "estimateResponseTime": "response time in milliseconds(example:78)"
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
     }
   ]
 }
@@ -103,7 +103,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, always try to give latest date such as created_at.
+   - In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -132,7 +132,7 @@ json
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ]
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
     }
   ]
 }
@@ -168,7 +168,7 @@ json
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, always try to give latest date such as created_at.
+   - In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -200,7 +200,7 @@ json
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ]
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
     }
   ]
 }
@@ -236,7 +236,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-   - In Example Result, always try to give latest date such as created_at.
+   - In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -265,7 +265,7 @@ json
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ]
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
     }
   ]
 }
@@ -308,7 +308,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - Respond strictly in JSON matching the schema below.  
 - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
 - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
-- In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at.
+- In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
 
 6. **Clarifications**  
 - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
@@ -351,7 +351,7 @@ json
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
-      ],
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
       "pagination": {
           "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
           },
@@ -426,7 +426,7 @@ const OpenAIPostgresLLMResponseSchema = `{
                        "type": "array",
                        "items": {
                            "type": "object",
-                           "description": "Key-value pairs representing column names and example values.",
+                           "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
                            "additionalProperties": {
                                "type": "string"
                            }
@@ -515,7 +515,7 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                        "type": "array",
                        "items": {
                            "type": "object",
-                           "description": "Key-value pairs representing column names and example values.",
+                           "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
                            "additionalProperties": {
                                "type": "string"
                            }
@@ -604,7 +604,7 @@ const OpenAIMySQLLLMResponseSchema = `{
                        "type": "array",
                        "items": {
                            "type": "object",
-                           "description": "Key-value pairs representing column names and example values.",
+                           "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
                            "additionalProperties": {
                                "type": "string"
                            }
@@ -705,7 +705,7 @@ const OpenAIClickhouseLLMResponseSchema = `{
                        "type": "array",
                        "items": {
                            "type": "object",
-                           "description": "Key-value pairs representing column names and example values.",
+                           "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
                            "additionalProperties": {
                                "type": "string"
                            }
@@ -794,7 +794,7 @@ var OpenAIMongoDBLLMResponseSchema = `{
                        "type": "array",
                        "items": {
                            "type": "object",
-                           "description": "Key-value pairs representing column names and example values.",
+                           "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
                            "additionalProperties": {
                                "type": "string"
                            }
