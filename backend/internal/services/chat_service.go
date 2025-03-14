@@ -2704,6 +2704,7 @@ func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID,
 							return
 						}
 						log.Printf("ProcessLLMResponseAndRunQuery -> Query executed successfully: %v", executionResult)
+
 						query.IsExecuted = true
 						query.ExecutionTime = executionResult.ExecutionTime
 
@@ -2724,6 +2725,11 @@ func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID,
 							}
 						}
 
+						if executionResult.ActionButtons != nil {
+							msgResp.ActionButtons = executionResult.ActionButtons
+						} else {
+							msgResp.ActionButtons = nil
+						}
 						query.Error = executionResult.Error
 						if query.Pagination != nil && executionResult.TotalRecordsCount != nil {
 							query.Pagination.TotalRecordsCount = *executionResult.TotalRecordsCount
@@ -2731,6 +2737,7 @@ func (s *chatService) ProcessLLMResponseAndRunQuery(ctx context.Context, userID,
 					}
 					tempQueries[i] = query
 				}
+
 				msgResp.Queries = &tempQueries
 				log.Printf("ProcessLLMResponseAndRunQuery -> Queries updated in LLM response: %v", msgResp.Queries)
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{

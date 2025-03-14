@@ -166,16 +166,18 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	}
 
 	temporaryQueries := []map[string]interface{}{}
-	for _, v := range mapResponse["queries"].([]interface{}) {
-		value := v.(map[string]interface{})
-		log.Printf("gemini responseMap loop queries: %v", value)
-		var exampleResult []map[string]interface{}
-		if value["exampleResultString"] != nil && value["exampleResultString"] != "" {
-			if err := json.Unmarshal([]byte(value["exampleResultString"].(string)), &exampleResult); err == nil {
-				value["exampleResult"] = exampleResult
+	if mapResponse["queries"] != nil {
+		for _, v := range mapResponse["queries"].([]interface{}) {
+			value := v.(map[string]interface{})
+			log.Printf("gemini responseMap loop queries: %v", value)
+			var exampleResult []map[string]interface{}
+			if value["exampleResultString"] != nil && value["exampleResultString"] != "" {
+				if err := json.Unmarshal([]byte(value["exampleResultString"].(string)), &exampleResult); err == nil {
+					value["exampleResult"] = exampleResult
+				}
 			}
+			temporaryQueries = append(temporaryQueries, value)
 		}
-		temporaryQueries = append(temporaryQueries, value)
 	}
 
 	mapResponse["queries"] = temporaryQueries

@@ -1068,6 +1068,29 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	// Get the MongoDB collection
 	collection := wrapper.Client.Database(wrapper.Database).Collection(collectionName)
 
+	// Check if the collection exists (except for dropCollection operation)
+	if operation != "dropCollection" {
+		// Check if collection exists by listing collections with a filter
+		collections, err := collection.Database().ListCollectionNames(ctx, bson.M{"name": collectionName})
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		if len(collections) == 0 {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Collection '%s' does not exist", collectionName),
+					Code:    "COLLECTION_NOT_FOUND",
+				},
+			}
+		}
+	}
+
 	var result interface{}
 	var err error
 
@@ -1075,176 +1098,256 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	// Execute the operation based on the type
 	switch operation {
 	case "find":
-		// Parse the parameters as a BSON filter
+		// Parse the parameters as a BSON filter and projection
+		// The parameters can be in two formats:
+		// 1. find({filter}) - just a filter
+		// 2. find({filter}, {projection}) - filter and projection
+
 		var filter bson.M
-		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+		var projection bson.M
 
-			// Process the query parameters to handle MongoDB syntax
-			jsonStr, err := processMongoDBQueryParams(paramsStr)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
+		// Check if we have both filter and projection
+		if strings.Contains(paramsStr, "}, {") {
+			// Split the parameters into filter and projection
+			parts := strings.SplitN(paramsStr, "}, {", 2)
+			if len(parts) == 2 {
+				filterStr := parts[0] + "}"
+				projectionStr := "{" + parts[1]
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Split parameters into filter: %s and projection: %s", filterStr, projectionStr)
 
-			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			// Handle ObjectId in the filter
-			if err := processObjectIds(filter); err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			// Log the final filter for debugging
-			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
-		}
-
-		// Extract modifiers from the query string
-		modifiersStruct := extractModifiers(operationWithParams)
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Extracted modifiers: %+v", modifiersStruct)
-
-		// Create find options from modifiers
-		findOptions := options.Find()
-
-		// Log all modifiers for debugging
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Modifiers: %+v", modifiers)
-
-		// Apply skip before limit to ensure correct pagination
-		if skip, ok := modifiers["skip"].(int); ok {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting skip: %d", skip)
-			findOptions.SetSkip(int64(skip))
-		} else if modifiersStruct.Skip > 0 {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting skip from modifiers: %d", modifiersStruct.Skip)
-			findOptions.SetSkip(modifiersStruct.Skip)
-		}
-
-		if limit, ok := modifiers["limit"].(int); ok {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting limit: %d", limit)
-			findOptions.SetLimit(int64(limit))
-		} else if modifiersStruct.Limit > 0 {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting limit from modifiers: %d", modifiersStruct.Limit)
-			findOptions.SetLimit(modifiersStruct.Limit)
-		}
-
-		// Apply projection if provided
-		if modifiersStruct.Projection != "" {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting projection: %s", modifiersStruct.Projection)
-
-			// Parse the projection string into a bson.M
-			var projection bson.M
-			projectionStr := modifiersStruct.Projection
-
-			// Process the projection parameters to handle MongoDB syntax
-			jsonStr, err := processMongoDBQueryParams(projectionStr)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted projection: %s", jsonStr)
-
-			if err := json.Unmarshal([]byte(jsonStr), &projection); err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			// Set the projection option
-			findOptions.SetProjection(projection)
-		}
-
-		if sortStr, ok := modifiers["sort"].(string); ok {
-			// Parse sort string into bson.D
-			// Example: {field: 1} or {field: -1}
-			var sort bson.D
-			if err := json.Unmarshal([]byte(sortStr), &sort); err != nil {
-				// Try to handle MongoDB syntax
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Error parsing sort as JSON: %v, trying MongoDB syntax conversion", err)
-
-				// Add quotes to field names if missing
-				re := regexp.MustCompile(`\{([^:{}]+):\s*(-?\d+)\}`)
-				convertedSortStr := re.ReplaceAllString(sortStr, `{"$1": $2}`)
-
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Converted sort string: %s", convertedSortStr)
-
-				// Try parsing again
-				if err := json.Unmarshal([]byte(convertedSortStr), &sort); err != nil {
-					log.Printf("MongoDBDriver -> ExecuteQuery -> Error parsing converted sort: %v", err)
-
-					// As a last resort, try to manually create the sort document
-					fieldParts := strings.Split(strings.Trim(sortStr, "{}"), ":")
-					if len(fieldParts) == 2 {
-						field := strings.TrimSpace(fieldParts[0])
-						// Remove quotes if present
-						field = strings.Trim(field, "\"' ")
-
-						orderStr := strings.TrimSpace(fieldParts[1])
-						var order int
-						if orderStr == "-1" {
-							order = -1
-						} else {
-							order = 1
+				// Parse the filter
+				if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+					// Try to handle MongoDB syntax with unquoted keys
+					jsonFilterStr, err := processMongoDBQueryParams(filterStr)
+					if err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
 						}
+					}
 
-						sort = bson.D{{Key: field, Value: order}}
-						log.Printf("MongoDBDriver -> ExecuteQuery -> Manually created sort document: %v", sort)
-					} else {
-						jsonSortStr, err := processMongoDBQueryParams(sortStr)
-						if err != nil {
-							return &QueryExecutionResult{
-								Error: &dtos.QueryError{
-									Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
-									Code:    "INVALID_PARAMETERS",
-								},
-							}
+					if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to parse filter: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
 						}
+					}
 
-						if err := json.Unmarshal([]byte(jsonSortStr), &sort); err != nil {
-							return &QueryExecutionResult{
-								Error: &dtos.QueryError{
-									Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
-									Code:    "INVALID_PARAMETERS",
-								},
-							}
+					// Handle ObjectId in the filter
+					if err := processObjectIds(filter); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process ObjectIds in filter: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
 						}
 					}
 				}
+
+				// Parse the projection
+				if err := json.Unmarshal([]byte(projectionStr), &projection); err != nil {
+					// Try to handle MongoDB syntax with unquoted keys
+					jsonProjectionStr, err := processMongoDBQueryParams(projectionStr)
+					if err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+
+					if err := json.Unmarshal([]byte(jsonProjectionStr), &projection); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to parse projection: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+				}
+			} else {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: "Invalid parameters format for find. Expected: find({filter}, {projection})",
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final sort document: %v", sort)
-			findOptions.SetSort(sort)
+		} else {
+			// Just a filter
+			if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
+				// Try to handle MongoDB syntax with unquoted keys and ObjectId
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+				// Process the query parameters to handle MongoDB syntax
+				jsonStr, err := processMongoDBQueryParams(paramsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+				if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Handle ObjectId in the filter
+				if err := processObjectIds(filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Log the final filter for debugging
+				filterJSON, _ := json.Marshal(filter)
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			}
 		}
 
-		// Log the final find options for debugging
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Find options: Skip=%v, Limit=%v",
-			findOptions.Skip, findOptions.Limit)
+		// Extract modifiers from the query string
+		modifiers := extractModifiers(query)
 
-		// Execute the find operation with options
+		// If count() modifier is present, perform a count operation instead of find
+		if modifiers.Count {
+			// Execute the countDocuments operation
+			count, err := collection.CountDocuments(ctx, filter)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to execute count operation: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			result = map[string]interface{}{
+				"count": count,
+			}
+			break
+		}
+
+		// Create find options
+		findOptions := options.Find()
+
+		// Apply limit if specified
+		if modifiers.Limit > 0 {
+			findOptions.SetLimit(modifiers.Limit)
+		}
+
+		// Apply skip if specified
+		if modifiers.Skip > 0 {
+			findOptions.SetSkip(modifiers.Skip)
+		}
+
+		// Apply sort if specified
+		if modifiers.Sort != "" {
+			var sortDoc bson.D
+			sortJSON := modifiers.Sort
+
+			// Process the sort expression to handle MongoDB syntax
+			if !strings.HasPrefix(sortJSON, "{") {
+				sortJSON = fmt.Sprintf(`{"%s": 1}`, sortJSON)
+			}
+
+			// Parse the sort document
+			var sortMap bson.M
+			if err := json.Unmarshal([]byte(sortJSON), &sortMap); err != nil {
+				jsonStr, err := processMongoDBQueryParams(sortJSON)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonStr), &sortMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Convert the sort map to a bson.D
+			for k, v := range sortMap {
+				sortDoc = append(sortDoc, bson.E{Key: k, Value: v})
+			}
+
+			findOptions.SetSort(sortDoc)
+		}
+
+		// Apply projection if specified from the parameters or modifiers
+		if projection != nil {
+			// Convert the projection map to a bson.D
+			var projectionDoc bson.D
+			for k, v := range projection {
+				projectionDoc = append(projectionDoc, bson.E{Key: k, Value: v})
+			}
+			findOptions.SetProjection(projectionDoc)
+		} else if modifiers.Projection != "" {
+			var projectionDoc bson.D
+			projectionJSON := modifiers.Projection
+
+			// Process the projection expression to handle MongoDB syntax
+			if !strings.HasPrefix(projectionJSON, "{") {
+				projectionJSON = fmt.Sprintf(`{"%s": 1}`, projectionJSON)
+			}
+
+			// Parse the projection document
+			var projectionMap bson.M
+			if err := json.Unmarshal([]byte(projectionJSON), &projectionMap); err != nil {
+				jsonStr, err := processMongoDBQueryParams(projectionJSON)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonStr), &projectionMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Convert the projection map to a bson.D
+			for k, v := range projectionMap {
+				projectionDoc = append(projectionDoc, bson.E{Key: k, Value: v})
+			}
+
+			findOptions.SetProjection(projectionDoc)
+		}
+
+		// Execute the find operation
 		cursor, err := collection.Find(ctx, filter, findOptions)
 		if err != nil {
 			return &QueryExecutionResult{
@@ -1261,14 +1364,11 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		if err := cursor.All(ctx, &results); err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode results: %v", err),
+					Message: fmt.Sprintf("Failed to decode find results: %v", err),
 					Code:    "DECODE_ERROR",
 				},
 			}
 		}
-
-		// Log the exact number of documents retrieved
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Retrieved exactly %d documents from collection %s", len(results), collectionName)
 
 		result = results
 
@@ -1872,12 +1972,49 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	case "countDocuments":
 		// Parse the parameters as a BSON filter
 		var filter bson.M
-		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+
+		// Handle empty parameters for countDocuments()
+		if strings.TrimSpace(paramsStr) == "" {
+			// Use an empty filter to count all documents
+			filter = bson.M{}
+		} else {
+			// Parse the provided filter
+			if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
+				// Try to handle MongoDB syntax with unquoted keys
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
+
+				// Process the query parameters to handle MongoDB syntax
+
+				jsonStr, err := processMongoDBQueryParams(paramsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonStr)
+
+				if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse filter: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Handle ObjectId in the filter
+				if err := processObjectIds(filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
 			}
 		}
 
@@ -2375,16 +2512,30 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	}
 
 	// Get the MongoDB collection
-	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
-	if !ok {
-		return &QueryExecutionResult{
-			Error: &dtos.QueryError{
-				Message: "Invalid MongoDB connection",
-				Code:    "CONNECTION_ERROR",
-			},
+	collection := tx.Wrapper.Client.Database(tx.Wrapper.Database).Collection(collectionName)
+
+	// Check if the collection exists (except for dropCollection operation)
+	if operation != "dropCollection" {
+		// Check if collection exists by listing collections with a filter
+		collections, err := collection.Database().ListCollectionNames(ctx, bson.M{"name": collectionName})
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
+
+		if len(collections) == 0 {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Collection '%s' does not exist", collectionName),
+					Code:    "COLLECTION_NOT_FOUND",
+				},
+			}
 		}
 	}
-	collection := wrapper.Client.Database(wrapper.Database).Collection(collectionName)
 
 	var result interface{}
 	var err error
@@ -2393,170 +2544,256 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	// Execute the operation based on the type
 	switch operation {
 	case "find":
-		// Parse the parameters as a BSON filter
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+		// Parse the parameters as a BSON filter and projection
+		// The parameters can be in two formats:
+		// 1. find({filter}) - just a filter
+		// 2. find({filter}, {projection}) - filter and projection
 
-		// Process the query parameters
-		processedParams, err := processMongoDBQueryParams(paramsStr)
-		if err != nil {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing query parameters: %v", err)
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Code:    "INVALID_QUERY",
-					Message: "invalid query",
-					Details: err.Error(),
-				},
+		var filter bson.M
+		var projection bson.M
+
+		// Check if we have both filter and projection
+		if strings.Contains(paramsStr, "}, {") {
+			// Split the parameters into filter and projection
+			parts := strings.SplitN(paramsStr, "}, {", 2)
+			if len(parts) == 2 {
+				filterStr := parts[0] + "}"
+				projectionStr := "{" + parts[1]
+
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Split parameters into filter: %s and projection: %s", filterStr, projectionStr)
+
+				// Parse the filter
+				if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+					// Try to handle MongoDB syntax with unquoted keys
+					jsonFilterStr, err := processMongoDBQueryParams(filterStr)
+					if err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+
+					if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to parse filter: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+
+					// Handle ObjectId in the filter
+					if err := processObjectIds(filter); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process ObjectIds in filter: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+				}
+
+				// Parse the projection
+				if err := json.Unmarshal([]byte(projectionStr), &projection); err != nil {
+					// Try to handle MongoDB syntax with unquoted keys
+					jsonProjectionStr, err := processMongoDBQueryParams(projectionStr)
+					if err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+
+					if err := json.Unmarshal([]byte(jsonProjectionStr), &projection); err != nil {
+						return &QueryExecutionResult{
+							Error: &dtos.QueryError{
+								Message: fmt.Sprintf("Failed to parse projection: %v", err),
+								Code:    "INVALID_PARAMETERS",
+							},
+						}
+					}
+				}
+			} else {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: "Invalid parameters format for find. Expected: find({filter}, {projection})",
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+		} else {
+			// Just a filter
+			if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
+				// Try to handle MongoDB syntax with unquoted keys and ObjectId
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+
+				// Process the query parameters to handle MongoDB syntax
+				jsonStr, err := processMongoDBQueryParams(paramsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process query parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
+
+				if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Handle ObjectId in the filter
+				if err := processObjectIds(filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Log the final filter for debugging
+				filterJSON, _ := json.Marshal(filter)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 			}
 		}
-
-		// Parse the filter
-		var filter map[string]interface{}
-		if err := bson.UnmarshalExtJSON([]byte(processedParams), true, &filter); err != nil {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing filter: %v", err)
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Code:    "INVALID_FILTER",
-					Message: "invalid filter",
-					Details: err.Error(),
-				},
-			}
-		}
-
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %+v", filter)
-
-		// Process ObjectIds in the filter
-		if err := processObjectIds(filter); err != nil {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing ObjectIds: %v", err)
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Code:    "INVALID_OBJECTID",
-					Message: "invalid ObjectId",
-					Details: err.Error(),
-				},
-			}
-		}
-
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %+v", filter)
 
 		// Extract modifiers from the query string
 		modifiers := extractModifiers(query)
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Modifiers: %+v", modifiers)
+
+		// If count() modifier is present, perform a count operation instead of find
+		if modifiers.Count {
+			// Execute the countDocuments operation
+			count, err := collection.CountDocuments(ctx, filter)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to execute count operation: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			result = map[string]interface{}{
+				"count": count,
+			}
+			break
+		}
 
 		// Create find options
 		findOptions := options.Find()
 
-		// Set the limit option if provided
+		// Apply limit if specified
 		if modifiers.Limit > 0 {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting limit: %d", modifiers.Limit)
 			findOptions.SetLimit(modifiers.Limit)
 		}
 
-		// Set the skip option if provided
+		// Apply skip if specified
 		if modifiers.Skip > 0 {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting skip: %d", modifiers.Skip)
 			findOptions.SetSkip(modifiers.Skip)
 		}
 
-		// Set the projection option if provided
-		if modifiers.Projection != "" {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting projection: %s", modifiers.Projection)
-
-			// Parse the projection string into a bson.M
-			var projection bson.M
-			projectionStr := modifiers.Projection
-
-			// Process the projection parameters to handle MongoDB syntax
-			jsonStr, err := processMongoDBQueryParams(projectionStr)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted projection: %s", jsonStr)
-
-			if err := json.Unmarshal([]byte(jsonStr), &projection); err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
-				}
-			}
-
-			// Set the projection option
-			findOptions.SetProjection(projection)
-		}
-
-		// Set the sort option if provided
+		// Apply sort if specified
 		if modifiers.Sort != "" {
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting sort: %s", modifiers.Sort)
-
-			// First try to parse as JSON
 			var sortDoc bson.D
-			err = bson.UnmarshalExtJSON([]byte(modifiers.Sort), true, &sortDoc)
-			if err != nil {
-				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing sort as JSON: %v, trying MongoDB syntax conversion", err)
+			sortJSON := modifiers.Sort
 
-				// Add quotes to field names if missing
-				re := regexp.MustCompile(`\{([^:{}]+):\s*(-?\d+)\}`)
-				convertedSortStr := re.ReplaceAllString(modifiers.Sort, `{"$1": $2}`)
+			// Process the sort expression to handle MongoDB syntax
+			if !strings.HasPrefix(sortJSON, "{") {
+				sortJSON = fmt.Sprintf(`{"%s": 1}`, sortJSON)
+			}
 
-				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted sort string: %s", convertedSortStr)
+			// Parse the sort document
+			var sortMap bson.M
+			if err := json.Unmarshal([]byte(sortJSON), &sortMap); err != nil {
+				jsonStr, err := processMongoDBQueryParams(sortJSON)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
 
-				// Try parsing again
-				if err := bson.UnmarshalExtJSON([]byte(convertedSortStr), true, &sortDoc); err != nil {
-					log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing converted sort: %v", err)
-
-					// As a last resort, try to manually create the sort document
-					fieldParts := strings.Split(strings.Trim(modifiers.Sort, "{}"), ":")
-					if len(fieldParts) == 2 {
-						field := strings.TrimSpace(fieldParts[0])
-						// Remove quotes if present
-						field = strings.Trim(field, "\"' ")
-
-						orderStr := strings.TrimSpace(fieldParts[1])
-						var order int
-						if orderStr == "-1" {
-							order = -1
-						} else {
-							order = 1
-						}
-
-						sortDoc = bson.D{{Key: field, Value: order}}
-						log.Printf("MongoDBTransaction -> ExecuteQuery -> Manually created sort document: %v", sortDoc)
-					} else {
-						jsonSortStr, err := processMongoDBQueryParams(modifiers.Sort)
-						if err != nil {
-							return &QueryExecutionResult{
-								Error: &dtos.QueryError{
-									Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
-									Code:    "INVALID_PARAMETERS",
-								},
-							}
-						}
-
-						if err := bson.UnmarshalExtJSON([]byte(jsonSortStr), true, &sortDoc); err != nil {
-							return &QueryExecutionResult{
-								Error: &dtos.QueryError{
-									Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
-									Code:    "INVALID_PARAMETERS",
-								},
-							}
-						}
+				if err := json.Unmarshal([]byte(jsonStr), &sortMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
 					}
 				}
 			}
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final sort document: %v", sortDoc)
+
+			// Convert the sort map to a bson.D
+			for k, v := range sortMap {
+				sortDoc = append(sortDoc, bson.E{Key: k, Value: v})
+			}
+
 			findOptions.SetSort(sortDoc)
 		}
 
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Find options: Skip=%v, Limit=%v", findOptions.Skip, findOptions.Limit)
+		// Apply projection if specified from the parameters or modifiers
+		if projection != nil {
+			// Convert the projection map to a bson.D
+			var projectionDoc bson.D
+			for k, v := range projection {
+				projectionDoc = append(projectionDoc, bson.E{Key: k, Value: v})
+			}
+			findOptions.SetProjection(projectionDoc)
+		} else if modifiers.Projection != "" {
+			var projectionDoc bson.D
+			projectionJSON := modifiers.Projection
 
-		// Execute the find operation with options
+			// Process the projection expression to handle MongoDB syntax
+			if !strings.HasPrefix(projectionJSON, "{") {
+				projectionJSON = fmt.Sprintf(`{"%s": 1}`, projectionJSON)
+			}
+
+			// Parse the projection document
+			var projectionMap bson.M
+			if err := json.Unmarshal([]byte(projectionJSON), &projectionMap); err != nil {
+				jsonStr, err := processMongoDBQueryParams(projectionJSON)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonStr), &projectionMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Convert the projection map to a bson.D
+			for k, v := range projectionMap {
+				projectionDoc = append(projectionDoc, bson.E{Key: k, Value: v})
+			}
+
+			findOptions.SetProjection(projectionDoc)
+		}
+
+		// Execute the find operation
 		cursor, err := collection.Find(ctx, filter, findOptions)
 		if err != nil {
 			return &QueryExecutionResult{
@@ -2573,14 +2810,11 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		if err := cursor.All(ctx, &results); err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode results: %v", err),
+					Message: fmt.Sprintf("Failed to decode find results: %v", err),
 					Code:    "DECODE_ERROR",
 				},
 			}
 		}
-
-		// Log the exact number of documents retrieved
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Retrieved exactly %d documents from collection %s", len(results), collectionName)
 
 		result = results
 
@@ -2652,7 +2886,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		var document bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &document); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and special types like Date
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB document: %s", paramsStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB document: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
@@ -2665,7 +2899,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted document: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted document: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &document); err != nil {
 				return &QueryExecutionResult{
@@ -3183,12 +3417,48 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	case "countDocuments":
 		// Parse the parameters as a BSON filter
 		var filter bson.M
-		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse filter: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+
+		// Handle empty parameters for countDocuments()
+		if strings.TrimSpace(paramsStr) == "" {
+			// Use an empty filter to count all documents
+			filter = bson.M{}
+		} else {
+			// Parse the provided filter
+			if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
+				// Try to handle MongoDB syntax with unquoted keys
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
+
+				// Process the query parameters to handle MongoDB syntax
+				jsonStr, err := processMongoDBQueryParams(paramsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonStr)
+
+				if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse filter: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Handle ObjectId in the filter
+				if err := processObjectIds(filter); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
 			}
 		}
 
@@ -3254,7 +3524,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 	case "drop":
 		// Check if collection exists before dropping
-		collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+		collections, err := tx.Wrapper.Client.Database(tx.Wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -3541,12 +3811,14 @@ func extractModifiers(query string) struct {
 	Limit      int64
 	Sort       string
 	Projection string
+	Count      bool
 } {
 	modifiers := struct {
 		Skip       int64
 		Limit      int64
 		Sort       string
 		Projection string
+		Count      bool
 	}{}
 
 	// Check if the query string is empty or doesn't contain any modifiers
@@ -3572,6 +3844,14 @@ func extractModifiers(query string) struct {
 		if err == nil {
 			modifiers.Limit = limit
 		}
+	}
+
+	// Extract count
+	countRegex := regexp.MustCompile(`\.count\(\s*\)`)
+	countMatches := countRegex.FindStringSubmatch(query)
+	if len(countMatches) > 0 {
+		modifiers.Count = true
+		log.Printf("extractModifiers -> Detected count() modifier")
 	}
 
 	// Extract projection
