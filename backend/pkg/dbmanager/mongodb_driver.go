@@ -833,6 +833,66 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 	}
 
+	// Handle database-level operations
+	dbOperationRegex := regexp.MustCompile(`db\.(\w+)\(\s*(.*)\s*\)`)
+	if dbOperationMatches := dbOperationRegex.FindStringSubmatch(query); len(dbOperationMatches) >= 2 {
+		operation := dbOperationMatches[1]
+		paramsStr := ""
+		if len(dbOperationMatches) >= 3 {
+			paramsStr = dbOperationMatches[2]
+		}
+
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Matched database operation: %s with params: %s", operation, paramsStr)
+
+		switch operation {
+		case "getCollectionNames":
+			// List all collections in the database
+			collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{})
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to list collections: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			// Convert the result to a map for consistent output
+			result := map[string]interface{}{
+				"collections": collections,
+			}
+
+			// Convert the result to JSON
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+						Code:    "JSON_ERROR",
+					},
+				}
+			}
+
+			executionTime := int(time.Since(startTime).Milliseconds())
+			log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
+			return &QueryExecutionResult{
+				Result:        result,
+				ResultJSON:    string(resultJSON),
+				ExecutionTime: executionTime,
+			}
+
+		// Add more database-level operations here as needed
+		default:
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Unsupported database operation: %s", operation),
+					Code:    "UNSUPPORTED_OPERATION",
+				},
+			}
+		}
+	}
+
 	// Parse the query
 	// Example: db.collection.find({name: "John"})
 	parts := strings.SplitN(query, ".", 3)
@@ -933,7 +993,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
+				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...}) or db.operation(...)",
 				Code:    "INVALID_QUERY",
 			},
 		}
@@ -1047,6 +1107,10 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
+		// Extract modifiers from the query string
+		modifiersStruct := extractModifiers(operationWithParams)
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Extracted modifiers: %+v", modifiersStruct)
+
 		// Create find options from modifiers
 		findOptions := options.Find()
 
@@ -1057,11 +1121,51 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		if skip, ok := modifiers["skip"].(int); ok {
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting skip: %d", skip)
 			findOptions.SetSkip(int64(skip))
+		} else if modifiersStruct.Skip > 0 {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting skip from modifiers: %d", modifiersStruct.Skip)
+			findOptions.SetSkip(modifiersStruct.Skip)
 		}
 
 		if limit, ok := modifiers["limit"].(int); ok {
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting limit: %d", limit)
 			findOptions.SetLimit(int64(limit))
+		} else if modifiersStruct.Limit > 0 {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting limit from modifiers: %d", modifiersStruct.Limit)
+			findOptions.SetLimit(modifiersStruct.Limit)
+		}
+
+		// Apply projection if provided
+		if modifiersStruct.Projection != "" {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Setting projection: %s", modifiersStruct.Projection)
+
+			// Parse the projection string into a bson.M
+			var projection bson.M
+			projectionStr := modifiersStruct.Projection
+
+			// Process the projection parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(projectionStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted projection: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &projection); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Set the projection option
+			findOptions.SetProjection(projection)
 		}
 
 		if sortStr, ok := modifiers["sort"].(string); ok {
@@ -1224,11 +1328,39 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Parse the parameters as a BSON document
 		var document bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &document); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse document: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and special types like Date
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB document: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process document: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted document: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &document); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse document: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId and other special types in the document
+			if err := processObjectIds(document); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
@@ -1998,6 +2130,66 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
+	// Handle database-level operations
+	dbOperationRegex := regexp.MustCompile(`db\.(\w+)\(\s*(.*)\s*\)`)
+	if dbOperationMatches := dbOperationRegex.FindStringSubmatch(query); len(dbOperationMatches) >= 2 {
+		operation := dbOperationMatches[1]
+		paramsStr := ""
+		if len(dbOperationMatches) >= 3 {
+			paramsStr = dbOperationMatches[2]
+		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Matched database operation: %s with params: %s", operation, paramsStr)
+
+		switch operation {
+		case "getCollectionNames":
+			// List all collections in the database
+			collections, err := tx.Wrapper.Client.Database(tx.Wrapper.Database).ListCollectionNames(ctx, bson.M{})
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to list collections: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			// Convert the result to a map for consistent output
+			result := map[string]interface{}{
+				"collections": collections,
+			}
+
+			// Convert the result to JSON
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+						Code:    "JSON_ERROR",
+					},
+				}
+			}
+
+			executionTime := int(time.Since(startTime).Milliseconds())
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
+			return &QueryExecutionResult{
+				Result:        result,
+				ResultJSON:    string(resultJSON),
+				ExecutionTime: executionTime,
+			}
+
+		// Add more database-level operations here as needed
+		default:
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Unsupported database operation: %s", operation),
+					Code:    "UNSUPPORTED_OPERATION",
+				},
+			}
+		}
+	}
+
 	// Parse the MongoDB query
 	// MongoDB queries are expected in the format: db.collection.operation({...})
 	// For example: db.users.find({name: "John"})
@@ -2110,7 +2302,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
+				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...}) or db.operation(...)",
 				Code:    "INVALID_QUERY",
 			},
 		}
@@ -2252,6 +2444,40 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		if modifiers.Skip > 0 {
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting skip: %d", modifiers.Skip)
 			findOptions.SetSkip(modifiers.Skip)
+		}
+
+		// Set the projection option if provided
+		if modifiers.Projection != "" {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Setting projection: %s", modifiers.Projection)
+
+			// Parse the projection string into a bson.M
+			var projection bson.M
+			projectionStr := modifiers.Projection
+
+			// Process the projection parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(projectionStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted projection: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &projection); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Set the projection option
+			findOptions.SetProjection(projection)
 		}
 
 		// Set the sort option if provided
@@ -2414,11 +2640,39 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// Parse the parameters as a BSON document
 		var document bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &document); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to parse document: %v", err),
-					Code:    "INVALID_PARAMETERS",
-				},
+			// Try to handle MongoDB syntax with unquoted keys and special types like Date
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB document: %s", paramsStr)
+
+			// Process the query parameters to handle MongoDB syntax
+			jsonStr, err := processMongoDBQueryParams(paramsStr)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process document: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted document: %s", jsonStr)
+
+			if err := json.Unmarshal([]byte(jsonStr), &document); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse document: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
+
+			// Handle ObjectId and other special types in the document
+			if err := processObjectIds(document); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
 			}
 		}
 
@@ -3114,23 +3368,73 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 		return fmt.Sprintf(`{"$oid":"%s"}`, matches[1])
 	})
 
-	// Log the processed string for debugging
-	log.Printf("After ObjectId replacement: %s", paramsStr)
+	// Handle new Date() syntax with various formats:
+	// 1. new Date() without parameters -> current date in ISO format
+	// 2. new Date("...") or new Date('...') with quoted date string
+	// 3. new Date(year, month, day, ...) with numeric parameters
 
-	// Temporarily replace $oid with a placeholder to prevent it from being modified
+	// First, handle new Date() without parameters
+	emptyDatePattern := regexp.MustCompile(`new\s+Date\(\s*\)`)
+	paramsStr = emptyDatePattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Return current date in ISO format
+		return fmt.Sprintf(`{"$date":"%s"}`, time.Now().Format(time.RFC3339))
+	})
+
+	// Handle new Date("...") and new Date('...') with quoted date string
+	quotedDatePattern := regexp.MustCompile(`new\s+Date\(['"]([^'"]+)['"]\)`)
+	paramsStr = quotedDatePattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Extract the date value
+		re := regexp.MustCompile(`new\s+Date\(['"]([^'"]+)['"]\)`)
+		matches := re.FindStringSubmatch(match)
+		if len(matches) < 2 {
+			return match
+		}
+
+		// Return the proper JSON format for Date
+		return fmt.Sprintf(`{"$date":"%s"}`, matches[1])
+	})
+
+	// Handle new Date(year, month, day, ...) with numeric parameters
+	// This is more complex and would require parsing the parameters and constructing a date
+	// For now, we'll replace it with the current date as a fallback
+	numericDatePattern := regexp.MustCompile(`new\s+Date\(([^'")\s][^)]*)\)`)
+	paramsStr = numericDatePattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// For now, return current date in ISO format as a fallback
+		// In a more complete implementation, we would parse the numeric parameters
+		return fmt.Sprintf(`{"$date":"%s"}`, time.Now().Format(time.RFC3339))
+	})
+
+	// Log the processed string for debugging
+	log.Printf("After ObjectId and Date replacement: %s", paramsStr)
+
+	// Temporarily replace $oid and $date with placeholders to prevent them from being modified
 	paramsStr = strings.ReplaceAll(paramsStr, "$oid", "__MONGODB_OID__")
+	paramsStr = strings.ReplaceAll(paramsStr, "$date", "__MONGODB_DATE__")
 
 	// Handle field names that might not be quoted
-	re := regexp.MustCompile(`(\w+):\s*`)
-	paramsStr = re.ReplaceAllString(paramsStr, `"$1": `)
+	// This regex matches field names followed by a colon, ensuring they're properly quoted
+	fieldNameRegex := regexp.MustCompile(`([,{])\s*(\w+)\s*:`)
+	paramsStr = fieldNameRegex.ReplaceAllString(paramsStr, `$1"$2":`)
 
 	// Handle single quotes for string values
 	// Use a standard approach instead of negative lookbehind which isn't supported in Go
 	singleQuoteRegex := regexp.MustCompile(`'([^']*)'`)
 	paramsStr = singleQuoteRegex.ReplaceAllString(paramsStr, `"$1"`)
 
-	// Restore $oid from placeholder
+	// Restore placeholders
 	paramsStr = strings.ReplaceAll(paramsStr, "__MONGODB_OID__", "$oid")
+	paramsStr = strings.ReplaceAll(paramsStr, "__MONGODB_DATE__", "$date")
+
+	// Ensure the document is valid JSON
+	// Check if it's an object and add missing quotes to field names
+	if strings.HasPrefix(paramsStr, "{") && strings.HasSuffix(paramsStr, "}") {
+		// Add quotes to any remaining unquoted field names
+		// This regex matches field names that aren't already quoted
+		unquotedFieldRegex := regexp.MustCompile(`([,{])\s*(\w+)\s*:`)
+		for unquotedFieldRegex.MatchString(paramsStr) {
+			paramsStr = unquotedFieldRegex.ReplaceAllString(paramsStr, `$1"$2":`)
+		}
+	}
 
 	// Log the final processed string for debugging
 	log.Printf("Final processed MongoDB query params: %s", paramsStr)
@@ -3156,6 +3460,43 @@ func processObjectIds(filter map[string]interface{}) error {
 				}
 				filter[key] = oid
 				log.Printf("Converted ObjectId %s to %v", oidStr, oid)
+			} else if dateStr, ok := v["$date"].(string); ok && len(v) == 1 {
+				// Convert to time.Time
+				date, err := time.Parse(time.RFC3339, dateStr)
+				if err != nil {
+					// Try other common date formats
+					formats := []string{
+						time.RFC3339,
+						"2006-01-02T15:04:05Z",
+						"2006-01-02",
+						"2006/01/02",
+						"01/02/2006",
+						"01-02-2006",
+						time.ANSIC,
+						time.UnixDate,
+						time.RubyDate,
+						time.RFC822,
+						time.RFC822Z,
+						time.RFC850,
+						time.RFC1123,
+						time.RFC1123Z,
+					}
+
+					parsed := false
+					for _, format := range formats {
+						if parsedDate, parseErr := time.Parse(format, dateStr); parseErr == nil {
+							date = parsedDate
+							parsed = true
+							break
+						}
+					}
+
+					if !parsed {
+						return fmt.Errorf("invalid date format: %v", err)
+					}
+				}
+				filter[key] = date
+				log.Printf("Converted date %s to %v", dateStr, date)
 			} else {
 				// Recursively process nested maps
 				if err := processObjectIds(v); err != nil {
@@ -3177,7 +3518,7 @@ func processObjectIds(filter map[string]interface{}) error {
 
 	// Log the output filter for debugging
 	filterJSON, _ = json.Marshal(filter)
-	// log.Printf("processObjectIds output: %s", string(filterJSON))
+	log.Printf("processObjectIds output (after ObjectId and Date conversion): %s", string(filterJSON))
 
 	return nil
 }
@@ -3185,14 +3526,16 @@ func processObjectIds(filter map[string]interface{}) error {
 // Add this new function to extract modifiers from the query string
 // Add this after the processObjectIds function
 func extractModifiers(query string) struct {
-	Skip  int64
-	Limit int64
-	Sort  string
+	Skip       int64
+	Limit      int64
+	Sort       string
+	Projection string
 } {
 	modifiers := struct {
-		Skip  int64
-		Limit int64
-		Sort  string
+		Skip       int64
+		Limit      int64
+		Sort       string
+		Projection string
 	}{}
 
 	// Check if the query string is empty or doesn't contain any modifiers
@@ -3218,6 +3561,16 @@ func extractModifiers(query string) struct {
 		if err == nil {
 			modifiers.Limit = limit
 		}
+	}
+
+	// Extract projection
+	projectionRegex := regexp.MustCompile(`\.project\(([^)]+)\)`)
+	projectionMatches := projectionRegex.FindStringSubmatch(query)
+	if len(projectionMatches) > 1 {
+		// Get the raw projection expression
+		projectionExpr := projectionMatches[1]
+		modifiers.Projection = projectionExpr
+		log.Printf("extractModifiers -> Extracted projection expression: %s", modifiers.Projection)
 	}
 
 	// Extract sort - improved to handle complex sort expressions
