@@ -575,6 +575,13 @@ function AppContent() {
         return prev.filter(msg => !(msg.is_streaming && msg.id === 'temp'));
       });
 
+      // Set isStreaming to false for all messages
+      setMessages(prev => {
+        return prev.map(msg => ({
+          ...msg,
+          is_streaming: false
+        }));
+      });
 
     } catch (error) {
       console.error('Failed to cancel stream:', error);
