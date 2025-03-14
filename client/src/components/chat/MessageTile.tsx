@@ -1141,7 +1141,20 @@ export default function MessageTile({
                                                             }}
                                                         >
                                                             <div className="p-2 text-xs text-gray-400 border-b border-gray-700">
-                                                                This will download records only for the fetched pages, not all records in the result.
+                                                                {(() => {
+                                                                    const cachedPages = pageDataCacheRef.current[query.id] || {};
+                                                                    const pageCount = Object.keys(cachedPages).length;
+                                                                    let totalRecords = 0;
+                                                                    
+                                                                    // Calculate total records across all cached pages
+                                                                    Object.values(cachedPages).forEach((page: any) => {
+                                                                        if (page.data && Array.isArray(page.data)) {
+                                                                            totalRecords += page.data.length;
+                                                                        }
+                                                                    });
+                                                                    
+                                                                    return `This will export ${totalRecords} records from ${pageCount} fetched ${pageCount === 1 ? 'page' : 'pages'}.`;
+                                                                })()}
                                                             </div>
                                                             <div className="py-1">
                                                                 <button 
