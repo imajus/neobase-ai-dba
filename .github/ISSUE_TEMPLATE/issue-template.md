@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-Here's a GitHub issue template that covers **feature requests, bug reports, and suggestions** in a structured format:  
+Use this Issue template, this covers **feature requests, bug reports, and suggestions** in a structured format:  
 
 ---
 
