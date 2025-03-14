@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, Download, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -122,6 +122,25 @@ export default function MessageTile({
     const [queryCurrentPages, setQueryCurrentPages] = useState<Record<string, number>>({});
     const [editingQueries, setEditingQueries] = useState<Record<string, boolean>>({});
     const [editedQueryTexts, setEditedQueryTexts] = useState<Record<string, string>>({});
+    // Add state for tracking which download dropdown is open
+    const [openDownloadMenu, setOpenDownloadMenu] = useState<string | null>(null);
+    
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (openDownloadMenu) {
+                const target = event.target as HTMLElement;
+                if (!target.closest('.download-dropdown-container')) {
+                    setOpenDownloadMenu(null);
+                }
+            }
+        };
+        
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [openDownloadMenu]);
 
     // Ensure message is valid to prevent errors
     if (!message) {
@@ -1090,6 +1109,69 @@ export default function MessageTile({
                                                     <Braces className="w-4 h-4" />
                                                 </button>
                                                 <div className="w-px h-4 bg-gray-700 mx-2" />
+                                                
+                                                {/* Download Dropdown */}
+                                                <div className="relative download-dropdown-container">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            setOpenDownloadMenu(openDownloadMenu === query.id ? null : query.id);
+                                                        }}
+                                                        className="p-1 md:p-2 rounded hover:bg-gray-800 flex items-center gap-1"
+                                                        title="Download data"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                                        </svg>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                                                            <polyline points="6 9 12 15 18 9"></polyline>
+                                                        </svg>
+                                                    </button>
+                                                    {openDownloadMenu === query.id && (
+                                                        <div 
+                                                            className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 dropdown-menu"
+                                                            style={{
+                                                                bottom: 'auto',
+                                                                top: '100%',
+                                                                maxHeight: '300px',
+                                                                overflowY: 'auto'
+                                                            }}
+                                                        >
+                                                            <div className="p-2 text-xs text-gray-400 border-b border-gray-700">
+                                                                This will download records only for the fetched pages, not all records in the result.
+                                                            </div>
+                                                            <div className="py-1">
+                                                                <button 
+                                                                    onClick={(e) => {
+                                                                        e.preventDefault();
+                                                                        e.stopPropagation();
+                                                                        handleExportData(query.id, 'csv');
+                                                                        setOpenDownloadMenu(null);
+                                                                    }}
+                                                                    className="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-700"
+                                                                >
+                                                                    Export as CSV
+                                                                </button>
+                                                                <button 
+                                                                    onClick={(e) => {
+                                                                        e.preventDefault();
+                                                                        e.stopPropagation();
+                                                                        handleExportData(query.id, 'json');
+                                                                        setOpenDownloadMenu(null);
+                                                                    }}
+                                                                    className="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-700"
+                                                                >
+                                                                    Export as JSON
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                
+                                                <div className="w-px h-4 bg-gray-700 mx-2" />
                                                 {shouldShowRollback && (
                                                     !queryState.isExecuting ? (
                                                         <>
@@ -1276,6 +1358,103 @@ export default function MessageTile({
         
         return uniqueSentences.join(' ');
     };
+
+    // Add this function to handle data export
+    const handleExportData = (queryId: string, format: 'csv' | 'xlsx' | 'json') => {
+        const query = message.queries?.find(q => q.id === queryId);
+        if (!query) return;
+        
+        // Get all cached data for this query from pageDataCacheRef
+        const cachedPages = pageDataCacheRef.current[queryId] || {};
+        const pageNumbers = Object.keys(cachedPages).map(Number).sort((a, b) => a - b);
+        
+        // Combine all data from all cached pages
+        let allData: any[] = [];
+        if (pageNumbers.length > 0) {
+            // Collect data from all cached pages
+            pageNumbers.forEach(pageNum => {
+                const pageData = cachedPages[pageNum]?.data || [];
+                allData = [...allData, ...pageData];
+            });
+        } else {
+            // Fallback to current query results or execution result if no cached pages
+            const queryResult = queryResults[queryId];
+            allData = queryResult?.data || parseResults(query.is_executed ? query.execution_result : query.example_result);
+        }
+        
+        // Remove duplicates (in case pages overlap)
+        const seen = new Set();
+        allData = allData.filter(item => {
+            // Create a string key from the item to check for duplicates
+            const key = JSON.stringify(item);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        
+        if (!allData || allData.length === 0) {
+            toast.error('No data available to export', toastStyle);
+            return;
+        }
+        
+        try {
+            // Convert data to the requested format
+            let content: string = '';
+            let fileName: string = `query-${queryId}-export`;
+            let mimeType: string = '';
+            
+            if (format === 'json') {
+                content = JSON.stringify(allData, null, 2);
+                fileName += '.json';
+                mimeType = 'application/json';
+            } else if (format === 'csv') {
+                // Get headers from the first object
+                const headers = Object.keys(allData[0]);
+                
+                // Create CSV header row
+                content = headers.join(',') + '\n';
+                
+                // Add data rows
+                allData.forEach((row: any) => {
+                    const rowValues = headers.map(header => {
+                        const value = row[header];
+                        // Handle different types of values
+                        if (value === null || value === undefined) return '';
+                        if (typeof value === 'object') return JSON.stringify(value).replace(/"/g, '""');
+                        return typeof value === 'string' ? `"${value.replace(/"/g, '""')}"` : value;
+                    });
+                    content += rowValues.join(',') + '\n';
+                });
+                
+                fileName += '.csv';
+                mimeType = 'text/csv';
+            }
+            
+            // Create a blob and download link
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            
+            // Clean up
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }, 100);
+            
+            toast(`Exported ${allData.length} records as ${format.toUpperCase()}`, {
+                ...toastStyle,
+                icon: '📥',
+            });
+        } catch (error) {
+            console.error('Error exporting data:', error);
+            toast.error(`Failed to export data: ${error}`, toastStyle);
+        }
+    };
+
     return (
         <div className={`
                 py-4 md:py-6
