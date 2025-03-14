@@ -25,10 +25,10 @@
 - Yugabyte
 - MySQL
 - ClickHouse
+- MongoDB
 
 ## Planned to be supported DBs
-- MongoDB (Priority 1)
-- Cassandra (Priority 2)
+- Cassandra (Priority 1)
 - Redis (Priority 2)
 - Neo4j DB (Priority 3)
 
