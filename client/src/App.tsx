@@ -597,7 +597,9 @@ function AppContent() {
           return {
             ...msg,
             content: '',
-            is_streaming: true
+            is_streaming: true,
+            // Preserve action buttons and other properties
+            action_buttons: msg.action_buttons
           };
         }
         return msg;
@@ -614,6 +616,8 @@ function AppContent() {
             return {
               ...msg,
               content: msg.content + (msg.content ? ' ' : '') + word,
+              // Preserve action buttons during animation
+              action_buttons: msg.action_buttons
             };
           }
           return msg;
@@ -627,7 +631,9 @@ function AppContent() {
         if (msg.id === messageId) {
           return {
             ...msg,
-            is_streaming: false
+            is_streaming: false,
+            // Preserve action buttons when animation is complete
+            action_buttons: msg.action_buttons
           };
         }
         return msg;
@@ -650,7 +656,9 @@ function AppContent() {
           return {
             ...msg,
             queries: initializedQueries,
-            is_streaming: true
+            is_streaming: true,
+            // Preserve action buttons during query initialization
+            action_buttons: msg.action_buttons
           };
         }
         return msg;
@@ -675,7 +683,9 @@ function AppContent() {
               }
               return {
                 ...msg,
-                queries: updatedQueries
+                queries: updatedQueries,
+                // Preserve action buttons during query animation
+                action_buttons: msg.action_buttons
               };
             }
             return msg;
@@ -690,7 +700,9 @@ function AppContent() {
         if (msg.id === messageId) {
           return {
             ...msg,
-            is_streaming: false
+            is_streaming: false,
+            // Preserve action buttons when query animation is complete
+            action_buttons: msg.action_buttons
           };
         }
         return msg;
@@ -753,6 +765,7 @@ function AppContent() {
           type: 'assistant',
           content: '',
           queries: [],
+          action_buttons: [], // Initialize with empty action buttons array
           is_loading: true,
           loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
           is_streaming: true,
@@ -866,6 +879,7 @@ function AppContent() {
                         ...msg,
                         id: msg.id, // Keep the original ID
                         content: '', // Reset content to empty for animation
+                        action_buttons: response.data.action_buttons, // Update action buttons from response
                         queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings
                         is_loading: false,
                         loading_steps: [],
@@ -892,6 +906,7 @@ function AppContent() {
                     if (index === existingAiMessageIndex) {
                       return {
                         ...msg,
+                        action_buttons: response.data.action_buttons, // Ensure action buttons are preserved
                         is_streaming: false,
                         updated_at: new Date().toISOString()
                       };
@@ -906,6 +921,7 @@ function AppContent() {
                   id: response.data.id,
                   type: 'assistant' as const,
                   content: '',
+                  action_buttons: response.data.action_buttons,
                   queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [],
                   is_loading: false,
                   loading_steps: [], // Clear loading steps for final message
@@ -936,6 +952,7 @@ function AppContent() {
                       return {
                         ...msg,
                         is_streaming: false,
+                        action_buttons: response.data.action_buttons, // Ensure action buttons are preserved
                         updated_at: new Date().toISOString()
                       };
                     }
@@ -1066,7 +1083,16 @@ function AppContent() {
           // Update the ai message with the new content
           setMessages(prev => prev.map(msg => {
             if (msg.id === aiMessage.id) {
-              return { ...msg, is_edited: true, content:"", queries: [], updated_at: new Date().toISOString(), loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }], is_streaming: true };
+              return { 
+                ...msg, 
+                is_edited: true, 
+                content:"", 
+                queries: [], 
+                action_buttons: [], // Reset action buttons for the edited message
+                updated_at: new Date().toISOString(), 
+                loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }], 
+                is_streaming: true 
+              };
             } 
             return msg;
           }));
@@ -1078,6 +1104,7 @@ function AppContent() {
             type: 'assistant',
             content: '',
             queries: [],
+            action_buttons: [], // Initialize with empty action buttons array
             is_loading: true,
             loading_steps: [{ text: 'NeoBase is analyzing your request..', done: false }],
             is_streaming: true,

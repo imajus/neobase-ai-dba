@@ -44,12 +44,25 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Schema",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -109,12 +122,25 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
    - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Schema",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -174,12 +200,25 @@ json
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
    - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Schema",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -242,12 +281,25 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
    - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Schema",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -314,6 +366,12 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
 - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+7. **Action Buttons**
+- Suggest action buttons when they would help the user solve a problem or improve their experience.
+- **Refresh Schema**: Suggest when schema appears outdated or missing collections/fields the user is asking about.
+- Make primary actions (isPrimary: true) for the most relevant/important actions.
+- Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 For MongoDB queries, use the standard MongoDB query syntax. For example:
 - db.collection.find({field: value})
 - db.collection.insertOne({field: value})
@@ -340,6 +398,13 @@ Always consider the schema information provided to you. This includes:
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Schema",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "MongoDB query with actual values (no placeholders)",
@@ -450,6 +515,28 @@ const OpenAIPostgresLLMResponseSchema = `{
            },
            "description": "List of queries related to orders."
        },
+       "actionButtons": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": ["label", "action", "isPrimary"],
+               "properties": {
+                   "label": {
+                       "type": "string",
+                       "description": "Display text for the button that the user will see."
+                   },
+                   "action": {
+                       "type": "string",
+                       "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                   },
+                   "isPrimary": {
+                       "type": "boolean",
+                       "description": "Whether this is a primary (highlighted) action button."
+                   }
+               }
+           },
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+       },
        "assistantMessage": {
            "type": "string",
            "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
@@ -539,6 +626,28 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
            },
            "description": "List of queries related to orders."
        },
+       "actionButtons": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": ["label", "action", "isPrimary"],
+               "properties": {
+                   "label": {
+                       "type": "string",
+                       "description": "Display text for the button that the user will see."
+                   },
+                   "action": {
+                       "type": "string",
+                       "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                   },
+                   "isPrimary": {
+                       "type": "boolean",
+                       "description": "Whether this is a primary (highlighted) action button."
+                   }
+               }
+           },
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+       },
        "assistantMessage": {
            "type": "string",
            "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
@@ -627,6 +736,28 @@ const OpenAIMySQLLLMResponseSchema = `{
                "additionalProperties": false
            },
            "description": "List of queries related to orders."
+       },
+       "actionButtons": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": ["label", "action", "isPrimary"],
+               "properties": {
+                   "label": {
+                       "type": "string",
+                       "description": "Display text for the button that the user will see."
+                   },
+                   "action": {
+                       "type": "string",
+                       "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                   },
+                   "isPrimary": {
+                       "type": "boolean",
+                       "description": "Whether this is a primary (highlighted) action button."
+                   }
+               }
+           },
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
        },
        "assistantMessage": {
            "type": "string",
@@ -729,6 +860,28 @@ const OpenAIClickhouseLLMResponseSchema = `{
            },
            "description": "List of queries related to orders."
        },
+       "actionButtons": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": ["label", "action", "isPrimary"],
+               "properties": {
+                   "label": {
+                       "type": "string",
+                       "description": "Display text for the button that the user will see."
+                   },
+                   "action": {
+                       "type": "string",
+                       "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                   },
+                   "isPrimary": {
+                       "type": "boolean",
+                       "description": "Whether this is a primary (highlighted) action button."
+                   }
+               }
+           },
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+       },
        "assistantMessage": {
            "type": "string",
            "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
@@ -812,11 +965,33 @@ var OpenAIMongoDBLLMResponseSchema = `{
                    "rollbackDependentQuery": {
                        "type": "string",
                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
-                   },
+                   }
                },
                "additionalProperties": false
            },
            "description": "List of queries related to orders."
+       },
+       "actionButtons": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": ["label", "action", "isPrimary"],
+               "properties": {
+                   "label": {
+                       "type": "string",
+                       "description": "Display text for the button that the user will see."
+                   },
+                   "action": {
+                       "type": "string",
+                       "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                   },
+                   "isPrimary": {
+                       "type": "boolean",
+                       "description": "Whether this is a primary (highlighted) action button."
+                   }
+               }
+           },
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
        },
        "assistantMessage": {
            "type": "string",

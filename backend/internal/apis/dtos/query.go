@@ -19,15 +19,16 @@ type CancelQueryExecutionRequest struct {
 }
 
 type QueryExecutionResponse struct {
-	ChatID            string      `json:"chat_id"`
-	MessageID         string      `json:"message_id"`
-	QueryID           string      `json:"query_id"`
-	IsExecuted        bool        `json:"is_executed"`
-	IsRolledBack      bool        `json:"is_rolled_back"`
-	ExecutionTime     *int        `json:"execution_time"`
-	ExecutionResult   interface{} `json:"execution_result"`
-	Error             *QueryError `json:"error,omitempty"`
-	TotalRecordsCount *int        `json:"total_records_count"`
+	ChatID            string          `json:"chat_id"`
+	MessageID         string          `json:"message_id"`
+	QueryID           string          `json:"query_id"`
+	IsExecuted        bool            `json:"is_executed"`
+	IsRolledBack      bool            `json:"is_rolled_back"`
+	ExecutionTime     *int            `json:"execution_time"`
+	ExecutionResult   interface{}     `json:"execution_result"`
+	Error             *QueryError     `json:"error,omitempty"`
+	TotalRecordsCount *int            `json:"total_records_count"`
+	ActionButtons     *[]ActionButton `json:"action_buttons,omitempty"`
 }
 
 type QueryResultsRequest struct {
@@ -38,12 +39,13 @@ type QueryResultsRequest struct {
 }
 
 type QueryResultsResponse struct {
-	ChatID            string      `json:"chat_id"`
-	MessageID         string      `json:"message_id"`
-	QueryID           string      `json:"query_id"`
-	ExecutionResult   interface{} `json:"execution_result"`
-	Error             *QueryError `json:"error,omitempty"`
-	TotalRecordsCount *int        `json:"total_records_count"`
+	ChatID            string          `json:"chat_id"`
+	MessageID         string          `json:"message_id"`
+	QueryID           string          `json:"query_id"`
+	ExecutionResult   interface{}     `json:"execution_result"`
+	Error             *QueryError     `json:"error,omitempty"`
+	TotalRecordsCount *int            `json:"total_records_count"`
+	ActionButtons     *[]ActionButton `json:"action_buttons,omitempty"`
 }
 
 type EditQueryRequest struct {

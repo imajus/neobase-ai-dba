@@ -2,8 +2,16 @@ package constants
 
 // LLMResponse represents the structured response from LLM
 type LLMResponse struct {
-	Queries          []QueryInfo `json:"queries,omitempty"`
-	AssistantMessage string      `json:"assistantMessage"`
+	Queries          []QueryInfo    `json:"queries,omitempty"`
+	AssistantMessage string         `json:"assistantMessage"`
+	ActionButtons    []ActionButton `json:"actionButtons,omitempty"`
+}
+
+// ActionButton represents a UI action button that can be suggested by the LLM
+type ActionButton struct {
+	Label     string `json:"label"`     // Display text for the button
+	Action    string `json:"action"`    // Action identifier (e.g., "refresh_schema", "show_tables")
+	IsPrimary bool   `json:"isPrimary"` // Whether this is a primary (highlighted) action
 }
 
 // QueryInfo represents a single query in the LLM response
