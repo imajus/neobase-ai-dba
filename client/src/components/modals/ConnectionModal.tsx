@@ -369,7 +369,10 @@ DATABASE_PASSWORD=`; // Mask password
           <div className="flex justify-between items-center p-6 border-b-4 border-black mb-2">
             <div className="flex items-center gap-2">
               <Database className="w-6 h-6" />
-              <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
+              <div className="flex flex-col gap-1 mt-2">
+                <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
+                <p className="text-gray-500 text-sm">Your database credentials are stored in encrypted form.</p>
+              </div>
             </div>
             <button
               onClick={onClose}
