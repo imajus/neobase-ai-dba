@@ -1233,6 +1233,7 @@ function AppContent() {
         onLogout={handleLogout}
         selectedConnection={selectedConnection}
         onDeleteConnection={handleDeleteConnection}
+        onEditConnection={handleEditConnectionFromChatWindow}
         onConnectionStatusChange={handleConnectionStatusChange}
         setupSSEConnection={setupSSEConnection}
         eventSource={eventSource}

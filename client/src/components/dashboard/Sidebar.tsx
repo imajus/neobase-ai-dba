@@ -3,9 +3,12 @@ import {
   ArrowRight,
   Boxes,
   Loader2,
+  MoreVertical,
   PanelLeft,
   PanelLeftClose,
+  Pencil,
   Plus,
+  Settings,
   Trash2
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -31,6 +34,7 @@ interface SidebarProps {
   onAddConnection: () => void;
   onLogout: () => void;
   onDeleteConnection?: (id: string) => void;
+  onEditConnection?: () => void;
   selectedConnection?: Chat;
   isLoadingConnections: boolean;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
@@ -60,6 +64,7 @@ export default function Sidebar({
   onAddConnection,
   onLogout,
   onDeleteConnection,
+  onEditConnection,
   selectedConnection,
   isLoadingConnections,
   onConnectionStatusChange,
@@ -70,11 +75,28 @@ export default function Sidebar({
   const [currentConnectedChatId, setCurrentConnectedChatId] = useState<string | null>(null);
   const previousConnectionRef = useRef<string | null>(null);
   const { user } = useUser();
+  const [openConnectionMenu, setOpenConnectionMenu] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (openConnectionMenu) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.connection-menu-container') && !target.closest('.connection-dropdown-menu')) {
+          setOpenConnectionMenu(null);
+          setMenuPosition(null);
+        }
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [openConnectionMenu]);
 
-  // Watch for selected connection changes
   useEffect(() => {
     const selectedId = selectedConnection?.id;
-    // Only setup new connection if selection changed and is different from current
     if (selectedId && selectedId !== previousConnectionRef.current) {
       handleSelectConnection(selectedId);
       previousConnectionRef.current = selectedId;
@@ -90,7 +112,18 @@ export default function Sidebar({
     setShowLogoutConfirm(false);
   };
 
+  const handleEditConnection = (connection: Chat) => {
+    setOpenConnectionMenu(null);
+    
+    handleSelectConnection(connection.id);
+    
+    if (onEditConnection) {
+      onEditConnection();
+    }
+  };
+
   const handleDeleteClick = useCallback((connection: Chat) => {
+    setOpenConnectionMenu(null);
     setConnectionToDelete(connection);
   }, []);
 
@@ -118,7 +151,6 @@ export default function Sidebar({
     try {
       console.log('handleSelectConnection happened', { id, currentConnectedChatId });
 
-      // If same connection is selected, just update UI and return
       if (id === currentConnectedChatId) {
         onSelectConnection(id);
         return;
@@ -134,6 +166,24 @@ export default function Sidebar({
       toast.error('Failed to connect to database');
     }
   }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, setupSSEConnection]);
+
+  const handleOpenMenu = (e: React.MouseEvent, connectionId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Get the position of the button
+    const button = e.currentTarget;
+    const rect = button.getBoundingClientRect();
+    
+    // Set the position for the dropdown
+    setMenuPosition({
+      top: rect.top,
+      left: rect.right + 10 // Position to the right of the button
+    });
+    
+    // Toggle the menu
+    setOpenConnectionMenu(openConnectionMenu === connectionId ? null : connectionId);
+  };
 
   return (
     <>
@@ -182,19 +232,20 @@ export default function Sidebar({
                       </div>
                     </button>
                     {isExpanded && onDeleteConnection && (
-                      <button
-                        onClick={() => handleDeleteClick(connection)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 opacity-0 group-hover:opacity-100 transition-all neo-border bg-white hover:bg-neo-error hover:text-white"
-                        title="Delete connection"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="connection-menu-container absolute right-2 top-1/2 -translate-y-1/2">
+                        <button
+                          onClick={(e) => handleOpenMenu(e, connection.id)}
+                          className="p-2 opacity-0 group-hover:opacity-100 transition-all neo-border bg-white hover:bg-gray-100"
+                          title="Connection menu"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
               ))
             ) : (
-              // Make good looking empty state
               isExpanded && (
                 <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
                   <p className="text-black font-bold text-lg">No connections yet</p>
@@ -205,7 +256,6 @@ export default function Sidebar({
           )}
         </div>
         <div className="p-4 border-t-4 border-black">
-          {/* Desktop view */}
           <div className="hidden md:flex md:flex-col md:space-y-3">
             <button
               onClick={onAddConnection}
@@ -240,7 +290,6 @@ export default function Sidebar({
             )}
           </div>
 
-          {/* Mobile view - show only when expanded */}
           <div className={`flex flex-col gap-3 md:hidden ${!isExpanded && 'hidden'}`}>
             <button
               onClick={onAddConnection}
@@ -285,7 +334,6 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Modals rendered outside the sidebar container */}
       {showLogoutConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <ConfirmationModal
@@ -308,6 +356,50 @@ export default function Sidebar({
             onConfirm={handleDeleteConfirm}
             onCancel={() => setConnectionToDelete(null)}
           />
+        </div>
+      )}
+
+      {openConnectionMenu && menuPosition && (
+        <div 
+          className="fixed w-48 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100] connection-dropdown-menu"
+          style={{
+            top: `${menuPosition.top}px`,
+            left: `${menuPosition.left}px`,
+            transform: 'none'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="py-1">
+            <button 
+              onClick={() => {
+                const connection = connections.find(c => c.id === openConnectionMenu);
+                if (connection) {
+                  handleEditConnection(connection);
+                }
+                setOpenConnectionMenu(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-[#FFDB58] transition-colors"
+            >
+              <Pencil className="w-4 h-4 mr-2 text-black" />
+              Edit Connection
+            </button>
+            <div className="h-px bg-gray-200 mx-2"></div>
+            <button 
+              onClick={() => {
+                const connection = connections.find(c => c.id === openConnectionMenu);
+                if (connection) {
+                  handleDeleteClick(connection);
+                }
+                setOpenConnectionMenu(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
+            >
+              <Trash2 className="w-4 h-4 mr-2 text-red-500" />
+              Delete Connection
+            </button>
+          </div>
         </div>
       )}
     </>
