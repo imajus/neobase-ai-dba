@@ -23,6 +23,13 @@ export interface QueryResult {
     is_edited?: boolean;
 }
 
+export interface ActionButton {
+    id: string;
+    label: string;
+    action: string;
+    isPrimary: boolean;
+}
+
 export interface Message {
     id: string;
     type: 'user' | 'assistant';
@@ -32,6 +39,7 @@ export interface Message {
     is_loading?: boolean;
     loading_steps?: LoadingStep[];
     queries?: QueryResult[];
+    action_buttons?: ActionButton[];
     is_edited?: boolean;
     is_streaming?: boolean;
     user_message_id?: string;

@@ -536,6 +536,102 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	}, http.StatusOK, nil
 }
 
+func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error) {
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	messageObjID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid message ID format")
+	}
+
+	message, err := s.chatRepo.FindMessageByID(messageObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch message: %v", err)
+	}
+
+	if message.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to message")
+	}
+
+	if message.ChatID != chatObjID {
+		return nil, http.StatusBadRequest, fmt.Errorf("message does not belong to chat")
+	}
+
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+
+	log.Printf("UpdateMessage -> content: %+v", req.Content)
+	// Update message content, This is a user message
+	message.Content = req.Content
+	message.IsEdited = true
+	log.Printf("UpdateMessage -> message: %+v", message)
+	log.Printf("UpdateMessage -> message.Content: %+v", message.Content)
+	err = s.chatRepo.UpdateMessage(message.ID, message)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message: %v", err)
+	}
+
+	// Find the next AI message after the edited message
+	nextMessage, err := s.chatRepo.FindNextMessageByID(messageObjID)
+	if err == nil && nextMessage != nil && nextMessage.Type == "assistant" {
+		log.Printf("UpdateMessage -> Found next AI message: %v", nextMessage.ID)
+
+		// Reset query states for the AI message
+		if nextMessage.Queries != nil {
+			for i := range *nextMessage.Queries {
+				(*nextMessage.Queries)[i].IsExecuted = false
+				(*nextMessage.Queries)[i].IsRolledBack = false
+				(*nextMessage.Queries)[i].ExecutionResult = nil
+				(*nextMessage.Queries)[i].ExecutionTime = nil
+				(*nextMessage.Queries)[i].Error = nil
+			}
+
+			// Update the AI message with reset query states
+			if err := s.chatRepo.UpdateMessage(nextMessage.ID, nextMessage); err != nil {
+				log.Printf("UpdateMessage -> Failed to update AI message: %v", err)
+				// Continue even if this fails, as it's not critical
+			}
+		}
+	}
+
+	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(message.ID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch LLM message: %v", err)
+	}
+
+	log.Printf("UpdateMessage -> llmMsg: %+v", llmMsg)
+	llmMsg.Content = map[string]interface{}{
+		"user_message": req.Content,
+	}
+
+	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update LLM message: %v", err)
+	}
+
+	// If auto execute query is true, we need to process LLM response & run query automatically
+	if chat.AutoExecuteQuery {
+		if err := s.ProcessLLMResponseAndRunQuery(ctx, userID, chatID, messageID, streamID); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+		}
+	} else {
+		// Start processing the message asynchronously
+		if err := s.ProcessMessage(ctx, userID, chatID, messageID, streamID); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
+		}
+	}
+	return s.buildMessageResponse(message), http.StatusOK, nil
+}
+
 // processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
 func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, userMessageID, streamID string, synchronous bool, allowSSEUpdates bool) (*dtos.MessageResponse, error) {
 	log.Printf("processLLMResponse -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
@@ -797,6 +893,27 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	log.Printf("processLLMResponse -> queries: %v", queries)
 
+	// Extract action buttons from the LLM response
+	var actionButtons []models.ActionButton
+	if jsonResponse["actionButtons"] != nil {
+		actionButtonsArray := jsonResponse["actionButtons"].([]interface{})
+		if len(actionButtonsArray) > 0 {
+			actionButtons = make([]models.ActionButton, 0, len(actionButtonsArray))
+			for _, btn := range actionButtonsArray {
+				btnMap := btn.(map[string]interface{})
+				actionButton := models.ActionButton{
+					ID:        primitive.NewObjectID(),
+					Label:     btnMap["label"].(string),
+					Action:    btnMap["action"].(string),
+					IsPrimary: btnMap["isPrimary"].(bool),
+				}
+				actionButtons = append(actionButtons, actionButton)
+			}
+		}
+	} else {
+		actionButtons = []models.ActionButton{}
+	}
+
 	assistantMessage := ""
 	if jsonResponse["assistantMessage"] != nil {
 		assistantMessage = jsonResponse["assistantMessage"].(string)
@@ -811,16 +928,29 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		return nil, fmt.Errorf("failed to find existing AI message: %v", err)
 	}
 
-	// Convert queries to the correct pointer type
+	// Convert queries and action buttons to the correct pointer type
 	queriesPtr := &queries
+	var actionButtonsPtr *[]models.ActionButton
+	if len(actionButtons) > 0 {
+		actionButtonsPtr = &actionButtons
+	} else {
+		// Clear action buttons
+		actionButtonsPtr = &[]models.ActionButton{}
+	}
 
 	// If we found an existing AI message, update it instead of creating a new one
 	if existingMessage != nil && existingMessage.Type == "assistant" {
 		log.Printf("processLLMResponse -> Updating existing AI message: %v", existingMessage.ID)
 
+		if actionButtonsPtr != nil && len(*actionButtonsPtr) > 0 {
+			log.Printf("processLLMResponse -> saving existingMessage.ActionButtons: %v", *actionButtonsPtr)
+		} else {
+			log.Printf("processLLMResponse -> saving existingMessage.ActionButtons: nil or empty")
+		}
 		// Update the existing message with new content
 		existingMessage.Content = assistantMessage
 		existingMessage.Queries = queriesPtr // Now correctly typed as *[]models.Query
+		existingMessage.ActionButtons = actionButtonsPtr
 		existingMessage.IsEdited = true
 
 		// Update the message in the database
@@ -856,6 +986,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 					Content:       existingMessage.Content,
 					UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
 					Queries:       dtos.ToQueryDto(existingMessage.Queries),
+					ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 					Type:          existingMessage.Type,
 					CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 					UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
@@ -870,6 +1001,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			Content:       existingMessage.Content,
 			UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
 			Queries:       dtos.ToQueryDto(existingMessage.Queries),
+			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
 			CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
@@ -877,6 +1009,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		}, nil
 	}
 
+	log.Printf("processLLMResponse -> saving new message actionButtonsPtr: %v", actionButtonsPtr)
 	// If no existing message found, create a new one
 	// Use the messageObjID that was already defined above
 	chatResponseMsg := &models.Message{
@@ -885,7 +1018,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		ChatID:        chatObjID,
 		Content:       assistantMessage,
 		Type:          "assistant",
-		Queries:       queriesPtr, // Now correctly typed as *[]models.Query
+		Queries:       queriesPtr,
+		ActionButtons: actionButtonsPtr,
 		IsEdited:      false,
 		UserMessageId: &userMessageObjID, // Set the user message ID that this AI message is responding to
 	}
@@ -920,6 +1054,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				Content:       chatResponseMsg.Content,
 				UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
 				Queries:       dtos.ToQueryDto(chatResponseMsg.Queries),
+				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
 				CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
@@ -932,6 +1067,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		Content:       chatResponseMsg.Content,
 		UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
 		Queries:       dtos.ToQueryDto(chatResponseMsg.Queries),
+		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
 		CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
@@ -940,102 +1076,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
-}
-
-func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error) {
-	userObjID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
-	}
-
-	chatObjID, err := primitive.ObjectIDFromHex(chatID)
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
-	}
-
-	messageObjID, err := primitive.ObjectIDFromHex(messageID)
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("invalid message ID format")
-	}
-
-	message, err := s.chatRepo.FindMessageByID(messageObjID)
-	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch message: %v", err)
-	}
-
-	if message.UserID != userObjID {
-		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to message")
-	}
-
-	if message.ChatID != chatObjID {
-		return nil, http.StatusBadRequest, fmt.Errorf("message does not belong to chat")
-	}
-
-	chat, err := s.chatRepo.FindByID(chatObjID)
-	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
-	}
-
-	log.Printf("UpdateMessage -> content: %+v", req.Content)
-	// Update message content, This is a user message
-	message.Content = req.Content
-	message.IsEdited = true
-	log.Printf("UpdateMessage -> message: %+v", message)
-	log.Printf("UpdateMessage -> message.Content: %+v", message.Content)
-	err = s.chatRepo.UpdateMessage(message.ID, message)
-	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message: %v", err)
-	}
-
-	// Find the next AI message after the edited message
-	nextMessage, err := s.chatRepo.FindNextMessageByID(messageObjID)
-	if err == nil && nextMessage != nil && nextMessage.Type == "assistant" {
-		log.Printf("UpdateMessage -> Found next AI message: %v", nextMessage.ID)
-
-		// Reset query states for the AI message
-		if nextMessage.Queries != nil {
-			for i := range *nextMessage.Queries {
-				(*nextMessage.Queries)[i].IsExecuted = false
-				(*nextMessage.Queries)[i].IsRolledBack = false
-				(*nextMessage.Queries)[i].ExecutionResult = nil
-				(*nextMessage.Queries)[i].ExecutionTime = nil
-				(*nextMessage.Queries)[i].Error = nil
-			}
-
-			// Update the AI message with reset query states
-			if err := s.chatRepo.UpdateMessage(nextMessage.ID, nextMessage); err != nil {
-				log.Printf("UpdateMessage -> Failed to update AI message: %v", err)
-				// Continue even if this fails, as it's not critical
-			}
-		}
-	}
-
-	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(message.ID)
-	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch LLM message: %v", err)
-	}
-
-	log.Printf("UpdateMessage -> llmMsg: %+v", llmMsg)
-	llmMsg.Content = map[string]interface{}{
-		"user_message": req.Content,
-	}
-
-	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update LLM message: %v", err)
-	}
-
-	// If auto execute query is true, we need to process LLM response & run query automatically
-	if chat.AutoExecuteQuery {
-		if err := s.ProcessLLMResponseAndRunQuery(ctx, userID, chatID, messageID, streamID); err != nil {
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
-		}
-	} else {
-		// Start processing the message asynchronously
-		if err := s.ProcessMessage(ctx, userID, chatID, messageID, streamID); err != nil {
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
-		}
-	}
-	return s.buildMessageResponse(message), http.StatusOK, nil
 }
 
 func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
@@ -1144,20 +1184,26 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 }
 
 func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageResponse {
-	userMessageID := ""
+	var userMessageID *string
 	if msg.UserMessageId != nil {
-		userMessageID = msg.UserMessageId.Hex()
+		id := msg.UserMessageId.Hex()
+		userMessageID = &id
 	}
+
+	queriesDto := dtos.ToQueryDto(msg.Queries)
+	actionButtonsDto := dtos.ToActionButtonDto(msg.ActionButtons)
+
 	return &dtos.MessageResponse{
 		ID:            msg.ID.Hex(),
 		ChatID:        msg.ChatID.Hex(),
+		UserMessageID: userMessageID,
 		Type:          msg.Type,
 		Content:       msg.Content,
-		UserMessageID: utils.ToStringPtr(userMessageID),
+		Queries:       queriesDto,
+		ActionButtons: actionButtonsDto,
 		IsEdited:      msg.IsEdited,
-		Queries:       dtos.ToQueryDto(msg.Queries),
-		CreatedAt:     msg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:     msg.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:     msg.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     msg.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -1521,6 +1567,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
+		processCompleted := make(chan bool)
 		go func() {
 			log.Printf("ChatService -> ExecuteQuery -> Updating message")
 
@@ -1548,6 +1595,22 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				log.Println("ChatService -> ExecuteQuery -> msg queries is null")
 				return
 			}
+
+			// Add "Fix Error" action button to the Message & LLM content if there's an error
+			if queryErr != nil {
+				s.addFixErrorButton(msg)
+			} else {
+				s.removeFixErrorButton(msg)
+			}
+
+			if msg.ActionButtons != nil {
+				log.Printf("ChatService -> ExecuteQuery -> queryError, msg.ActionButtons: %+v", *msg.ActionButtons)
+			} else {
+				log.Printf("ChatService -> ExecuteQuery -> queryError, msg.ActionButtons: nil")
+			}
+
+			// We want to wait for the message to be updated but not save it to DB before sending the response
+			processCompleted <- true
 
 			// Save updated message
 			if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
@@ -1631,6 +1694,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			}
 		}()
 
+		<-processCompleted
 		return &dtos.QueryExecutionResponse{
 			ChatID:            chatID,
 			MessageID:         msg.ID.Hex(),
@@ -1641,6 +1705,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			ExecutionResult:   nil,
 			Error:             queryErr,
 			TotalRecordsCount: nil,
+			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
 		}, http.StatusOK, nil
 	}
 	var totalRecordsCount *int
@@ -1732,6 +1797,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		query.Error = nil
 	}
 
+	processCompleted := make(chan bool)
 	go func() {
 		// Update query status in message
 		if msg.Queries != nil {
@@ -1771,7 +1837,22 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 				log.Printf("ChatService -> ExecuteQuery -> updated query: %v", query)
 			}
 		}
+		// Add "Fix Error" action button to the Message & LLM content if there's an error
+		if result.Error != nil {
+			s.addFixErrorButton(msg)
+		} else {
+			s.removeFixErrorButton(msg)
+		}
 		// Save updated message
+		if msg.ActionButtons != nil {
+			log.Printf("ChatService -> ExecuteQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
+		} else {
+			log.Printf("ChatService -> ExecuteQuery -> msg.ActionButtons: nil")
+		}
+
+		// We want to wait for the message to be updated but not save it to DB before sending the response
+		processCompleted <- true
+
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
 		}
@@ -1862,6 +1943,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		}
 	}()
 
+	<-processCompleted
 	return &dtos.QueryExecutionResponse{
 		ChatID:            chatID,
 		MessageID:         msg.ID.Hex(),
@@ -1872,6 +1954,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		ExecutionResult:   formattedResultJSON,
 		Error:             result.Error,
 		TotalRecordsCount: totalRecordsCount,
+		ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
 	}, http.StatusOK, nil
 }
 
@@ -1990,6 +2073,13 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					"error":      queryErr,
 				},
 			})
+			// Add "Fix Error" action button to the Message & LLM content if there's an error
+			if queryErr != nil {
+				s.addFixErrorButton(msg)
+			} else {
+				s.removeFixErrorButton(msg)
+			}
+
 			return &dtos.QueryExecutionResponse{
 				ChatID:            chatID,
 				MessageID:         msg.ID.Hex(),
@@ -2000,6 +2090,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				ExecutionResult:   nil,
 				Error:             queryErr,
 				TotalRecordsCount: nil,
+				ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
 			}, http.StatusOK, nil
 		}
 
@@ -2061,6 +2152,16 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					(*msg.Queries)[i].RollbackQuery = &rollbackQuery
 				}
 			}
+		}
+		if queryErr != nil {
+			s.addFixErrorButton(msg)
+		} else {
+			s.removeFixErrorButton(msg)
+		}
+		if msg.ActionButtons != nil {
+			log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
+		} else {
+			log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: nil")
 		}
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			log.Printf("ChatService -> RollbackQuery -> Error updating message: %v", err)
@@ -2196,6 +2297,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
+		processCompleted := make(chan bool)
 		// Update query status in message
 		go func() {
 			if msg.Queries != nil {
@@ -2210,10 +2312,22 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 						}
 					}
 				}
+				// Add "Fix Error" action button to the Message & LLM content if there's an error
+				if queryErr != nil {
+					s.addFixErrorButton(msg)
+				} else {
+					s.removeFixErrorButton(msg)
+				}
+				if msg.ActionButtons != nil {
+					log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
+				} else {
+					log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: nil")
+				}
+				// We want to wait for the message to be updated but not save it to DB before sending the response
+				processCompleted <- true
 				if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 					log.Printf("ChatService -> RollbackQuery -> Error updating message: %v", err)
 				}
-
 				// Update LLM message with query execution results
 				llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
 				if err != nil {
@@ -2269,6 +2383,8 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			}
 		}()
 
+		<-processCompleted
+
 		// Send event about rollback query failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 			Event: "rollback-query-failed",
@@ -2279,6 +2395,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				"error":      queryErr,
 			},
 		})
+
 		return &dtos.QueryExecutionResponse{
 			ChatID:            chatID,
 			MessageID:         msg.ID.Hex(),
@@ -2289,6 +2406,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			ExecutionResult:   nil,
 			Error:             queryErr,
 			TotalRecordsCount: nil,
+			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
 		}, http.StatusOK, nil
 	}
 
@@ -2327,6 +2445,16 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				}
 			}
 		}
+	}
+	if queryErr != nil {
+		s.addFixErrorButton(msg)
+	} else {
+		s.removeFixErrorButton(msg)
+	}
+	if msg.ActionButtons != nil {
+		log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
+	} else {
+		log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: nil")
 	}
 	// Save updated message
 	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
@@ -2429,6 +2557,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			"execution_time":   query.ExecutionTime,
 			"execution_result": result.Result,
 			"error":            query.Error,
+			"action_buttons":   dtos.ToActionButtonDto(msg.ActionButtons),
 		},
 	})
 
@@ -2441,6 +2570,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		ExecutionTime:   query.ExecutionTime,
 		ExecutionResult: result.Result,
 		Error:           result.Error,
+		ActionButtons:   dtos.ToActionButtonDto(msg.ActionButtons),
 	}, http.StatusOK, nil
 }
 
@@ -3141,5 +3271,120 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		return &dtos.TablesResponse{
 			Tables: tables,
 		}, http.StatusOK, nil
+	}
+}
+
+// Helper function to add a "Fix Error" button to a message
+func (s *chatService) addFixErrorButton(msg *models.Message) {
+	log.Printf("ChatService -> addFixErrorButton -> msg.id: %s", msg.ID)
+
+	// Check if any query has an error
+	hasError := false
+	if msg.Queries != nil {
+		for _, query := range *msg.Queries {
+			if query.Error != nil {
+				hasError = true
+				log.Printf("ChatService -> addFixErrorButton -> Found error in query: %s", query.ID.Hex())
+				break
+			}
+		}
+	} else {
+		log.Printf("ChatService -> addFixErrorButton -> msg.Queries: nil")
+		hasError = false
+	}
+
+	// Only add the button if at least one query has an error
+	if !hasError {
+		log.Printf("ChatService -> addFixErrorButton -> No errors found in queries, not adding button")
+		return
+	}
+
+	// Create a new "Fix Error" action button
+	fixErrorButton := models.ActionButton{
+		ID:        primitive.NewObjectID(),
+		Label:     "Fix Error(s)",
+		Action:    "fix_error",
+		IsPrimary: true,
+	}
+
+	// Initialize action buttons array if it doesn't exist
+	if msg.ActionButtons == nil {
+		actionButtons := []models.ActionButton{fixErrorButton}
+		msg.ActionButtons = &actionButtons
+		log.Printf("ChatService -> addFixErrorButton -> Created new action buttons array")
+	} else {
+		// Check if a fix_error button already exists
+		hasFixErrorButton := false
+		for _, button := range *msg.ActionButtons {
+			if button.Action == "fix_error" {
+				hasFixErrorButton = true
+				break
+			}
+		}
+
+		// Add the button if it doesn't exist
+		if !hasFixErrorButton {
+			actionButtons := append(*msg.ActionButtons, fixErrorButton)
+			msg.ActionButtons = &actionButtons
+			log.Printf("ChatService -> addFixErrorButton -> Added fix_error button to existing array")
+		} else {
+			log.Printf("ChatService -> addFixErrorButton -> fix_error button already exists")
+		}
+	}
+
+	if msg.ActionButtons != nil {
+		log.Printf("ChatService -> addFixErrorButton -> msg.ActionButtons: %+v", *msg.ActionButtons)
+	} else {
+		log.Printf("ChatService -> addFixErrorButton -> msg.ActionButtons: nil")
+	}
+}
+
+// Helper function to remove the "Fix Error" button from a message
+func (s *chatService) removeFixErrorButton(msg *models.Message) {
+	log.Printf("ChatService -> removeFixErrorButton -> msg.id: %s", msg.ID)
+	if msg.ActionButtons == nil {
+		log.Printf("ChatService -> removeFixErrorButton -> No action buttons to remove")
+		return
+	}
+
+	// Check if any query has an error
+	hasError := false
+	if msg.Queries != nil {
+		for _, query := range *msg.Queries {
+			if query.Error != nil {
+				hasError = true
+				log.Printf("ChatService -> removeFixErrorButton -> Found error in query: %s", query.ID.Hex())
+				break
+			}
+		}
+	}
+
+	// Only remove the button if there are no errors
+	if !hasError {
+		log.Printf("ChatService -> removeFixErrorButton -> No errors found, removing fix_error button")
+		// Filter out the "Fix Error" button
+		var filteredButtons []models.ActionButton
+		for _, button := range *msg.ActionButtons {
+			if button.Action != "fix_error" {
+				filteredButtons = append(filteredButtons, button)
+			}
+		}
+
+		// Update the message's action buttons
+		if len(filteredButtons) > 0 {
+			msg.ActionButtons = &filteredButtons
+			log.Printf("ChatService -> removeFixErrorButton -> Updated action buttons array")
+		} else {
+			msg.ActionButtons = nil
+			log.Printf("ChatService -> removeFixErrorButton -> Removed all action buttons")
+		}
+	} else {
+		log.Printf("ChatService -> removeFixErrorButton -> Errors still exist, keeping fix_error button")
+	}
+
+	if msg.ActionButtons != nil {
+		log.Printf("ChatService -> removeFixErrorButton -> msg.ActionButtons: %+v", *msg.ActionButtons)
+	} else {
+		log.Printf("ChatService -> removeFixErrorButton -> msg.ActionButtons: nil")
 	}
 }

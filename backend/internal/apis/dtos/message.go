@@ -12,15 +12,24 @@ type CreateMessageRequest struct {
 }
 
 type MessageResponse struct {
-	ID            string   `json:"id"`
-	ChatID        string   `json:"chat_id"`
-	UserMessageID *string  `json:"user_message_id,omitempty"` // Only for AI response, this is the user message id of the message that triggered the AI response
-	Type          string   `json:"type"`
-	Content       string   `json:"content"`
-	Queries       *[]Query `json:"queries,omitempty"`
-	IsEdited      bool     `json:"is_edited"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
+	ID            string          `json:"id"`
+	ChatID        string          `json:"chat_id"`
+	UserMessageID *string         `json:"user_message_id,omitempty"` // Only for AI response, this is the user message id of the message that triggered the AI response
+	Type          string          `json:"type"`
+	Content       string          `json:"content"`
+	Queries       *[]Query        `json:"queries,omitempty"`
+	ActionButtons *[]ActionButton `json:"action_buttons,omitempty"` // UI action buttons suggested by the LLM
+	IsEdited      bool            `json:"is_edited"`
+	CreatedAt     string          `json:"created_at"`
+	UpdatedAt     string          `json:"updated_at"`
+}
+
+// ActionButton represents a UI action button that can be suggested by the LLM
+type ActionButton struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`     // Display text for the button
+	Action    string `json:"action"`    // Action identifier (e.g., "refresh_schema", "show_tables")
+	IsPrimary bool   `json:"isPrimary"` // Whether this is a primary (highlighted) action
 }
 
 type Query struct {
@@ -136,4 +145,24 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 		}
 	}
 	return &queriesDto
+}
+
+// ToActionButtonDto converts model action buttons to DTO action buttons
+func ToActionButtonDto(actionButtons *[]models.ActionButton) *[]ActionButton {
+	log.Printf("ToActionButtonDto -> input actionButtons: %+v", actionButtons)
+	if actionButtons == nil {
+		return nil
+	}
+
+	actionButtonsDto := make([]ActionButton, len(*actionButtons))
+	for i, button := range *actionButtons {
+		actionButtonsDto[i] = ActionButton{
+			ID:        button.ID.Hex(),
+			Label:     button.Label,
+			Action:    button.Action,
+			IsPrimary: button.IsPrimary,
+		}
+	}
+	log.Printf("ToActionButtonDto -> returning actionButtonsDto: %+v", actionButtonsDto)
+	return &actionButtonsDto
 }

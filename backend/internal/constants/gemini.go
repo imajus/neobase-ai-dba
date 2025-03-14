@@ -44,12 +44,25 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 5. **Clarifications**  
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user (example: Refresh Schema)",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -108,12 +121,25 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
    - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user (example: Refresh Schema)",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -172,12 +198,25 @@ const GeminiClickhousePrompt = `You are NeoBase AI, a senior ClickHouse database
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
    - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user (example: Refresh Schema)",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -239,12 +278,25 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
    - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 ---
 
 ### **Response Schema**
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user (example: Refresh Schema)",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "SQL query with actual values (no placeholders)",
@@ -309,6 +361,12 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
 - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
 
+7. **Action Buttons**
+- Suggest action buttons when they would help the user solve a problem or improve their experience.
+- **Refresh Schema**: Suggest when schema appears outdated or missing collections/fields the user is asking about.
+- Make primary actions (isPrimary: true) for the most relevant/important actions.
+- Limit to Max 2 buttons per response to avoid overwhelming the user.
+
 For MongoDB queries, use the standard MongoDB query syntax. For example:
 - db.collection.find({field: value})
 - db.collection.insertOne({field: value})
@@ -336,6 +394,13 @@ Always consider the schema information provided to you. This includes:
 json
 {
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user (example: Refresh Schema)",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
   "queries": [
     {
       "query": "MongoDB query with actual values (no placeholders)",
@@ -418,6 +483,29 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 				},
 			},
 		},
+		"actionButtons": &genai.Schema{
+			Type:        genai.TypeArray,
+			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected.",
+			Items: &genai.Schema{
+				Type:     genai.TypeObject,
+				Enum:     []string{},
+				Required: []string{"label", "action", "isPrimary"},
+				Properties: map[string]*genai.Schema{
+					"label": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Display text for the button that the user will see (example: Refresh Schema)",
+					},
+					"action": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc.",
+					},
+					"isPrimary": &genai.Schema{
+						Type:        genai.TypeBoolean,
+						Description: "Whether this is a primary (highlighted) action button.",
+					},
+				},
+			},
+		},
 		"assistantMessage": &genai.Schema{
 			Type: genai.TypeString,
 		},
@@ -481,6 +569,29 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 				},
 			},
 		},
+		"actionButtons": &genai.Schema{
+			Type:        genai.TypeArray,
+			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected.",
+			Items: &genai.Schema{
+				Type:     genai.TypeObject,
+				Enum:     []string{},
+				Required: []string{"label", "action", "isPrimary"},
+				Properties: map[string]*genai.Schema{
+					"label": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Display text for the button that the user will see.",
+					},
+					"action": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc.",
+					},
+					"isPrimary": &genai.Schema{
+						Type:        genai.TypeBoolean,
+						Description: "Whether this is a primary (highlighted) action button.",
+					},
+				},
+			},
+		},
 		"assistantMessage": &genai.Schema{
 			Type: genai.TypeString,
 		},
@@ -540,6 +651,29 @@ var GeminiMySQLLLMResponseSchema = &genai.Schema{
 					"exampleResultString": &genai.Schema{
 						Type:        genai.TypeString,
 						Description: "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
+					},
+				},
+			},
+		},
+		"actionButtons": &genai.Schema{
+			Type:        genai.TypeArray,
+			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected.",
+			Items: &genai.Schema{
+				Type:     genai.TypeObject,
+				Enum:     []string{},
+				Required: []string{"label", "action", "isPrimary"},
+				Properties: map[string]*genai.Schema{
+					"label": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Display text for the button that the user will see.",
+					},
+					"action": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc.",
+					},
+					"isPrimary": &genai.Schema{
+						Type:        genai.TypeBoolean,
+						Description: "Whether this is a primary (highlighted) action button.",
 					},
 				},
 			},
@@ -616,6 +750,29 @@ var GeminiClickhouseLLMResponseSchema = &genai.Schema{
 				},
 			},
 		},
+		"actionButtons": &genai.Schema{
+			Type:        genai.TypeArray,
+			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected.",
+			Items: &genai.Schema{
+				Type:     genai.TypeObject,
+				Enum:     []string{},
+				Required: []string{"label", "action", "isPrimary"},
+				Properties: map[string]*genai.Schema{
+					"label": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Display text for the button that the user will see.",
+					},
+					"action": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc.",
+					},
+					"isPrimary": &genai.Schema{
+						Type:        genai.TypeBoolean,
+						Description: "Whether this is a primary (highlighted) action button.",
+					},
+				},
+			},
+		},
 		"assistantMessage": &genai.Schema{
 			Type: genai.TypeString,
 		},
@@ -681,6 +838,29 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 					},
 					"indexOptions": &genai.Schema{
 						Type: genai.TypeString,
+					},
+				},
+			},
+		},
+		"actionButtons": &genai.Schema{
+			Type:        genai.TypeArray,
+			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected.",
+			Items: &genai.Schema{
+				Type:     genai.TypeObject,
+				Enum:     []string{},
+				Required: []string{"label", "action", "isPrimary"},
+				Properties: map[string]*genai.Schema{
+					"label": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Display text for the button that the user will see.",
+					},
+					"action": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc.",
+					},
+					"isPrimary": &genai.Schema{
+						Type:        genai.TypeBoolean,
+						Description: "Whether this is a primary (highlighted) action button.",
 					},
 				},
 			},

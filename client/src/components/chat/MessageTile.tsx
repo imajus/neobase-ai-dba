@@ -45,9 +45,7 @@ interface MessageTileProps {
     isFirstMessage?: boolean;
     onQueryUpdate: (callback: () => void) => void;
     onEditQuery: (id: string, queryId: string, query: string) => void;
-    hasButton: boolean;
-    hasRefreshSchemaButton: boolean;
-    buttonCallback?: () => void;
+    buttonCallback?: (action: string) => void;
 }
 
 const toastStyle = {
@@ -96,8 +94,6 @@ export default function MessageTile({
     onQueryUpdate,
     onEditQuery,
     buttonCallback,
-    hasButton,
-    hasRefreshSchemaButton
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -354,7 +350,9 @@ export default function MessageTile({
                                 ...q.pagination,
                                 total_records_count: response.data.total_records_count,
                             }
-                        } : q)
+                        } : q),
+                        // Always update action buttons, setting to empty array if not in response
+                        action_buttons: response.data.action_buttons || []
                     });
 
                     setQueryResults(prev => ({
@@ -426,7 +424,9 @@ export default function MessageTile({
                         execution_result: response?.data?.execution_result,
                         execution_time: response?.data?.execution_time,
                         error: response?.data?.error,
-                    } : q)
+                    } : q),
+                    // Always update action buttons, setting to empty array if not in response
+                    action_buttons: response?.data?.action_buttons || []
                 };
                 
                 setMessage(updatedMessage);
@@ -1581,9 +1581,9 @@ export default function MessageTile({
                             : 'w-fit max-w-[95%] sm:max-w-[85%] md:max-w-[75%]'
                     ) : 'w-fit max-w-[95%] sm:max-w-[85%] md:max-w-[75%]'}
     ${message.type === 'user'
-                        ? 'message-bubble-user'
-                        : 'message-bubble-ai'
-                    }
+        ? 'message-bubble-user'
+        : 'message-bubble-ai'
+    }
 `}>
                     <div className={`
         ${editingMessageId === message.id ? 'w-full min-w-full' : 'w-auto min-w-0'}
@@ -1672,13 +1672,27 @@ export default function MessageTile({
                                             })}
                                         </div>
                                     )}
-                                    {hasButton && hasRefreshSchemaButton && (
-                                        <div className="flex justify-start pt-6">
-                                            <button className="neo-button" onClick={() => buttonCallback!()}>
-                                                Fetch Latest Schema
-                                            </button>
+                                    
+                                    {message.action_buttons && message.action_buttons.length > 0 && (
+                                        <div className="flex flex-wrap gap-3 mt-4">
+                                            {message.action_buttons.map((button) => (
+                                                <button
+                                                    key={button.id}
+                                                    onClick={() => {
+                                                        if (buttonCallback) {
+                                                            buttonCallback(button.action);
+                                                        } else {
+                                                            console.log(`Action button clicked: ${button.action}`);
+                                                        }
+                                                    }}
+                                                    className={button.isPrimary ? "neo-button" : "neo-button-secondary"}
+                                                >
+                                                    {button.label}
+                                                </button>
+                                            ))}
                                         </div>
                                     )}
+                        
                                 </div>
                             )}
                         </div>

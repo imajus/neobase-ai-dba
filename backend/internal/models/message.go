@@ -14,7 +14,16 @@ type Message struct {
 	Content       string              `bson:"content" json:"content"`
 	IsEdited      bool                `bson:"is_edited" json:"is_edited"` // if the message content has been edited, only for user messages
 	Queries       *[]Query            `bson:"queries,omitempty" json:"queries,omitempty"`
+	ActionButtons *[]ActionButton     `bson:"action_buttons,omitempty" json:"action_buttons,omitempty"` // UI action buttons suggested by the LLM
 	Base          `bson:",inline"`
+}
+
+// ActionButton represents a UI action button that can be suggested by the LLM
+type ActionButton struct {
+	ID        primitive.ObjectID `bson:"id" json:"id"`
+	Label     string             `bson:"label" json:"label"`          // Display text for the button
+	Action    string             `bson:"action" json:"action"`        // Action identifier (e.g., "refresh_schema", "show_tables")
+	IsPrimary bool               `bson:"is_primary" json:"isPrimary"` // Whether this is a primary (highlighted) action
 }
 
 type Query struct {
@@ -60,6 +69,22 @@ func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, quer
 		Content:       content,
 		IsEdited:      false,
 		Queries:       queries,
+		Base:          NewBase(),
+	}
+}
+
+// NewMessageWithActionButtons creates a new message with action buttons
+func NewMessageWithActionButtons(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query, actionButtons *[]ActionButton, userMessageId *primitive.ObjectID) *Message {
+	log.Printf("NewMessageWithActionButtons -> queries: %v, actionButtons: %v", queries, actionButtons)
+	return &Message{
+		UserID:        userID,
+		ChatID:        chatID,
+		Type:          msgType,
+		UserMessageId: userMessageId,
+		Content:       content,
+		IsEdited:      false,
+		Queries:       queries,
+		ActionButtons: actionButtons,
 		Base:          NewBase(),
 	}
 }

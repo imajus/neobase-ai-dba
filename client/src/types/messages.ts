@@ -1,4 +1,4 @@
-import { Message } from "../components/chat/types";
+import { ActionButton, Message } from "../components/chat/types";
 
 
 // Update MessagesResponse to use BackendMessage instead of Message
@@ -18,6 +18,7 @@ export interface BackendMessage {
     content: string;
     user_message_id?: string;
     is_edited: boolean;
+    action_buttons?: ActionButton[];
     queries?: {
         id: string;
         query: string;
@@ -60,7 +61,8 @@ export const transformBackendMessage = (msg: BackendMessage): Message => {
     loading_steps: [],
     is_streaming: false,
         is_edited: msg.is_edited,
-        created_at: msg.created_at
+        created_at: msg.created_at,
+        action_buttons: msg.action_buttons || []
     };
 };
 
@@ -92,5 +94,6 @@ export interface ExecuteQueryResponse {
             message: string;
             details?: string;
         };
+        action_buttons?: ActionButton[];
     };
 }

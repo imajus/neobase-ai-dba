@@ -589,6 +589,48 @@ export default function ChatWindow({
     }
   };
 
+  const handleFixErrorAction = (message: Message) => {
+    // Find the user message that this AI response is replying to
+    const userMessageId = message.user_message_id;
+    if (!userMessageId) {
+      toast.error("Could not find the original message to fix");
+      return;
+    }
+
+    // Find the user message in the messages array
+    const userMessage = messages.find(m => m.id === userMessageId);
+    if (!userMessage) {
+      toast.error("Could not find the original message to fix");
+      return;
+    }
+
+    // Collect all queries with errors
+    const queriesWithErrors = message.queries?.filter(q => q.error) || [];
+    if (queriesWithErrors.length === 0) {
+      toast.error("No errors found to fix");
+      // Remove the "Fix Error" action button from the message
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === userMessageId) {
+          return {
+            ...msg,
+            action_buttons: msg.action_buttons?.filter(b => b.action !== "fix_error")
+          };
+        }
+        return msg;
+      }));
+      return;
+    }
+
+    // Create the error message content
+    let fixErrorContent = userMessage.content + "\n\nFix Errors:\n";
+    queriesWithErrors.forEach(query => {
+      fixErrorContent += `Query: '${query.query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
+    });
+
+    // Edit the user message to include the error message
+    onEditMessage(userMessageId, fixErrorContent);
+  };
+
   return (
     <div className={`flex-1 flex flex-col h-screen transition-all duration-300 relative ${isExpanded ? 'md:ml-80' : 'md:ml-20'}`}>
       <ChatHeader
@@ -690,8 +732,17 @@ export default function ChatWindow({
                   isFirstMessage={index === 0}
                   onQueryUpdate={handleQueryUpdate}
                   onEditQuery={handleEditQuery}
-                  hasButton={false}
-                  hasRefreshSchemaButton={false}
+                  buttonCallback={(action) => {
+                    if (action === "refresh_schema") {
+                      setShowRefreshSchema(true);
+                    } else if (action === "fix_error") {
+                      // Handle fix_error action
+                      handleFixErrorAction(message);
+                    } else {
+                      console.log(`Action not implemented: ${action}`);
+                      toast.error(`There is no available action for this button: ${action}`);
+                    }
+                  }}
                 />
               ))}
             </div>
@@ -723,6 +774,14 @@ export default function ChatWindow({
                                     queries: [],
                                     created_at: new Date().toISOString(),
                                     updated_at: new Date().toISOString(),
+                                    action_buttons: [
+                                      {
+                                        id: "refresh-schema-button",
+                                        label: "Fetch Latest Schema",
+                                        action: "refresh_schema",
+                                        isPrimary: true
+                                      }
+                                    ]
                                   }}
                                   setMessage={setMessage}
                                   onEdit={handleEditMessage}
@@ -737,10 +796,24 @@ export default function ChatWindow({
                                   isFirstMessage={false}
                                   onQueryUpdate={handleQueryUpdate}
                                   onEditQuery={handleEditQuery}
-                                  hasButton={true}
-                                  hasRefreshSchemaButton={true}
-                                  buttonCallback={() => {
-                                    setShowRefreshSchema(true);
+                                  buttonCallback={(action) => {
+                                    if (action === "refresh_schema") {
+                                      setShowRefreshSchema(true);
+                                    } else if (action === "fix_error") {
+                                      // Handle fix_error action
+                                      handleFixErrorAction({
+                                        id: "welcome-message",
+                                        type: "assistant",
+                                        content: "Welcome to NeoBase! Ask me anything about your database.",
+                                        queries: [],
+                                        created_at: new Date().toISOString(),
+                                        updated_at: new Date().toISOString(),
+                                        action_buttons: []
+                                      });
+                                    } else {
+                                      console.log(`Action not implemented: ${action}`);
+                                      toast.error(`There is no available action for this button: ${action}`);
+                                    }
                                   }}
               />
             </div>
