@@ -1284,7 +1284,11 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 	})
 
 	if err != nil {
-		return http.StatusBadRequest, fmt.Errorf("failed to connect: %v", err)
+		if strings.Contains(err.Error(), "already exists") {
+			log.Printf("ChatService -> ConnectDB -> Database already connected, skipping connection")
+		} else {
+			return http.StatusBadRequest, fmt.Errorf("failed to connect: %v", err)
+		}
 	}
 
 	return http.StatusOK, nil
