@@ -833,6 +833,111 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 	}
 
+	// Special case for createCollection which has a different format
+	// Example: db.createCollection("collectionName", {...})
+	if strings.Contains(query, "createCollection") {
+		createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
+		matches := createCollectionRegex.FindStringSubmatch(query)
+		if len(matches) >= 3 {
+			collectionName := matches[1]
+			optionsStr := strings.TrimSpace(matches[2])
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
+
+			// Process the options
+			var optionsMap bson.M
+			if optionsStr != "" {
+				// Process the options to handle MongoDB syntax
+				jsonStr, err := processMongoDBQueryParams(optionsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process collection options: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonStr), &optionsMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse collection options: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Check if collection already exists
+			collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			// If collection already exists, return an error
+			if len(collections) > 0 {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+						Code:    "COLLECTION_EXISTS",
+					},
+				}
+			}
+
+			// Create collection options
+			var createOptions *options.CreateCollectionOptions
+			if optionsMap != nil {
+				// Convert validator to proper format if it exists
+				if validator, ok := optionsMap["validator"]; ok {
+					createOptions = &options.CreateCollectionOptions{
+						Validator: validator,
+					}
+				}
+			}
+
+			// Execute the createCollection operation
+			err = wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, createOptions)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to create collection: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			result := map[string]interface{}{
+				"ok":      1,
+				"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+			}
+
+			// Convert the result to JSON
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+						Code:    "JSON_ERROR",
+					},
+				}
+			}
+
+			executionTime := int(time.Since(startTime).Milliseconds())
+			log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
+			return &QueryExecutionResult{
+				Result:        result,
+				ResultJSON:    string(resultJSON),
+				ExecutionTime: executionTime,
+			}
+		}
+	}
+
 	// Handle database-level operations
 	dbOperationRegex := regexp.MustCompile(`db\.(\w+)\(\s*(.*)\s*\)`)
 	if dbOperationMatches := dbOperationRegex.FindStringSubmatch(query); len(dbOperationMatches) >= 2 {
@@ -897,100 +1002,6 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	// Example: db.collection.find({name: "John"})
 	parts := strings.SplitN(query, ".", 3)
 	if len(parts) < 3 || !strings.HasPrefix(parts[0], "db") {
-		// Special case for createCollection which has a different format
-		// Example: db.createCollection("collectionName", {...})
-		if strings.Contains(query, "createCollection") {
-			createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
-			matches := createCollectionRegex.FindStringSubmatch(query)
-			if len(matches) >= 3 {
-				collectionName := matches[1]
-				optionsStr := strings.TrimSpace(matches[2])
-
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
-
-				// Process the options
-				var options bson.M
-				if optionsStr != "" {
-					// Process the options to handle MongoDB syntax
-					jsonStr, err := processMongoDBQueryParams(optionsStr)
-					if err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to process collection options: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
-					}
-
-					if err := json.Unmarshal([]byte(jsonStr), &options); err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to parse collection options: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
-					}
-				}
-
-				// Check if collection already exists
-				collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
-							Code:    "EXECUTION_ERROR",
-						},
-					}
-				}
-
-				// If collection already exists, return an error
-				if len(collections) > 0 {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
-							Code:    "COLLECTION_EXISTS",
-						},
-					}
-				}
-
-				// Execute the createCollection operation
-				err = wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to create collection: %v", err),
-							Code:    "EXECUTION_ERROR",
-						},
-					}
-				}
-
-				result := map[string]interface{}{
-					"ok":      1,
-					"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
-				}
-
-				// Convert the result to JSON
-				resultJSON, err := json.Marshal(result)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
-							Code:    "JSON_ERROR",
-						},
-					}
-				}
-
-				executionTime := int(time.Since(startTime).Milliseconds())
-				log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
-
-				return &QueryExecutionResult{
-					Result:        result,
-					ResultJSON:    string(resultJSON),
-					ExecutionTime: executionTime,
-				}
-			}
-		}
-
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...}) or db.operation(...)",
@@ -2130,6 +2141,111 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
+	// Special case for createCollection which has a different format
+	// Example: db.createCollection("collectionName", {...})
+	if strings.Contains(query, "createCollection") {
+		createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
+		matches := createCollectionRegex.FindStringSubmatch(query)
+		if len(matches) >= 3 {
+			collectionName := matches[1]
+			optionsStr := strings.TrimSpace(matches[2])
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
+
+			// Process the options
+			var optionsMap bson.M
+			if optionsStr != "" {
+				// Process the options to handle MongoDB syntax
+				jsonStr, err := processMongoDBQueryParams(optionsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process collection options: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonStr), &optionsMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse collection options: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Check if collection already exists
+			collections, err := tx.Wrapper.Client.Database(tx.Wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			// If collection already exists, return an error
+			if len(collections) > 0 {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+						Code:    "COLLECTION_EXISTS",
+					},
+				}
+			}
+
+			// Create collection options
+			var createOptions *options.CreateCollectionOptions
+			if optionsMap != nil {
+				// Convert validator to proper format if it exists
+				if validator, ok := optionsMap["validator"]; ok {
+					createOptions = &options.CreateCollectionOptions{
+						Validator: validator,
+					}
+				}
+			}
+
+			// Execute the createCollection operation
+			err = tx.Wrapper.Client.Database(tx.Wrapper.Database).CreateCollection(ctx, collectionName, createOptions)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to create collection: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			result := map[string]interface{}{
+				"ok":      1,
+				"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+			}
+
+			// Convert the result to JSON
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+						Code:    "JSON_ERROR",
+					},
+				}
+			}
+
+			executionTime := int(time.Since(startTime).Milliseconds())
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
+			return &QueryExecutionResult{
+				Result:        result,
+				ResultJSON:    string(resultJSON),
+				ExecutionTime: executionTime,
+			}
+		}
+	}
+
 	// Handle database-level operations
 	dbOperationRegex := regexp.MustCompile(`db\.(\w+)\(\s*(.*)\s*\)`)
 	if dbOperationMatches := dbOperationRegex.FindStringSubmatch(query); len(dbOperationMatches) >= 2 {
@@ -2195,111 +2311,6 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	// For example: db.users.find({name: "John"})
 	parts := strings.SplitN(query, ".", 3)
 	if len(parts) < 3 || !strings.HasPrefix(parts[0], "db") {
-		// Special case for createCollection which has a different format
-		// Example: db.createCollection("collectionName", {...})
-		if strings.Contains(query, "createCollection") {
-			createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
-			matches := createCollectionRegex.FindStringSubmatch(query)
-			if len(matches) >= 3 {
-				collectionName := matches[1]
-				optionsStr := strings.TrimSpace(matches[2])
-
-				log.Printf("MongoDBTransaction -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
-
-				// Process the options
-				var options bson.M
-				if optionsStr != "" {
-					// Process the options to handle MongoDB syntax
-					jsonStr, err := processMongoDBQueryParams(optionsStr)
-					if err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to process collection options: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
-					}
-
-					if err := json.Unmarshal([]byte(jsonStr), &options); err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to parse collection options: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
-					}
-				}
-
-				// Execute the createCollection operation
-				wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
-				if !ok {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: "Invalid MongoDB connection",
-							Code:    "CONNECTION_ERROR",
-						},
-					}
-				}
-
-				// Check if collection already exists
-				collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
-							Code:    "EXECUTION_ERROR",
-						},
-					}
-				}
-
-				// If collection already exists, return an error
-				if len(collections) > 0 {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
-							Code:    "COLLECTION_EXISTS",
-						},
-					}
-				}
-
-				// Execute the createCollection operation
-				err = wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, nil)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to create collection: %v", err),
-							Code:    "EXECUTION_ERROR",
-						},
-					}
-				}
-
-				result := map[string]interface{}{
-					"ok":      1,
-					"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
-				}
-
-				// Convert the result to JSON
-				resultJSON, err := json.Marshal(result)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
-							Code:    "JSON_ERROR",
-						},
-					}
-				}
-
-				executionTime := int(time.Since(startTime).Milliseconds())
-				log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
-
-				return &QueryExecutionResult{
-					Result:        result,
-					ResultJSON:    string(resultJSON),
-					ExecutionTime: executionTime,
-				}
-			}
-		}
-
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...}) or db.operation(...)",
