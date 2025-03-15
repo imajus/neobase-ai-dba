@@ -818,7 +818,7 @@ func (d *MongoDBDriver) IsAlive(conn *Connection) bool {
 }
 
 // ExecuteQuery executes a MongoDB query
-func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	startTime := time.Now()
 	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
 
@@ -2160,30 +2160,76 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
 	log.Printf("MongoDBDriver -> BeginTx -> Beginning MongoDB transaction")
 
-	// Get the MongoDB wrapper from the connection
+	// Get the MongoDB wrapper
 	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
 	if !ok {
+		log.Printf("MongoDBDriver -> BeginTx -> Invalid MongoDB connection")
 		return &MongoDBTransaction{
 			Error: fmt.Errorf("invalid MongoDB connection"),
+			// Session is nil here, but that's expected since we have an error
 		}
 	}
 
-	// Start a new session
-	session, err := wrapper.Client.StartSession()
-	if err != nil {
-		log.Printf("MongoDBDriver -> BeginTx -> Error starting MongoDB session: %v", err)
+	// Ensure the client is not nil
+	if wrapper.Client == nil {
+		log.Printf("MongoDBDriver -> BeginTx -> MongoDB client is nil")
 		return &MongoDBTransaction{
-			Error: fmt.Errorf("failed to start MongoDB session: %v", err),
+			Error:   fmt.Errorf("MongoDB client is nil"),
+			Wrapper: wrapper,
+			// Session is nil here, but that's expected since we have an error
 		}
 	}
 
-	// Start a transaction
-	err = session.StartTransaction()
+	// Verify the connection is alive before starting a transaction
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := wrapper.Client.Ping(pingCtx, readpref.Primary()); err != nil {
+		log.Printf("MongoDBDriver -> BeginTx -> MongoDB connection is not alive: %v", err)
+		return &MongoDBTransaction{
+			Error:   fmt.Errorf("MongoDB connection is not alive: %v", err),
+			Wrapper: wrapper,
+		}
+	}
+
+	// Start a new session with retry logic
+	var session mongo.Session
+	var err error
+
+	// Try up to 3 times to start a session
+	for attempts := 0; attempts < 3; attempts++ {
+		session, err = wrapper.Client.StartSession()
+		if err == nil {
+			break
+		}
+		log.Printf("MongoDBDriver -> BeginTx -> Error starting MongoDB session (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(500 * time.Millisecond) // Wait before retrying
+	}
+
 	if err != nil {
-		log.Printf("MongoDBDriver -> BeginTx -> Error starting MongoDB transaction: %v", err)
+		log.Printf("MongoDBDriver -> BeginTx -> Failed to start MongoDB session after retries: %v", err)
+		return &MongoDBTransaction{
+			Error:   fmt.Errorf("failed to start MongoDB session after retries: %v", err),
+			Wrapper: wrapper,
+		}
+	}
+
+	// Start a transaction with retry logic
+	for attempts := 0; attempts < 3; attempts++ {
+		err = session.StartTransaction()
+		if err == nil {
+			break
+		}
+		log.Printf("MongoDBDriver -> BeginTx -> Error starting MongoDB transaction (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(500 * time.Millisecond) // Wait before retrying
+	}
+
+	if err != nil {
+		log.Printf("MongoDBDriver -> BeginTx -> Failed to start MongoDB transaction after retries: %v", err)
 		session.EndSession(ctx)
 		return &MongoDBTransaction{
-			Error: fmt.Errorf("failed to start MongoDB transaction: %v", err),
+			Error:   fmt.Errorf("failed to start MongoDB transaction after retries: %v", err),
+			Wrapper: wrapper,
 		}
 	}
 
@@ -2194,7 +2240,7 @@ func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transacti
 		Error:   nil,
 	}
 
-	log.Printf("MongoDBDriver -> BeginTx -> MongoDB transaction started")
+	log.Printf("MongoDBDriver -> BeginTx -> MongoDB transaction started successfully")
 	return tx
 }
 
@@ -2205,27 +2251,56 @@ func (tx *MongoDBTransaction) Commit() error {
 	// Check if the session is nil (which can happen if there was an error creating the transaction)
 	if tx.Session == nil {
 		log.Printf("MongoDBTransaction -> Commit -> No session to commit (session is nil)")
+		if tx.Error != nil {
+			log.Printf("MongoDBTransaction -> Commit -> Original error: %v", tx.Error)
+			return fmt.Errorf("cannot commit transaction: %v", tx.Error)
+		}
 		return fmt.Errorf("cannot commit transaction: session is nil")
+	}
+
+	// Check if the wrapper or client is nil
+	if tx.Wrapper == nil || tx.Wrapper.Client == nil {
+		log.Printf("MongoDBTransaction -> Commit -> Wrapper or client is nil")
+		return fmt.Errorf("cannot commit: wrapper or client is nil")
 	}
 
 	// Check if there was an error starting the transaction
 	if tx.Error != nil {
+		log.Printf("MongoDBTransaction -> Commit -> Cannot commit with error: %v", tx.Error)
+		// End the session if it exists
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		tx.Session.EndSession(ctx)
 		return fmt.Errorf("cannot commit transaction with error: %v", tx.Error)
 	}
 
-	// Create a context
-	ctx := context.Background()
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Commit the transaction
-	err := tx.Session.CommitTransaction(ctx)
+	// Commit the transaction with retry logic
+	var err error
+	for attempts := 0; attempts < 3; attempts++ {
+		err = tx.Session.CommitTransaction(ctx)
+		if err == nil {
+			break
+		}
+		log.Printf("MongoDBTransaction -> Commit -> Error committing transaction (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(500 * time.Millisecond) // Wait before retrying
+	}
+
 	if err != nil {
+		log.Printf("MongoDBTransaction -> Commit -> Failed to commit transaction after retries: %v", err)
+		// Still try to end the session even if commit fails
+		tx.Session.EndSession(ctx)
 		return fmt.Errorf("failed to commit MongoDB transaction: %v", err)
 	}
 
 	// End the session
 	tx.Session.EndSession(ctx)
 
-	log.Printf("MongoDBTransaction -> Commit -> MongoDB transaction committed")
+	log.Printf("MongoDBTransaction -> Commit -> MongoDB transaction committed successfully")
 	return nil
 }
 
@@ -2236,29 +2311,58 @@ func (tx *MongoDBTransaction) Rollback() error {
 	// Check if the session is nil (which can happen if there was an error creating the transaction)
 	if tx.Session == nil {
 		log.Printf("MongoDBTransaction -> Rollback -> No session to roll back (session is nil)")
+		if tx.Error != nil {
+			log.Printf("MongoDBTransaction -> Rollback -> Original error: %v", tx.Error)
+			return tx.Error
+		}
 		return nil
+	}
+
+	// Check if the wrapper or client is nil
+	if tx.Wrapper == nil || tx.Wrapper.Client == nil {
+		log.Printf("MongoDBTransaction -> Rollback -> Wrapper or client is nil")
+		return fmt.Errorf("cannot rollback: wrapper or client is nil")
 	}
 
 	// Check if there was an error starting the transaction
 	if tx.Error != nil {
 		// If there was an error starting the transaction, just end the session
-		tx.Session.EndSession(context.Background())
-		return nil
+		log.Printf("MongoDBTransaction -> Rollback -> Rolling back with error: %v", tx.Error)
+
+		// Use a timeout context for ending the session
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		tx.Session.EndSession(ctx)
+		return tx.Error
 	}
 
-	// Create a context
-	ctx := context.Background()
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Abort the transaction
-	err := tx.Session.AbortTransaction(ctx)
+	// Abort the transaction with retry logic
+	var err error
+	for attempts := 0; attempts < 3; attempts++ {
+		err = tx.Session.AbortTransaction(ctx)
+		if err == nil {
+			break
+		}
+		log.Printf("MongoDBTransaction -> Rollback -> Error aborting transaction (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(500 * time.Millisecond) // Wait before retrying
+	}
+
 	if err != nil {
+		log.Printf("MongoDBTransaction -> Rollback -> Failed to abort transaction after retries: %v", err)
+		// Still try to end the session even if abort fails
+		tx.Session.EndSession(ctx)
 		return fmt.Errorf("failed to abort MongoDB transaction: %v", err)
 	}
 
 	// End the session
 	tx.Session.EndSession(ctx)
 
-	log.Printf("MongoDBTransaction -> Rollback -> MongoDB transaction rolled back")
+	log.Printf("MongoDBTransaction -> Rollback -> MongoDB transaction rolled back successfully")
 	return nil
 }
 
@@ -2276,15 +2380,21 @@ type MongoDBTransaction struct {
 }
 
 // ExecuteQuery executes a MongoDB query within a transaction
-func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	log.Printf("MongoDBTransaction -> ExecuteQuery -> Executing MongoDB query in transaction: %s", query)
 	startTime := time.Now()
 
 	// Check if the session is nil (which can happen if there was an error creating the transaction)
 	if tx.Session == nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Cannot execute query: session is nil")
+		errorMsg := "Cannot execute query: transaction session is nil"
+		if tx.Error != nil {
+			errorMsg = fmt.Sprintf("Cannot execute query: %v", tx.Error)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Original error: %v", tx.Error)
+		}
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Cannot execute query: transaction session is nil",
+				Message: errorMsg,
 				Code:    "TRANSACTION_ERROR",
 			},
 		}
@@ -2292,9 +2402,44 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 	// Check if there was an error starting the transaction
 	if tx.Error != nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Transaction error: %v", tx.Error)
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: fmt.Sprintf("Transaction error: %v", tx.Error),
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
+
+	// Check if the wrapper is nil
+	if tx.Wrapper == nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Wrapper is nil")
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "Transaction wrapper is nil",
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
+
+	// Verify the client is not nil
+	if tx.Wrapper.Client == nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB client is nil")
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "MongoDB client is nil",
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
+
+	// Verify the session is still valid by checking if the client is still connected
+	// This is a lightweight check that doesn't require a full ping
+	if tx.Wrapper.Client.NumberSessionsInProgress() == 0 {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> No active sessions, session may have expired")
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "Transaction session may have expired",
 				Code:    "TRANSACTION_ERROR",
 			},
 		}
@@ -3303,6 +3448,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
+
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
 			if err != nil {
 				return &QueryExecutionResult{
@@ -3913,4 +4059,26 @@ func extractModifiers(query string) struct {
 	}
 
 	return modifiers
+}
+
+// SafeBeginTx is a helper function to safely begin a transaction with proper error handling
+func (d *MongoDBDriver) SafeBeginTx(ctx context.Context, conn *Connection) (Transaction, error) {
+	log.Printf("MongoDBDriver -> SafeBeginTx -> Safely beginning MongoDB transaction")
+
+	tx := d.BeginTx(ctx, conn)
+
+	// Check if the transaction has an error
+	if mongoTx, ok := tx.(*MongoDBTransaction); ok && mongoTx.Error != nil {
+		log.Printf("MongoDBDriver -> SafeBeginTx -> Transaction creation failed: %v", mongoTx.Error)
+		return nil, mongoTx.Error
+	}
+
+	// Check if the transaction has a nil session
+	if mongoTx, ok := tx.(*MongoDBTransaction); ok && mongoTx.Session == nil {
+		log.Printf("MongoDBDriver -> SafeBeginTx -> Transaction has nil session")
+		return nil, fmt.Errorf("transaction has nil session")
+	}
+
+	log.Printf("MongoDBDriver -> SafeBeginTx -> Transaction created successfully")
+	return tx, nil
 }
