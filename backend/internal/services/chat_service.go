@@ -2297,7 +2297,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
-		processCompleted := make(chan bool)
 		// Update query status in message
 		go func() {
 			if msg.Queries != nil {
@@ -2305,26 +2304,15 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					if (*msg.Queries)[i].ID == query.ID {
 						(*msg.Queries)[i].IsExecuted = true
 						(*msg.Queries)[i].IsRolledBack = false
-						(*msg.Queries)[i].Error = &models.QueryError{
-							Code:    queryErr.Code,
-							Message: queryErr.Message,
-							Details: queryErr.Details,
-						}
 					}
 				}
-				// Add "Fix Error" action button to the Message & LLM content if there's an error
-				if queryErr != nil {
-					s.addFixErrorButton(msg)
-				} else {
-					s.removeFixErrorButton(msg)
-				}
+
 				if msg.ActionButtons != nil {
 					log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
 				} else {
 					log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: nil")
 				}
-				// We want to wait for the message to be updated but not save it to DB before sending the response
-				processCompleted <- true
+
 				if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 					log.Printf("ChatService -> RollbackQuery -> Error updating message: %v", err)
 				}
@@ -2345,11 +2333,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 										qMap["isExecuted"] = true
 										qMap["isRolledBack"] = false
-										qMap["error"] = &models.QueryError{
-											Code:    queryErr.Code,
-											Message: queryErr.Message,
-											Details: queryErr.Details,
-										}
 									}
 								}
 							}
@@ -2360,15 +2343,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 										qMap["isExecuted"] = true
 										qMap["isRolledBack"] = false
-										if queryErr.Code != "" {
-											qMap["error"] = &models.QueryError{
-												Code:    queryErr.Code,
-												Message: queryErr.Message,
-												Details: queryErr.Details,
-											}
-										} else {
-											qMap["error"] = nil
-										}
 									}
 								}
 							}
@@ -2383,8 +2357,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			}
 		}()
 
-		<-processCompleted
-
 		// Send event about rollback query failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 			Event: "rollback-query-failed",
@@ -2396,6 +2368,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			},
 		})
 
+		tempMessage := *msg
+		// Add "Fix Rollback Error" action button temporarily to response so that user can fix the error
+		s.addFixRollbackErrorButton(&tempMessage)
+
 		return &dtos.QueryExecutionResponse{
 			ChatID:            chatID,
 			MessageID:         msg.ID.Hex(),
@@ -2406,7 +2382,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			ExecutionResult:   nil,
 			Error:             queryErr,
 			TotalRecordsCount: nil,
-			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
+			ActionButtons:     dtos.ToActionButtonDto(tempMessage.ActionButtons),
 		}, http.StatusOK, nil
 	}
 
@@ -2446,11 +2422,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			}
 		}
 	}
-	if queryErr != nil {
-		s.addFixErrorButton(msg)
-	} else {
-		s.removeFixErrorButton(msg)
-	}
+
 	if msg.ActionButtons != nil {
 		log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
 	} else {
@@ -3281,6 +3253,31 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 	}
 }
 
+// Helper function to add a "Fix Rollback Error" button to a message, temporarily and doesnt update message in database
+func (s *chatService) addFixRollbackErrorButton(msg *models.Message) {
+	log.Printf("ChatService -> addFixRollbackErrorButton -> msg.id: %s", msg.ID)
+
+	// Check if message already has a "Fix Rollback Error" button
+	hasFixRollbackErrorButton := false
+	for _, button := range *msg.ActionButtons {
+		if button.Action == "fix_rollback_error" {
+			hasFixRollbackErrorButton = true
+			break
+		}
+	}
+
+	if !hasFixRollbackErrorButton {
+		fixRollbackErrorButton := models.ActionButton{
+			ID:     primitive.NewObjectID(),
+			Label:  "Fix Rollback Error",
+			Action: "fix_rollback_error",
+		}
+		actionButtons := append(*msg.ActionButtons, fixRollbackErrorButton)
+		msg.ActionButtons = &actionButtons
+		log.Printf("ChatService -> addFixRollbackErrorButton -> Added fix_rollback_error button to existing array")
+	}
+}
+
 // Helper function to add a "Fix Error" button to a message
 func (s *chatService) addFixErrorButton(msg *models.Message) {
 	log.Printf("ChatService -> addFixErrorButton -> msg.id: %s", msg.ID)
@@ -3309,7 +3306,7 @@ func (s *chatService) addFixErrorButton(msg *models.Message) {
 	// Create a new "Fix Error" action button
 	fixErrorButton := models.ActionButton{
 		ID:        primitive.NewObjectID(),
-		Label:     "Fix Error(s)",
+		Label:     "Fix Error",
 		Action:    "fix_error",
 		IsPrimary: true,
 	}

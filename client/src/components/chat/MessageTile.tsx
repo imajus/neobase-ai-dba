@@ -420,7 +420,7 @@ export default function MessageTile({
                     queries: message.queries?.map(q => q.id === queryId ? {
                         ...q,
                         is_executed: true,
-                        is_rolled_back: true,
+                        is_rolled_back: response?.data?.is_rolled_back,
                         execution_result: response?.data?.execution_result,
                         execution_time: response?.data?.execution_time,
                         error: response?.data?.error,
@@ -477,7 +477,7 @@ export default function MessageTile({
                 
                 onQueryUpdate(() => {
                     if (message.queries) {
-                        message.queries[queryIndex].is_rolled_back = true;
+                        message.queries[queryIndex].is_rolled_back = response?.data?.is_rolled_back;
                         message.queries[queryIndex].execution_time = response?.data?.execution_time;
                         message.queries[queryIndex].error = response?.data?.error;
                         message.queries[queryIndex].execution_result = response?.data?.execution_result;

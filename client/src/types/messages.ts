@@ -43,7 +43,8 @@ export interface BackendMessage {
             paginated_query?: string;
         };
         tables: string;
-        rollback_query: string;
+        rollback_query?: string;
+        rollback_dependent_query?: string;
     }[];
     created_at: string;
 }

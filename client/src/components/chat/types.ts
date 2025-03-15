@@ -19,6 +19,8 @@ export interface QueryResult {
     };
     is_critical?: boolean;
     can_rollback?: boolean;
+    rollback_query?: string;
+    rollback_dependent_query?: string;
     is_streaming?: boolean;
     is_edited?: boolean;
 }

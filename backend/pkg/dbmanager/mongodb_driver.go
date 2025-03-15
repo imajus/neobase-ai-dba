@@ -2202,6 +2202,12 @@ func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transacti
 func (tx *MongoDBTransaction) Commit() error {
 	log.Printf("MongoDBTransaction -> Commit -> Committing MongoDB transaction")
 
+	// Check if the session is nil (which can happen if there was an error creating the transaction)
+	if tx.Session == nil {
+		log.Printf("MongoDBTransaction -> Commit -> No session to commit (session is nil)")
+		return fmt.Errorf("cannot commit transaction: session is nil")
+	}
+
 	// Check if there was an error starting the transaction
 	if tx.Error != nil {
 		return fmt.Errorf("cannot commit transaction with error: %v", tx.Error)
@@ -2226,6 +2232,12 @@ func (tx *MongoDBTransaction) Commit() error {
 // Rollback rolls back a MongoDB transaction
 func (tx *MongoDBTransaction) Rollback() error {
 	log.Printf("MongoDBTransaction -> Rollback -> Rolling back MongoDB transaction")
+
+	// Check if the session is nil (which can happen if there was an error creating the transaction)
+	if tx.Session == nil {
+		log.Printf("MongoDBTransaction -> Rollback -> No session to roll back (session is nil)")
+		return nil
+	}
 
 	// Check if there was an error starting the transaction
 	if tx.Error != nil {
@@ -2267,6 +2279,16 @@ type MongoDBTransaction struct {
 func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
 	log.Printf("MongoDBTransaction -> ExecuteQuery -> Executing MongoDB query in transaction: %s", query)
 	startTime := time.Now()
+
+	// Check if the session is nil (which can happen if there was an error creating the transaction)
+	if tx.Session == nil {
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "Cannot execute query: transaction session is nil",
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
 
 	// Check if there was an error starting the transaction
 	if tx.Error != nil {
