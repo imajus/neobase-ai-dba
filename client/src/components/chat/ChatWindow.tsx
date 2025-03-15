@@ -666,7 +666,7 @@ export default function ChatWindow({
     // Create the error message content
     let fixRollbackErrorContent = userMessage.content + "\n\nFix Rollback Errors:\n";
     queriesWithErrors.forEach(query => {
-      fixRollbackErrorContent += `Query: '${query.rollback_query != null ? query.rollback_query : query.rollback_dependent_query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
+      fixRollbackErrorContent += `Query: '${query.rollback_query != null && query.rollback_query != "" ? query.rollback_query : query.rollback_dependent_query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
     });
 
     // Edit the user message to include the error message
