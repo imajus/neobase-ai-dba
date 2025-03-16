@@ -69,7 +69,7 @@ json
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
           "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -147,7 +147,7 @@ json
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
           "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -228,7 +228,7 @@ json
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
           "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -305,8 +305,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -416,7 +416,7 @@ json
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "pagination": {
           "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions from the original query but uses countDocuments instead of find. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -459,7 +459,7 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -549,7 +549,7 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -639,7 +639,7 @@ var GeminiMySQLLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -738,7 +738,7 @@ var GeminiClickhouseLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -828,7 +828,7 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions from the original query but uses countDocuments instead of find. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
