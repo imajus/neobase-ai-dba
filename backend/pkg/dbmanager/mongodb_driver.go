@@ -3809,11 +3809,6 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 		}
 	}
 
-	// First, handle MongoDB operators at the beginning of objects
-	// For example: {$or: [...]} -> {"$or": [...]}
-	operatorPattern := regexp.MustCompile(`\{\s*(\$[a-zA-Z]+):\s*`)
-	paramsStr = operatorPattern.ReplaceAllString(paramsStr, `{"$1": `)
-
 	// Handle ObjectId syntax: ObjectId('...') -> {"$oid":"..."}
 	// This pattern matches both ObjectId('...') and ObjectId("...")
 	objectIdPattern := regexp.MustCompile(`ObjectId\(['"]([^'"]+)['"]\)`)
@@ -3827,6 +3822,21 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 
 		// Return the proper JSON format for ObjectId
 		return fmt.Sprintf(`{"$oid":"%s"}`, matches[1])
+	})
+
+	// Handle ISODate syntax: ISODate('...') -> {"$date":"..."}
+	// This pattern matches both ISODate('...') and ISODate("...")
+	isoDatePattern := regexp.MustCompile(`ISODate\(['"]([^'"]+)['"]\)`)
+	paramsStr = isoDatePattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Extract the ISODate value
+		re := regexp.MustCompile(`ISODate\(['"]([^'"]+)['"]\)`)
+		matches := re.FindStringSubmatch(match)
+		if len(matches) < 2 {
+			return match
+		}
+
+		// Return the proper JSON format for Date
+		return fmt.Sprintf(`{"$date":"%s"}`, matches[1])
 	})
 
 	// Handle new Date() syntax with various formats:
@@ -3855,13 +3865,19 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 		return fmt.Sprintf(`{"$date":"%s"}`, matches[1])
 	})
 
-	// Handle new Date(year, month, day, ...) with numeric parameters
-	// This is more complex and would require parsing the parameters and constructing a date
-	// For now, we'll replace it with the current date as a fallback
-	numericDatePattern := regexp.MustCompile(`new\s+Date\(([^'")\s][^)]*)\)`)
-	paramsStr = numericDatePattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
-		// For now, return current date in ISO format as a fallback
-		// In a more complete implementation, we would parse the numeric parameters
+	// Handle complex date expressions like:
+	// new Date(new Date().getTime() - (20 * 60 * 1000))
+	// new Date(new Date().getFullYear(), new Date().getMonth()-1, 1)
+	complexDatePattern := regexp.MustCompile(`new\s+Date\(([^)]+)\)`)
+	paramsStr = complexDatePattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Check if we've already processed this date (to avoid infinite recursion)
+		if strings.Contains(match, "$date") {
+			return match
+		}
+
+		// For complex date expressions, we'll use the current date
+		// This is a simplification, but it allows the query to be parsed
+		log.Printf("Converting complex date expression to current date: %s", match)
 		return fmt.Sprintf(`{"$date":"%s"}`, time.Now().Format(time.RFC3339))
 	})
 
@@ -3872,9 +3888,14 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	paramsStr = strings.ReplaceAll(paramsStr, "$oid", "__MONGODB_OID__")
 	paramsStr = strings.ReplaceAll(paramsStr, "$date", "__MONGODB_DATE__")
 
+	// Handle MongoDB operators ($gt, $lt, $in, etc.) throughout the entire document
+	// This is a more comprehensive approach than just handling them at the beginning of objects
+	operatorRegex := regexp.MustCompile(`(\s*)(\$[a-zA-Z0-9]+)(\s*):`)
+	paramsStr = operatorRegex.ReplaceAllString(paramsStr, `$1"$2"$3:`)
+
 	// Handle field names that might not be quoted
 	// This regex matches field names followed by a colon, ensuring they're properly quoted
-	fieldNameRegex := regexp.MustCompile(`([,{])\s*(\w+)\s*:`)
+	fieldNameRegex := regexp.MustCompile(`([,{])\s*([a-zA-Z0-9_]+)\s*:`)
 	paramsStr = fieldNameRegex.ReplaceAllString(paramsStr, `$1"$2":`)
 
 	// Handle single quotes for string values
@@ -3891,7 +3912,7 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	if strings.HasPrefix(paramsStr, "{") && strings.HasSuffix(paramsStr, "}") {
 		// Add quotes to any remaining unquoted field names
 		// This regex matches field names that aren't already quoted
-		unquotedFieldRegex := regexp.MustCompile(`([,{])\s*(\w+)\s*:`)
+		unquotedFieldRegex := regexp.MustCompile(`([,{])\s*([a-zA-Z0-9_]+)\s*:`)
 		for unquotedFieldRegex.MatchString(paramsStr) {
 			paramsStr = unquotedFieldRegex.ReplaceAllString(paramsStr, `$1"$2":`)
 		}
@@ -3922,8 +3943,8 @@ func processObjectIds(filter map[string]interface{}) error {
 				filter[key] = oid
 				log.Printf("Converted ObjectId %s to %v", oidStr, oid)
 			} else if dateStr, ok := v["$date"].(string); ok && len(v) == 1 {
-				// Convert to time.Time
-				date, err := time.Parse(time.RFC3339, dateStr)
+				// Parse the date to validate it, but preserve the exact format for MongoDB
+				_, err := time.Parse(time.RFC3339, dateStr)
 				if err != nil {
 					// Try other common date formats
 					formats := []string{
@@ -3945,21 +3966,22 @@ func processObjectIds(filter map[string]interface{}) error {
 
 					parsed := false
 					for _, format := range formats {
-						if parsedDate, parseErr := time.Parse(format, dateStr); parseErr == nil {
-							date = parsedDate
+						if _, parseErr := time.Parse(format, dateStr); parseErr == nil {
 							parsed = true
 							break
 						}
 					}
 
 					if !parsed {
-						return fmt.Errorf("invalid date format: %v", err)
+						return fmt.Errorf("invalid date format: %s", dateStr)
 					}
 				}
-				filter[key] = date
-				log.Printf("Converted date %s to %v", dateStr, date)
+
+				// Use the original date string format for MongoDB
+				filter[key] = dateStr
+				log.Printf("Converted date %s to %s", dateStr, dateStr)
 			} else {
-				// Recursively process nested maps
+				// Recursively process nested objects
 				if err := processObjectIds(v); err != nil {
 					return err
 				}
@@ -3978,8 +4000,8 @@ func processObjectIds(filter map[string]interface{}) error {
 	}
 
 	// Log the output filter for debugging
-	filterJSON, _ = json.Marshal(filter)
-	log.Printf("processObjectIds output (after ObjectId and Date conversion): %s", string(filterJSON))
+	outputJSON, _ := json.Marshal(filter)
+	log.Printf("processObjectIds output (after ObjectId and Date conversion): %s", string(outputJSON))
 
 	return nil
 }
