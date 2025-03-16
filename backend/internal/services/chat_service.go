@@ -731,7 +731,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		// Send initial processing message
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Generating an optimized query & example results for the request..",
+			Data:  "Generating an optimized query & results for the request..",
 		})
 	}
 	if checkCancellation() {
@@ -1729,18 +1729,28 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	if query.Pagination != nil && query.Pagination.PaginatedQuery != nil && *query.Pagination.PaginatedQuery != "" {
 		log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery is present, will use it to cap the result to 50 records. query.Pagination.PaginatedQuery: %+v", *query.Pagination.PaginatedQuery)
-		// Capping the result to 50 records, we do not need to run the query.Query as we have better paginated query & already have the total records count
-		queryToExecute = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(50), 1)
+		// Capping the result to 50 records by default and skipping 0 records, we do not need to run the query.Query as we have better paginated query & already have the total records count
+
+		queryToExecute = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1)
 	}
 
 	log.Printf("ChatService -> ExecuteQuery -> queryToExecute: %+v", queryToExecute)
 	// Execute query, we will be executing the pagination.paginatedQuery if it exists, else the query.Query
 	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, *query.QueryType, false, false)
 	if queryErr != nil {
+		// Checking if executed query was paginatedQuery, if so, let's try to execute it again with the original query
+		if query.Pagination != nil && query.Pagination.PaginatedQuery != nil && *query.Pagination.PaginatedQuery != "" && queryToExecute == strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1) {
+			log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery was executed but faced an error, will try to execute the original query")
+			queryToExecute = query.Query
+			result, queryErr = s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, *query.QueryType, false, false)
+		}
+	}
+	if queryErr != nil {
 		log.Printf("ChatService -> ExecuteQuery -> queryErr: %+v", queryErr)
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
+
 		processCompleted := make(chan bool)
 		go func() {
 			log.Printf("ChatService -> ExecuteQuery -> Updating message")

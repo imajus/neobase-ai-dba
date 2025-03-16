@@ -1031,6 +1031,12 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
 
+	// Handle empty parameters case - if the parameters are empty, use an empty JSON object
+	if strings.TrimSpace(paramsStr) == "" {
+		paramsStr = "{}"
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Empty parameters detected, using empty object {}")
+	}
+
 	// Handle query modifiers like .limit(), .skip(), etc.
 	modifiers := make(map[string]interface{})
 	if closeParenIndex < len(operationWithParams)-1 {
@@ -2643,6 +2649,12 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	// Extract the operation and parameters
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
+
+	// Handle empty parameters case - if the parameters are empty, use an empty JSON object
+	if strings.TrimSpace(paramsStr) == "" {
+		paramsStr = "{}"
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Empty parameters detected, using empty object {}")
+	}
 
 	// Handle query modifiers like .limit(), .skip(), etc.
 	modifiers := make(map[string]interface{})
