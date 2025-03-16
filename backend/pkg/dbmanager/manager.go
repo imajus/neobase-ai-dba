@@ -906,8 +906,8 @@ func (m *Manager) CancelQueryExecution(streamID string) {
 	}
 }
 
-// ExecuteQuery executes a query and returns the result, synchronous, no SSE events are sent
-func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, queryType string, isRollback bool) (*QueryExecutionResult, *dtos.QueryError) {
+// ExecuteQuery executes a query and returns the result, synchronous, no SSE events are sent, findCount is used to strictly get the number/count of records that the query returns
+func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, streamID string, query string, queryType string, isRollback bool, findCount bool) (*QueryExecutionResult, *dtos.QueryError) {
 	m.executionMu.Lock()
 
 	// Create cancellable context with timeout
@@ -972,7 +972,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 	go func() {
 		defer close(done)
 		log.Printf("Manager -> ExecuteQuery -> Executing query: %v", query)
-		result = tx.ExecuteQuery(execCtx, conn, query, queryType)
+		result = tx.ExecuteQuery(execCtx, conn, query, queryType, findCount)
 		// log.Printf("Manager -> ExecuteQuery -> Result: %v", result)
 		if result.Error != nil {
 			queryErr = result.Error

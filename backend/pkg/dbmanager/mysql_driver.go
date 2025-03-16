@@ -278,7 +278,7 @@ func (d *MySQLDriver) IsAlive(conn *Connection) bool {
 }
 
 // ExecuteQuery executes a SQL query on the MySQL database
-func (d *MySQLDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (d *MySQLDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	if conn == nil || conn.DB == nil {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
@@ -470,7 +470,7 @@ type MySQLTransaction struct {
 }
 
 // ExecuteQuery executes a query within a transaction
-func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	if t.tx == nil {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{

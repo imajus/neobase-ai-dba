@@ -52,11 +52,11 @@ func (e *MongoDBExecutor) GetConnection() *Connection {
 	return e.conn
 }
 
-// ExecuteQuery executes a MongoDB query
+// ExecuteQuery executes a MongoDB query, *Not Used By DBManager*
 func (e *MongoDBExecutor) ExecuteQuery(query string) (*QueryExecutionResult, error) {
 	ctx := context.Background()
 	driver := &MongoDBDriver{}
-	return driver.ExecuteQuery(ctx, e.conn, query, ""), nil
+	return driver.ExecuteQuery(ctx, e.conn, query, "", false), nil
 }
 
 // QueryRows executes a MongoDB query and unmarshals the results into the provided destination
@@ -489,7 +489,7 @@ func (e *MongoDBExecutor) Close() error {
 	return nil
 }
 
-// Exec executes a MongoDB command
+// Exec executes a MongoDB command, *Not Used By DBManager*
 func (e *MongoDBExecutor) Exec(command string, values ...interface{}) error {
 	// Parse and execute the MongoDB command
 	log.Printf("MongoDBExecutor -> Exec -> Command: %s", command)
@@ -497,7 +497,7 @@ func (e *MongoDBExecutor) Exec(command string, values ...interface{}) error {
 	// Execute the command using the MongoDB driver
 	ctx := context.Background()
 	driver := &MongoDBDriver{}
-	result := driver.ExecuteQuery(ctx, e.conn, command, "")
+	result := driver.ExecuteQuery(ctx, e.conn, command, "", false)
 
 	// Check for errors
 	if result.Error != nil {
@@ -507,7 +507,7 @@ func (e *MongoDBExecutor) Exec(command string, values ...interface{}) error {
 	return nil
 }
 
-// Raw executes a raw MongoDB command
+// Raw executes a raw MongoDB command, *Not Used By DBManager*
 func (e *MongoDBExecutor) Raw(command string, values ...interface{}) error {
 	// Parse and execute the MongoDB command
 	log.Printf("MongoDBExecutor -> Raw -> Command: %s", command)
@@ -515,7 +515,7 @@ func (e *MongoDBExecutor) Raw(command string, values ...interface{}) error {
 	// Execute the command using the MongoDB driver
 	ctx := context.Background()
 	driver := &MongoDBDriver{}
-	result := driver.ExecuteQuery(ctx, e.conn, command, "")
+	result := driver.ExecuteQuery(ctx, e.conn, command, "", false)
 
 	// Check for errors
 	if result.Error != nil {

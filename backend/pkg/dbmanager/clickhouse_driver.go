@@ -292,7 +292,7 @@ func (d *ClickHouseDriver) IsAlive(conn *Connection) bool {
 }
 
 // ExecuteQuery executes a SQL query on the ClickHouse database
-func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	if conn == nil || conn.DB == nil {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
@@ -484,7 +484,7 @@ type ClickHouseTransaction struct {
 }
 
 // ExecuteQuery executes a query within a transaction
-func (t *ClickHouseTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (t *ClickHouseTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	if t.tx == nil {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{

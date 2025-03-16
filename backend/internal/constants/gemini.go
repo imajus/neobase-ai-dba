@@ -68,7 +68,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. set_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. always generate this query whenever there can be large volume of data or fetching data"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -76,7 +77,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
@@ -145,7 +146,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -153,7 +155,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
@@ -225,7 +227,8 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -233,7 +236,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResultString": "MUST BE VALID JSON STRING with no additional text.[{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}",
     }
@@ -302,7 +305,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
@@ -310,7 +314,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
@@ -408,18 +412,15 @@ json
       "isCritical": "true when the query is critical like adding, updating or deleting data",
       "canRollback": "true when the request query can be rolled back",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions from the original query but uses countDocuments instead of find. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
           },
         },
        "tables": "users,orders",
       "explanation": "User-friendly description of the query's purpose",
-      "isCritical": "true when the query is critical like adding, updating or deleting data",
-      "canRollback": "true when the request query can be rolled back",
-      "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable)",
       "exampleResultString": "MUST BE VALID JSON STRING with no additional text. [{\"column1\":\"value1\",\"column2\":\"value2\"}] or {\"result\":\"1 row affected\"}. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
     }
   ]
@@ -451,10 +452,14 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 					"pagination": &genai.Schema{
 						Type:     genai.TypeObject,
 						Enum:     []string{},
-						Required: []string{"paginatedQuery"},
+						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
 								Type: genai.TypeString,
+							},
+							"countQuery": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -537,10 +542,14 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 					"pagination": &genai.Schema{
 						Type:     genai.TypeObject,
 						Enum:     []string{},
-						Required: []string{"paginatedQuery"},
+						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
 								Type: genai.TypeString,
+							},
+							"countQuery": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -623,10 +632,14 @@ var GeminiMySQLLLMResponseSchema = &genai.Schema{
 					"pagination": &genai.Schema{
 						Type:     genai.TypeObject,
 						Enum:     []string{},
-						Required: []string{"paginatedQuery"},
+						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
 								Type: genai.TypeString,
+							},
+							"countQuery": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -718,10 +731,14 @@ var GeminiClickhouseLLMResponseSchema = &genai.Schema{
 					"pagination": &genai.Schema{
 						Type:     genai.TypeObject,
 						Enum:     []string{},
-						Required: []string{"paginatedQuery"},
+						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
 								Type: genai.TypeString,
+							},
+							"countQuery": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},
@@ -804,10 +821,14 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 					"pagination": &genai.Schema{
 						Type:     genai.TypeObject,
 						Enum:     []string{},
-						Required: []string{"paginatedQuery"},
+						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
 								Type: genai.TypeString,
+							},
+							"countQuery": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions from the original query but uses countDocuments instead of find. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with limit < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with limit ≥ 50, or if the user did not specify a limit at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original user query explicitly included 'limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original user query had 'limit(100)' or no limit specified, the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50.",
 							},
 						},
 					},

@@ -255,7 +255,7 @@ func (d *PostgresDriver) IsAlive(conn *Connection) bool {
 }
 
 // Modify ExecuteQuery to check for schema changes
-func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (d *PostgresDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	startTime := time.Now()
 	log.Printf("PostgreSQL/YugabyteDB Driver -> ExecuteQuery -> Query: %v", query)
 	sqlDB, err := conn.DB.DB()
@@ -380,7 +380,7 @@ type PostgresTransaction struct {
 	conn *Connection // Add connection reference
 }
 
-func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string) *QueryExecutionResult {
+func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
 	startTime := time.Now()
 
 	// Split into individual statements

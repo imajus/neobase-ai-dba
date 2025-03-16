@@ -731,7 +731,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		// Send initial processing message
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Generating an optimized query & example results for the request..",
+			Data:  "Generating an optimized query & results for the request..",
 		})
 	}
 	if checkCancellation() {
@@ -820,8 +820,14 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			log.Printf("processLLMResponse -> queryMap[\"pagination\"]: %v", queryMap["pagination"])
 			pagination := &models.Pagination{}
 			if queryMap["pagination"] != nil {
-				pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
-				log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
+				if queryMap["pagination"].(map[string]interface{})["paginatedQuery"] != nil {
+					pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
+					log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
+				}
+				if queryMap["pagination"].(map[string]interface{})["countQuery"] != nil {
+					pagination.CountQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["countQuery"].(string))
+					log.Printf("processLLMResponse -> pagination.CountQuery: %v", *pagination.CountQuery)
+				}
 			}
 			var tables *string
 			if queryMap["tables"] != nil {
@@ -1546,7 +1552,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		return nil, http.StatusRequestTimeout, fmt.Errorf("query execution cancelled or timed out")
 	default:
 		log.Printf("ChatService -> ExecuteQuery -> msg: %+v", msg)
-		log.Printf("ChatService -> ExecuteQuery -> query: %+v", query)
 	}
 
 	// Check connection status and connect if needed
@@ -1560,13 +1565,192 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		time.Sleep(1 * time.Second)
 	}
 
-	// Execute query
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, query.Query, *query.QueryType, false)
+	var totalRecordsCount *int
+
+	// To find total records count, we need to execute the pagination.countQuery with findCount = true
+	if query.Pagination != nil && query.Pagination.CountQuery != nil && *query.Pagination.CountQuery != "" {
+		log.Printf("ChatService -> ExecuteQuery -> query.Pagination.CountQuery is present, will use it to get the total records count")
+		countResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.Pagination.CountQuery, *query.QueryType, false, true)
+		if queryErr != nil {
+			log.Printf("ChatService -> ExecuteQuery -> Error executing count query: %v", queryErr)
+		}
+		if countResult != nil && countResult.Result != nil {
+			log.Printf("ChatService -> ExecuteQuery -> countResult.Result: %+v", countResult.Result)
+
+			// Try to extract count from different possible formats
+
+			// Format 1: Direct count in the result
+			if countVal, ok := countResult.Result["count"].(float64); ok {
+				tempCount := int(countVal)
+				totalRecordsCount = &tempCount
+				log.Printf("ChatService -> ExecuteQuery -> Found count directly in result: %d", tempCount)
+			} else if countVal, ok := countResult.Result["count"].(int64); ok {
+				tempCount := int(countVal)
+				totalRecordsCount = &tempCount
+				log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int64): %d", tempCount)
+			} else if countVal, ok := countResult.Result["count"].(int); ok {
+				totalRecordsCount = &countVal
+				log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int): %d", countVal)
+			} else if results, ok := countResult.Result["results"]; ok {
+				// Format 2: Results is an array of objects with count
+				if resultsList, ok := results.([]interface{}); ok && len(resultsList) > 0 {
+					log.Printf("ChatService -> ExecuteQuery -> Results is a list with %d items", len(resultsList))
+
+					// Try to get count from the first item
+					if countObj, ok := resultsList[0].(map[string]interface{}); ok {
+						if countVal, ok := countObj["count"].(float64); ok {
+							tempCount := int(countVal)
+							totalRecordsCount = &tempCount
+							log.Printf("ChatService -> ExecuteQuery -> Found count in first result item: %d", tempCount)
+						} else if countVal, ok := countObj["count"].(int64); ok {
+							tempCount := int(countVal)
+							totalRecordsCount = &tempCount
+							log.Printf("ChatService -> ExecuteQuery -> Found count in first result item (int64): %d", tempCount)
+						} else if countVal, ok := countObj["count"].(int); ok {
+							totalRecordsCount = &countVal
+							log.Printf("ChatService -> ExecuteQuery -> Found count in first result item (int): %d", countVal)
+						} else {
+							// For PostgreSQL, the count might be in a column named 'count'
+							for key, value := range countObj {
+								if strings.ToLower(key) == "count" {
+									if countVal, ok := value.(float64); ok {
+										tempCount := int(countVal)
+										totalRecordsCount = &tempCount
+										log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s': %d", key, tempCount)
+										break
+									} else if countVal, ok := value.(int64); ok {
+										tempCount := int(countVal)
+										totalRecordsCount = &tempCount
+										log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (int64): %d", key, tempCount)
+										break
+									} else if countVal, ok := value.(int); ok {
+										totalRecordsCount = &countVal
+										log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (int): %d", key, countVal)
+										break
+									} else if countStr, ok := value.(string); ok {
+										// Handle case where count is returned as string
+										if countVal, err := strconv.Atoi(countStr); err == nil {
+											totalRecordsCount = &countVal
+											log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (string): %d", key, countVal)
+											break
+										}
+									}
+								}
+							}
+						}
+					} else {
+						// Handle case where the array element is not a map
+						log.Printf("ChatService -> ExecuteQuery -> First item in results list is not a map: %T", resultsList[0])
+					}
+				} else if resultsMap, ok := results.(map[string]interface{}); ok {
+					// Format 3: Results is a map with count
+					log.Printf("ChatService -> ExecuteQuery -> Results is a map")
+					if countVal, ok := resultsMap["count"].(float64); ok {
+						tempCount := int(countVal)
+						totalRecordsCount = &tempCount
+						log.Printf("ChatService -> ExecuteQuery -> Found count in results map: %d", tempCount)
+					} else if countVal, ok := resultsMap["count"].(int64); ok {
+						tempCount := int(countVal)
+						totalRecordsCount = &tempCount
+						log.Printf("ChatService -> ExecuteQuery -> Found count in results map (int64): %d", tempCount)
+					} else if countVal, ok := resultsMap["count"].(int); ok {
+						totalRecordsCount = &countVal
+						log.Printf("ChatService -> ExecuteQuery -> Found count in results map (int): %d", countVal)
+					}
+				} else if countVal, ok := results.(float64); ok {
+					// Format 4: Results is directly a number
+					tempCount := int(countVal)
+					totalRecordsCount = &tempCount
+					log.Printf("ChatService -> ExecuteQuery -> Results is a number: %d", tempCount)
+				} else if countVal, ok := results.(int64); ok {
+					tempCount := int(countVal)
+					totalRecordsCount = &tempCount
+					log.Printf("ChatService -> ExecuteQuery -> Results is a number (int64): %d", tempCount)
+				} else if countVal, ok := results.(int); ok {
+					totalRecordsCount = &countVal
+					log.Printf("ChatService -> ExecuteQuery -> Results is a number (int): %d", countVal)
+				} else {
+					// Log the actual type for debugging
+					log.Printf("ChatService -> ExecuteQuery -> Results has unexpected type: %T", results)
+				}
+			}
+
+			// If we still couldn't extract the count, try a more direct approach for the specific format
+			if totalRecordsCount == nil {
+				// Try to handle the specific format: map[results:[map[count:92]]]
+				if resultsRaw, ok := countResult.Result["results"]; ok {
+					log.Printf("ChatService -> ExecuteQuery -> Trying direct approach for format: map[results:[map[count:92]]]")
+
+					// Convert to JSON and back to ensure proper type handling
+					jsonBytes, err := json.Marshal(resultsRaw)
+					if err == nil {
+						var resultsArray []map[string]interface{}
+						if err := json.Unmarshal(jsonBytes, &resultsArray); err == nil && len(resultsArray) > 0 {
+							if countVal, ok := resultsArray[0]["count"]; ok {
+								// Try to convert to int
+								switch v := countVal.(type) {
+								case float64:
+									tempCount := int(v)
+									totalRecordsCount = &tempCount
+									log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach: %d", tempCount)
+								case int64:
+									tempCount := int(v)
+									totalRecordsCount = &tempCount
+									log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (int64): %d", tempCount)
+								case int:
+									totalRecordsCount = &v
+									log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (int): %d", v)
+								case string:
+									if countInt, err := strconv.Atoi(v); err == nil {
+										totalRecordsCount = &countInt
+										log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (string): %d", countInt)
+									}
+								default:
+									log.Printf("ChatService -> ExecuteQuery -> Count value has unexpected type: %T", v)
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if totalRecordsCount == nil {
+				log.Printf("ChatService -> ExecuteQuery -> Could not extract count from result: %+v", countResult.Result)
+			} else {
+				log.Printf("ChatService -> ExecuteQuery -> Successfully extracted count: %d", *totalRecordsCount)
+			}
+		}
+	}
+
+	if totalRecordsCount != nil {
+		log.Printf("ChatService -> ExecuteQuery -> totalRecordsCount: %+v", *totalRecordsCount)
+	}
+	queryToExecute := query.Query
+
+	if query.Pagination != nil && query.Pagination.PaginatedQuery != nil && *query.Pagination.PaginatedQuery != "" {
+		log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery is present, will use it to cap the result to 50 records. query.Pagination.PaginatedQuery: %+v", *query.Pagination.PaginatedQuery)
+		// Capping the result to 50 records by default and skipping 0 records, we do not need to run the query.Query as we have better paginated query & already have the total records count
+
+		queryToExecute = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1)
+	}
+
+	log.Printf("ChatService -> ExecuteQuery -> queryToExecute: %+v", queryToExecute)
+	// Execute query, we will be executing the pagination.paginatedQuery if it exists, else the query.Query
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, *query.QueryType, false, false)
+	if queryErr != nil {
+		// Checking if executed query was paginatedQuery, if so, let's try to execute it again with the original query
+		if query.Pagination != nil && query.Pagination.PaginatedQuery != nil && *query.Pagination.PaginatedQuery != "" && queryToExecute == strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1) {
+			log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery was executed but faced an error, will try to execute the original query")
+			queryToExecute = query.Query
+			result, queryErr = s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, *query.QueryType, false, false)
+		}
+	}
 	if queryErr != nil {
 		log.Printf("ChatService -> ExecuteQuery -> queryErr: %+v", queryErr)
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
+
 		processCompleted := make(chan bool)
 		go func() {
 			log.Printf("ChatService -> ExecuteQuery -> Updating message")
@@ -1708,9 +1892,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
 		}, http.StatusOK, nil
 	}
-	var totalRecordsCount *int
+
 	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
-	// Then we need to save capped 50 results in DB and the original records count to pagination.totalRecordsCount...
+	// Then we need to save capped 50 results in DB
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
 	log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %+v", result.ResultJSON)
 
@@ -1736,8 +1920,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		formattedResultJSON = resultListFormatting
 		if len(resultListFormatting) > 50 {
 			log.Printf("ChatService -> ExecuteQuery -> resultListFormatting length > 50")
-			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting)) // Store actual total count
-			formattedResultJSON = resultListFormatting[:50]               // Cap the result to 50 records
+			formattedResultJSON = resultListFormatting[:50] // Cap the result to 50 records
 
 			// Cap the result.ResultJSON to 50 records
 			cappedResults, err := json.Marshal(resultListFormatting[:50])
@@ -1746,12 +1929,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			} else {
 				result.ResultJSON = string(cappedResults)
 			}
-		} else {
-			totalRecordsCount = utils.ToIntPtr(len(resultListFormatting))
 		}
 	} else if resultMapFormatting != nil && resultMapFormatting["results"] != nil && len(resultMapFormatting["results"].([]interface{})) > 0 {
 		log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
-		totalRecordsCount = utils.ToIntPtr(len(resultMapFormatting["results"].([]interface{})))
 		if len(resultMapFormatting["results"].([]interface{})) > 50 {
 			formattedResultJSON = map[string]interface{}{
 				"results": resultMapFormatting["results"].([]interface{})[:50],
@@ -2004,7 +2184,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		}
 
 		// Execute dependent query
-		dependentResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, "SELECT", false)
+		dependentResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackDependentQuery, *query.QueryType, false, false)
 		if queryErr != nil {
 			log.Printf("ChatService -> RollbackQuery -> queryErr: %+v", queryErr)
 			if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
@@ -2291,13 +2471,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	}
 
 	// Execute rollback query
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, "DML", true)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.RollbackQuery, *query.QueryType, true, false)
 	if queryErr != nil {
 		log.Printf("ChatService -> RollbackQuery -> queryErr: %+v", queryErr)
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
-		processCompleted := make(chan bool)
 		// Update query status in message
 		go func() {
 			if msg.Queries != nil {
@@ -2305,26 +2484,15 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 					if (*msg.Queries)[i].ID == query.ID {
 						(*msg.Queries)[i].IsExecuted = true
 						(*msg.Queries)[i].IsRolledBack = false
-						(*msg.Queries)[i].Error = &models.QueryError{
-							Code:    queryErr.Code,
-							Message: queryErr.Message,
-							Details: queryErr.Details,
-						}
 					}
 				}
-				// Add "Fix Error" action button to the Message & LLM content if there's an error
-				if queryErr != nil {
-					s.addFixErrorButton(msg)
-				} else {
-					s.removeFixErrorButton(msg)
-				}
+
 				if msg.ActionButtons != nil {
 					log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
 				} else {
 					log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: nil")
 				}
-				// We want to wait for the message to be updated but not save it to DB before sending the response
-				processCompleted <- true
+
 				if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 					log.Printf("ChatService -> RollbackQuery -> Error updating message: %v", err)
 				}
@@ -2345,11 +2513,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 										qMap["isExecuted"] = true
 										qMap["isRolledBack"] = false
-										qMap["error"] = &models.QueryError{
-											Code:    queryErr.Code,
-											Message: queryErr.Message,
-											Details: queryErr.Details,
-										}
 									}
 								}
 							}
@@ -2360,15 +2523,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
 										qMap["isExecuted"] = true
 										qMap["isRolledBack"] = false
-										if queryErr.Code != "" {
-											qMap["error"] = &models.QueryError{
-												Code:    queryErr.Code,
-												Message: queryErr.Message,
-												Details: queryErr.Details,
-											}
-										} else {
-											qMap["error"] = nil
-										}
 									}
 								}
 							}
@@ -2383,8 +2537,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			}
 		}()
 
-		<-processCompleted
-
 		// Send event about rollback query failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 			Event: "rollback-query-failed",
@@ -2396,6 +2548,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			},
 		})
 
+		tempMessage := *msg
+		// Add "Fix Rollback Error" action button temporarily to response so that user can fix the error
+		s.addFixRollbackErrorButton(&tempMessage)
+
 		return &dtos.QueryExecutionResponse{
 			ChatID:            chatID,
 			MessageID:         msg.ID.Hex(),
@@ -2406,7 +2562,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			ExecutionResult:   nil,
 			Error:             queryErr,
 			TotalRecordsCount: nil,
-			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
+			ActionButtons:     dtos.ToActionButtonDto(tempMessage.ActionButtons),
 		}, http.StatusOK, nil
 	}
 
@@ -2446,11 +2602,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			}
 		}
 	}
-	if queryErr != nil {
-		s.addFixErrorButton(msg)
-	} else {
-		s.removeFixErrorButton(msg)
-	}
+
 	if msg.ActionButtons != nil {
 		log.Printf("ChatService -> RollbackQuery -> msg.ActionButtons: %+v", *msg.ActionButtons)
 	} else {
@@ -2972,7 +3124,7 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	log.Printf("ChatService -> GetQueryResults -> query.Pagination.PaginatedQuery: %+v", query.Pagination.PaginatedQuery)
 	offSettPaginatedQuery := strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
 	log.Printf("ChatService -> GetQueryResults -> offSettPaginatedQuery: %+v", offSettPaginatedQuery)
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, offSettPaginatedQuery, *query.QueryType, false)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, offSettPaginatedQuery, *query.QueryType, false, false)
 	if queryErr != nil {
 		log.Printf("ChatService -> GetQueryResults -> queryErr: %+v", queryErr)
 		return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
@@ -3281,6 +3433,31 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 	}
 }
 
+// Helper function to add a "Fix Rollback Error" button to a message, temporarily and doesnt update message in database
+func (s *chatService) addFixRollbackErrorButton(msg *models.Message) {
+	log.Printf("ChatService -> addFixRollbackErrorButton -> msg.id: %s", msg.ID)
+
+	// Check if message already has a "Fix Rollback Error" button
+	hasFixRollbackErrorButton := false
+	for _, button := range *msg.ActionButtons {
+		if button.Action == "fix_rollback_error" {
+			hasFixRollbackErrorButton = true
+			break
+		}
+	}
+
+	if !hasFixRollbackErrorButton {
+		fixRollbackErrorButton := models.ActionButton{
+			ID:     primitive.NewObjectID(),
+			Label:  "Fix Rollback Error",
+			Action: "fix_rollback_error",
+		}
+		actionButtons := append(*msg.ActionButtons, fixRollbackErrorButton)
+		msg.ActionButtons = &actionButtons
+		log.Printf("ChatService -> addFixRollbackErrorButton -> Added fix_rollback_error button to existing array")
+	}
+}
+
 // Helper function to add a "Fix Error" button to a message
 func (s *chatService) addFixErrorButton(msg *models.Message) {
 	log.Printf("ChatService -> addFixErrorButton -> msg.id: %s", msg.ID)
@@ -3309,7 +3486,7 @@ func (s *chatService) addFixErrorButton(msg *models.Message) {
 	// Create a new "Fix Error" action button
 	fixErrorButton := models.ActionButton{
 		ID:        primitive.NewObjectID(),
-		Label:     "Fix Error(s)",
+		Label:     "Fix Error",
 		Action:    "fix_error",
 		IsPrimary: true,
 	}

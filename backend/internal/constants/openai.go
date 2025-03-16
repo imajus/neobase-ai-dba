@@ -68,7 +68,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
           },
         },
        “tables”: “users,orders”,
@@ -76,7 +77,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       “rollbackDependentQuery”: “Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)"
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
@@ -146,7 +147,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -154,7 +156,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
@@ -227,7 +229,8 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -235,7 +238,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
@@ -305,7 +308,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -313,7 +317,7 @@ json
       "isCritical": "boolean",
       "canRollback": "boolean",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "SQL to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
@@ -410,15 +414,13 @@ json
       "query": "MongoDB query with actual values (no placeholders)",
       "queryType": "FIND/INSERT/UPDATE/DELETE/AGGREGATE/CREATE_COLLECTION/DROP_COLLECTION...",
       "isCritical": "true when the query is critical like adding, updating or deleting data",
-      "canRollback": "true when the request query can be rolled back",
-      "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable)",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "exampleResult": [
         { "column1": "example_value1", "column2": "example_value2" }
       ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions from the original query but uses countDocuments instead of find. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(100)', the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50."
           },
         },
       "collections": "users,orders",
@@ -426,7 +428,7 @@ json
       "isCritical": "true when the query is critical like adding, updating or deleting data",
       "canRollback": "true when the request query can be rolled back",
       "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
-      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable)",
+      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
     }
   ]
 }
@@ -466,12 +468,17 @@ const OpenAIPostgresLLMResponseSchema = `{
                    "pagination": {
                        "type": "object",
                        "required": [
-                           "paginatedQuery"
+                           "paginatedQuery",
+                           "countQuery"
                        ],
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                           },
+                           "countQuery": {
+                               "type": "string",
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -500,7 +507,7 @@ const OpenAIPostgresLLMResponseSchema = `{
                    },
                    "rollbackQuery": {
                        "type": "string",
-                       "description": "Query to undo this operation (if canRollback=true), default empty"
+                       "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
                    },
                    "estimateResponseTime": {
                        "type": "number",
@@ -577,12 +584,17 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                    "pagination": {
                        "type": "object",
                        "required": [
-                           "paginatedQuery"
+                           "paginatedQuery",
+                           "countQuery"
                        ],
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                           },
+                           "countQuery": {
+                               "type": "string",
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -611,7 +623,7 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                    },
                    "rollbackQuery": {
                        "type": "string",
-                       "description": "Query to undo this operation (if canRollback=true), default empty"
+                       "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
                    },
                    "estimateResponseTime": {
                        "type": "number",
@@ -688,12 +700,17 @@ const OpenAIMySQLLLMResponseSchema = `{
                    "pagination": {
                        "type": "object",
                        "required": [
-                           "paginatedQuery"
+                           "paginatedQuery",
+                           "countQuery"
                        ],
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                           },
+                           "countQuery": {
+                               "type": "string",
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -722,7 +739,7 @@ const OpenAIMySQLLLMResponseSchema = `{
                    },
                    "rollbackQuery": {
                        "type": "string",
-                       "description": "Query to undo this operation (if canRollback=true), default empty"
+                       "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
                    },
                    "estimateResponseTime": {
                        "type": "number",
@@ -811,12 +828,17 @@ const OpenAIClickhouseLLMResponseSchema = `{
                    "pagination": {
                        "type": "object",
                        "required": [
-                           "paginatedQuery"
+                           "paginatedQuery",
+                           "countQuery"
                        ],
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                           },
+                           "countQuery": {
+                               "type": "string",
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -845,7 +867,7 @@ const OpenAIClickhouseLLMResponseSchema = `{
                    },
                    "rollbackQuery": {
                        "type": "string",
-                       "description": "Query to undo this operation (if canRollback=true), default empty. Note that ClickHouse has limited transaction support."
+                       "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead. Note that ClickHouse has limited transaction support."
                    },
                    "estimateResponseTime": {
                        "type": "number",
@@ -922,12 +944,17 @@ var OpenAIMongoDBLLMResponseSchema = `{
                    "pagination": {
                        "type": "object",
                        "required": [
-                           "paginatedQuery"
+                           "paginatedQuery",
+                           "countQuery"
                        ],
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). (.skip(offset_size) should come before .limit(50)), always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                           },
+                           "countQuery": {
+                               "type": "string",
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(100)', the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50."
                            }
                        }
                    },
@@ -956,7 +983,7 @@ var OpenAIMongoDBLLMResponseSchema = `{
                    },
                    "rollbackQuery": {
                        "type": "string",
-                       "description": "Query to undo this operation (if canRollback=true), default empty."
+                       "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
                    },
                    "estimateResponseTime": {
                        "type": "number",
