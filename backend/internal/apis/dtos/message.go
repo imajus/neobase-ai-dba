@@ -54,7 +54,8 @@ type Query struct {
 }
 
 type Pagination struct {
-	TotalRecordsCount int `json:"total_records_count"`
+	TotalRecordsCount int `json:"total_records_count"` // Total records count of the query
+	// We do not return the paginatedQuery and countQuery in the response
 }
 
 type QueryError struct {

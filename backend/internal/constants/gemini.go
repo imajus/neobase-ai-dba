@@ -68,8 +68,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. set_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -146,8 +146,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -227,8 +227,8 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -305,8 +305,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -415,8 +415,8 @@ json
       "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
       "estimateResponseTime": "response time in milliseconds(example:78)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
           },
         },
        "tables": "users,orders",
@@ -459,7 +459,7 @@ var GeminiPostgresLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
 							},
 						},
 					},
@@ -549,7 +549,7 @@ var GeminiYugabyteDBLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
 							},
 						},
 					},
@@ -639,7 +639,7 @@ var GeminiMySQLLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
 							},
 						},
 					},
@@ -738,7 +738,7 @@ var GeminiClickhouseLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
 							},
 						},
 					},
@@ -828,7 +828,7 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
-								Description: "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
+								Description: "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination",
 							},
 						},
 					},

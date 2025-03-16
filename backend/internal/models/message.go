@@ -57,6 +57,7 @@ type QueryError struct {
 type Pagination struct {
 	TotalRecordsCount *int    `bson:"total_records_count" json:"total_records_count"`
 	PaginatedQuery    *string `bson:"paginated_query" json:"paginated_query"`
+	CountQuery        *string `bson:"count_query" json:"count_query"`
 }
 
 func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query, userMessageId *primitive.ObjectID) *Message {

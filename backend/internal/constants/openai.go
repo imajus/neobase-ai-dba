@@ -68,8 +68,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        “tables”: “users,orders”,
@@ -147,8 +147,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -229,8 +229,8 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -308,8 +308,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. it should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
        "tables": "users,orders",
@@ -419,8 +419,8 @@ json
         { "column1": "example_value1", "column2": "example_value2" }
       ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
       "pagination": {
-          "paginatedQuery": "A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
+		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
           },
         },
       "collections": "users,orders",
@@ -474,11 +474,11 @@ const OpenAIPostgresLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -590,11 +590,11 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -706,11 +706,11 @@ const OpenAIMySQLLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -834,11 +834,11 @@ const OpenAIClickhouseLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). Always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
@@ -950,11 +950,11 @@ var OpenAIMongoDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. Only applicable where there can be large volume of data(>50). (.skip(offset_size) should come before .limit(50)), always generate this query whenever there can be large volume of data or fetching data"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
                            }
                        }
                    },
