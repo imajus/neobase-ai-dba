@@ -133,7 +133,7 @@ This setup includes everything you need to run NeoBase locally:
    ```
 
 This will start:
-- MongoDB and Redis (dependencies)
+- MongoDB and Redis (dependencies) (Update the Volume path for both)
 - NeoBase backend
 - NeoBase frontend
 
@@ -168,6 +168,7 @@ For production deployment on a server:
    ```bash
    docker-compose -f docker-compose-dependencies.yml up -d
    ```
+   ### Note: Update & mount the volume paths for the dependencies in above docker compose file.
 
 6. Start the NeoBase applications:
    ```bash
