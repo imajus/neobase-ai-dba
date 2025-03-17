@@ -41,9 +41,6 @@ services:
       - EXAMPLE_DB_NAME=${EXAMPLE_DB_NAME} # testdb
       - EXAMPLE_DB_USERNAME=${EXAMPLE_DB_USERNAME} # postgres
       - EXAMPLE_DB_PASSWORD=${EXAMPLE_DB_PASSWORD} # postgres
-    depends_on:
-      - neobase-mongodb
-      - neobase-redis
     networks:
       - neobase-network
 
