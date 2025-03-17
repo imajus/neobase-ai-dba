@@ -113,6 +113,7 @@ func LoadEnv() error {
 	Env.GeminiMaxCompletionTokens = getIntEnvWithDefault("GEMINI_MAX_COMPLETION_TOKENS", constants.GeminiMaxCompletionTokens)
 	Env.GeminiTemperature = getFloatEnvWithDefault("GEMINI_TEMPERATURE", constants.GeminiTemperature)
 
+	fmt.Println("Welcome to NeoBase! Running in", Env.Environment, "Mode. You can access your client UI at: ", Env.CorsAllowedOrigin)
 	return validateConfig()
 }
 

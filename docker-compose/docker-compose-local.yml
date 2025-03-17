@@ -84,10 +84,10 @@ services:
       context: ../client
       dockerfile: Dockerfile
     container_name: neobase-client
-    environment:
-      - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL} # Frontend exposed base url (http://localhost:5173)
-      - VITE_API_URL=${VITE_API_URL} # Backend url with /api (http://localhost:3000/api)
-      - VITE_ENVIRONMENT=${VITE_ENVIRONMENT} # DEVELOPMENT, PRODUCTION
+    args: # These are the environment variables for the client
+        - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL}
+        - VITE_API_URL=${VITE_API_URL}
+        - VITE_ENVIRONMENT=${VITE_ENVIRONMENT}
     restart: always
     ports:
       - 5173:5173

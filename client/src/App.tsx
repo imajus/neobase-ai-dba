@@ -21,7 +21,6 @@ import { Chat, ChatsResponse, Connection } from './types/chat';
 import { SendMessageResponse } from './types/messages';
 import { StreamResponse } from './types/stream';
 
-
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,7 +46,6 @@ function AppContent() {
   
   // Debug useEffect for isSSEReconnecting state changes
   useEffect(() => {
-    console.log('isSSEReconnecting state changed to:', isSSEReconnecting);
   }, [isSSEReconnecting]);
   
   // Check auth status on mount

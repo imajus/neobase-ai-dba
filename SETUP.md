@@ -115,7 +115,7 @@ This setup includes everything you need to run NeoBase locally:
    cd docker-compose/
    ```
 
-2. Create an environment file:
+2. Create an environment file in docker-compose folder:
    ```bash
    cp .env.example .env
    ```
@@ -129,7 +129,7 @@ This setup includes everything you need to run NeoBase locally:
 
 5. Start the complete stack:
    ```bash
-   docker-compose -f docker-compose-local.yml up -d
+   docker-compose -f docker-compose-local.yml up -d --build
    ```
 
 This will start:
@@ -148,7 +148,7 @@ For production deployment on a server:
    cd docker-compose/
    ```
 
-2. Create an environment file:
+2. Create an environment file in docker-compose folder:
    ```bash
    cp .env.example .env
    ```
@@ -172,7 +172,7 @@ For production deployment on a server:
 
 6. Start the NeoBase applications:
    ```bash
-   docker-compose -f docker-compose-server.yml up -d
+   docker-compose -f docker-compose-server.yml up -d --build
    ```
 
 ### 3. Running Example Databases (Optional)
