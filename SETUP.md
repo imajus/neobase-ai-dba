@@ -188,6 +188,8 @@ This will start:
 - MySQL (port 3306)
 - MongoDB (port 27017)
 
+Access the application at your client hosted domain a.k.a `VITE_FRONTEND_BASE_URL`
+
 ## First-Time Setup
 
 After deployment, follow these steps:
@@ -195,7 +197,7 @@ After deployment, follow these steps:
 1. Access the client app at the configured URL (default: http://localhost:5173)
 
 2. Generate a signup secret using admin credentials:
-   - Send a POST request to `api/auth/generate-signup-secret` with admin username & password
+   - Send a POST request to your backend at`${BACKEND_URL}/api/auth/generate-signup-secret` with admin username & password(mentioned in your .env)
    - Example using curl:
      ```bash
      curl -X POST http://localhost:3000/api/auth/generate-signup-secret \
@@ -203,7 +205,7 @@ After deployment, follow these steps:
        -d '{"username":"your-admin-username","password":"your-admin-password"}'
      ```
 
-3. Use the generated secret to create a new user through the NeoBase UI
+3. Use the generated secret to create a new user through the NeoBase Client UI
 
 4. Add database connections through the UI and start using NeoBase!
 
@@ -211,6 +213,7 @@ After deployment, follow these steps:
 
 - If containers fail to start, check logs with `docker-compose logs`
 - Ensure all required ports are available (3000, 5173, 27017, 6379)
+- Ensure you use hosted url with domains for both Backend and Client in environment variables if hosting on a server
 - Verify your API keys are valid for OpenAI or Gemini
 
 ## Thank you for using NeoBase!
