@@ -57,7 +57,7 @@ You can set up NeoBase in several ways:
    ```
    
 3. Edit the `.env` file with your configuration:
-   - `VITE_FRONTEND_BASE_URL` - Client URL (e.g., http://localhost:5173/)
+   - `VITE_FRONTEND_BASE_URL` - Client URL with / (e.g., http://localhost:5173/)
    - `VITE_API_URL` - Backend URL with /api (e.g., http://localhost:3000/api)
    - `VITE_ENVIRONMENT` - DEVELOPMENT or PRODUCTION
 
@@ -154,8 +154,8 @@ For production deployment on a server:
    ```
 
 3. Edit the `.env` file with your production configuration:
-   - Set `ENVIRONMENT=PRODUCTION`
-   - Configure your domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
+   - Set `ENVIRONMENT=PRODUCTION` and `VITE_ENVIRONMENT=PRODUCTION`
+   - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
    - Set secure passwords for MongoDB and Redis
    - Add your OpenAI or Gemini API key
 
