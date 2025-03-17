@@ -550,8 +550,8 @@ function AppContent() {
         toast.error('Cancelled Knowledge Base Refresh');
       }
     } catch (error) {
-      console.error('Failed to refresh schema:', error);
-      toast.error('Failed to refresh schema ' + error);
+      console.error('Failed to refresh knowledge base:', error);
+      toast.error('Failed to refresh knowledge base ' + error);
     }
   };
 

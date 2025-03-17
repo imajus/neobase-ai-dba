@@ -822,7 +822,7 @@ export default function ChatWindow({
                                     action_buttons: [
                                       {
                                         id: "refresh-schema-button",
-                                        label: "Fetch Latest Schema",
+                                        label: "Refresh Knowledge Base",
                                         action: "refresh_schema",
                                         isPrimary: true
                                       }

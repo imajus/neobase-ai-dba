@@ -120,6 +120,7 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 				Username: config.Env.ExampleDatabaseUsername,
 				Password: utils.ToStringPtr(config.Env.ExampleDatabasePassword),
 			},
+			AutoExecuteQuery: true,
 		})
 		if err != nil {
 			log.Println("failed to create chat:" + err.Error())

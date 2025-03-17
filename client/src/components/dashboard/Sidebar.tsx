@@ -2,6 +2,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   ArrowRight,
   Boxes,
+  HelpCircle,
   Loader2,
   MoreVertical,
   PanelLeft,
@@ -19,6 +20,7 @@ import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import DeleteConnectionModal from '../modals/DeleteConnectionModal';
+import { DemoModal } from '../modals/DemoModal';
 
 export interface Connection {
   id: string;
@@ -77,6 +79,7 @@ export default function Sidebar({
   const { user } = useUser();
   const [openConnectionMenu, setOpenConnectionMenu] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [showDemoModal, setShowDemoModal] = useState(false);
   
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -206,56 +209,79 @@ export default function Sidebar({
               <Loader2 className="w-8 h-8 animate-spin" />
             </div>
           ) : (
-            connections.length > 0 ? (
-              [...connections].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).map((connection) => (
-                <div key={connection.id} className="mb-4">
-                  <div className={`relative group ${!isExpanded ? 'md:w-12 md:h-12' : ''}`}>
-                    <button
-                      onClick={() => handleSelectConnection(connection.id)}
-                      className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
-                        }`}
-                      title={connection.connection.database}
-                    >
-                      <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
-                        <DatabaseLogo
-                          type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
-                          size={28}
-                          className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
-                        />
-                        <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
-                          }`}>
-                          <div className="text-left">
-                            <h3 className="font-bold text-lg leading-tight">{connection.connection.database.length > 20 ? connection.connection.database.slice(0, 20) + '...' : connection.connection.database}</h3>
-                            <p className="text-gray-600 capitalize text-sm">{connection.connection.type === 'postgresql' ? 'PostgreSQL' : connection.connection.type === 'yugabytedb' ? 'YugabyteDB' : connection.connection.type === 'mysql' ? 'MySQL' : connection.connection.type === 'clickhouse' ? 'ClickHouse' : connection.connection.type === 'mongodb' ? 'MongoDB' : connection.connection.type === 'redis' ? 'Redis' : connection.connection.type === 'neo4j' ? 'Neo4j' : 'Unknown'}</p>
+            <>
+              {connections.length > 0 ? (
+                [...connections].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).map((connection) => (
+                  <div key={connection.id} className="mb-4">
+                    <div className={`relative group ${!isExpanded ? 'md:w-12 md:h-12' : ''}`}>
+                      <button
+                        onClick={() => handleSelectConnection(connection.id)}
+                        className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
+                          }`}
+                        title={connection.connection.database}
+                      >
+                        <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
+                          <DatabaseLogo
+                            type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
+                            size={28}
+                            className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
+                          />
+                          <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
+                            }`}>
+                            <div className="text-left">
+                              <h3 className="font-bold text-lg leading-tight">{connection.connection.database.length > 20 ? connection.connection.database.slice(0, 20) + '...' : connection.connection.database}</h3>
+                              <p className="text-gray-600 capitalize text-sm">{connection.connection.type === 'postgresql' ? 'PostgreSQL' : connection.connection.type === 'yugabytedb' ? 'YugabyteDB' : connection.connection.type === 'mysql' ? 'MySQL' : connection.connection.type === 'clickhouse' ? 'ClickHouse' : connection.connection.type === 'mongodb' ? 'MongoDB' : connection.connection.type === 'redis' ? 'Redis' : connection.connection.type === 'neo4j' ? 'Neo4j' : 'Unknown'}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </button>
-                    {isExpanded && onDeleteConnection && (
-                      <div className="connection-menu-container absolute right-2 top-1/2 -translate-y-1/2">
-                        <button
-                          onClick={(e) => handleOpenMenu(e, connection.id)}
-                          className="p-2 opacity-0 group-hover:opacity-100 transition-all neo-border bg-white hover:bg-gray-100"
-                          title="Connection menu"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
+                      </button>
+                      {isExpanded && onDeleteConnection && (
+                        <div className="connection-menu-container absolute right-2 top-1/2 -translate-y-1/2">
+                          <button
+                            onClick={(e) => handleOpenMenu(e, connection.id)}
+                            className="p-2 opacity-0 group-hover:opacity-100 transition-all neo-border bg-white hover:bg-gray-100"
+                            title="Connection menu"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
-            ) : (
-              isExpanded && (
-                <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
-                  <p className="text-black font-bold text-lg">No connections yet</p>
-                  <p className="text-gray-600">Add a connection to get started</p>
-                </div>
-              )
-            )
+                ))
+              ) : (
+                isExpanded && (
+                  <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
+                    <p className="text-black font-bold text-lg">No connections yet</p>
+                    <p className="text-gray-600">Add a connection to get started</p>
+                  </div>
+                )
+              )}
+            </>
           )}
         </div>
+                  {/* How to Use Card - Moved to bottom */}
+                  {isExpanded && (
+                    <div className="px-4">
+            <div className="mb-3">
+              <button
+                onClick={() => setShowDemoModal(true)}
+                className="w-full p-4 rounded-lg bg-purple-100 hover:bg-purple-200 transition-colors border-2 border-purple-300 flex items-center gap-3"
+              >
+                <div className="bg-purple-500 rounded-full p-2">
+                  <HelpCircle className="w-5 h-5 text-white" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-bold text-lg leading-tight text-base">How to Use NeoBase</h3>
+                  <p className="text-gray-600 text-sm">Try this quick tutorial</p>
+                </div>
+              </button>
+            </div>
+            </div>
+          )}
+          
         <div className="p-4 border-t-4 border-black">
+
           <div className="hidden md:flex md:flex-col md:space-y-3">
             <button
               onClick={onAddConnection}
@@ -291,6 +317,8 @@ export default function Sidebar({
           </div>
 
           <div className={`flex flex-col gap-3 md:hidden ${!isExpanded && 'hidden'}`}>
+
+            
             <button
               onClick={onAddConnection}
               className="neo-button h-12 flex items-center justify-center"
@@ -402,6 +430,9 @@ export default function Sidebar({
           </div>
         </div>
       )}
+
+      {/* Demo Modal */}
+      <DemoModal isOpen={showDemoModal} onClose={() => setShowDemoModal(false)} />
     </>
   );
 }

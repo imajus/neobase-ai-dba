@@ -46,7 +46,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 6. **Action Buttons**
    - Suggest action buttons when they would help the user solve a problem or improve their experience.
-   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
    - Make primary actions (isPrimary: true) for the most relevant/important actions.
    - Limit to Max 2 buttons per response to avoid overwhelming the user.
 
@@ -58,7 +58,7 @@ json
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
   "actionButtons": [
     {
-      "label": "Button text to display to the user. Example: Refresh Schema",
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
       "action": "refresh_schema",
       "isPrimary": true/false
     }
@@ -125,7 +125,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 6. **Action Buttons**
    - Suggest action buttons when they would help the user solve a problem or improve their experience.
-   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
    - Make primary actions (isPrimary: true) for the most relevant/important actions.
    - Limit to Max 2 buttons per response to avoid overwhelming the user.
 
@@ -137,7 +137,7 @@ json
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
   "actionButtons": [
     {
-      "label": "Button text to display to the user. Example: Refresh Schema",
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
       "action": "refresh_schema",
       "isPrimary": true/false
     }
@@ -204,7 +204,7 @@ json
 
 6. **Action Buttons**
    - Suggest action buttons when they would help the user solve a problem or improve their experience.
-   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
    - Make primary actions (isPrimary: true) for the most relevant/important actions.
    - Limit to Max 2 buttons per response to avoid overwhelming the user.
 
@@ -216,7 +216,7 @@ json
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
   "actionButtons": [
     {
-      "label": "Button text to display to the user. Example: Refresh Schema",
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
       "action": "refresh_schema",
       "isPrimary": true/false
     }
@@ -286,7 +286,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 6. **Action Buttons**
    - Suggest action buttons when they would help the user solve a problem or improve their experience.
-   - **Refresh Schema**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
    - Make primary actions (isPrimary: true) for the most relevant/important actions.
    - Limit to Max 2 buttons per response to avoid overwhelming the user.
 
@@ -298,7 +298,7 @@ json
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
   "actionButtons": [
     {
-      "label": "Button text to display to the user. Example: Refresh Schema",
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
       "action": "refresh_schema",
       "isPrimary": true/false
     }
@@ -372,7 +372,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 
 7. **Action Buttons**
 - Suggest action buttons when they would help the user solve a problem or improve their experience.
-- **Refresh Schema**: Suggest when schema appears outdated or missing collections/fields the user is asking about.
+- **Refresh Knowledge Base**: Suggest when schema appears outdated or missing collections/fields the user is asking about.
 - Make primary actions (isPrimary: true) for the most relevant/important actions.
 - Limit to Max 2 buttons per response to avoid overwhelming the user.
 
@@ -404,7 +404,7 @@ json
   "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
   "actionButtons": [
     {
-      "label": "Button text to display to the user. Example: Refresh Schema",
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
       "action": "refresh_schema",
       "isPrimary": true/false
     }

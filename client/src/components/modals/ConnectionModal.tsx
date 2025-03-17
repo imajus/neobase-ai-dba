@@ -223,9 +223,9 @@ export default function ConnectionModal({
             try {
               const abortController = new AbortController();
               await chatService.refreshSchema(result.chatId, abortController);
-              console.log('Schema refreshed successfully for new connection');
+              console.log('Knowledge base refreshed successfully for new connection');
             } catch (error) {
-              console.error('Failed to refresh schema:', error);
+              console.error('Failed to refresh knowledge base:', error);
             }
           }
           onClose();

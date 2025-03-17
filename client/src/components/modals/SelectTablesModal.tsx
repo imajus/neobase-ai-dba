@@ -144,7 +144,7 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
             await chatService.refreshSchema(chat.id, abortController);
             console.log('Schema refreshed successfully for new connection');
           } catch (error) {
-            console.error('Failed to refresh schema:', error);
+            console.error('Failed to refresh knowledge base:', error);
           }
         }
         

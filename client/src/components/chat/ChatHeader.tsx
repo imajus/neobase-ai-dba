@@ -52,82 +52,140 @@ export default function ChatHeader({
                 {connectionStatus}
             </div>
             <div className="flex items-center gap-2">
-                <button
-                    onClick={() => setShowRefreshSchema(true)}
-                    className="p-2 hover:bg-neo-gray rounded-lg transition-colors hidden md:block neo-border text-gray-800"
-                    title="Refresh schema"
-                >
-                    <ListRestart className="w-5 h-5" />
-                </button>
-                <button
-                    onClick={onClearChat}
-                    className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors hidden md:block neo-border"
-                    title="Clear chat"
-                >
-                    <Eraser className="w-5 h-5" />
-                </button>
-                <button
-                    onClick={onEditConnection}
-                    className="p-2 hover:bg-neo-gray rounded-lg transition-colors hidden md:block neo-border text-gray-800"
-                    title="Edit connection"
-                >
-                    <Pencil className="w-5 h-5" />
-                </button>
+                {/* Desktop buttons with borders */}
+                <div className="relative group hidden md:block">
+                    <button
+                        onClick={() => setShowRefreshSchema(true)}
+                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
+                        aria-label="Refresh Knowledge Base"
+                    >
+                        <ListRestart className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Refresh Knowledge Base
+                    </div>
+                </div>
+
+                <div className="relative group hidden md:block">
+                    <button
+                        onClick={onClearChat}
+                        className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors neo-border"
+                        aria-label="Clear chat"
+                    >
+                        <Eraser className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Clear chat
+                    </div>
+                </div>
+
+                <div className="relative group hidden md:block">
+                    <button
+                        onClick={onEditConnection}
+                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
+                        aria-label="Edit connection"
+                    >
+                        <Pencil className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Edit connection
+                    </div>
+                </div>
+
                 {isConnected ? (
-                    <button
-                        onClick={onShowCloseConfirm}
-                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors hidden md:block neo-border text-gray-800"
-                        title="Disconnect connection"
-                    >
-                        <PlugZap className="w-5 h-5" />
-                    </button>
+                    <div className="relative group hidden md:block">
+                        <button
+                            onClick={onShowCloseConfirm}
+                            className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
+                            aria-label="Disconnect"
+                        >
+                            <PlugZap className="w-5 h-5" />
+                        </button>
+                        <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                            Disconnect
+                        </div>
+                    </div>
                 ) : (
-                    <button
-                        onClick={onReconnect}
-                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors hidden md:block neo-border"
-                        title="Reconnect"
-                    >
-                        <RefreshCw className="w-5 h-5 text-gray-800" />
-                    </button>
+                    <div className="relative group hidden md:block">
+                        <button
+                            onClick={onReconnect}
+                            className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border"
+                            aria-label="Reconnect"
+                        >
+                            <RefreshCw className="w-5 h-5 text-gray-800" />
+                        </button>
+                        <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                            Reconnect
+                        </div>
+                    </div>
                 )}
+
                 {/* Mobile buttons without borders */}
-                <button
-                    onClick={() => setShowRefreshSchema(true)}
-                    className="p-2 hover:bg-neo-gray rounded-lg transition-colors md:hidden"
-                    title="Refresh schema"
-                >
-                    <ListRestart className="w-5 h-5" />
-                </button>
-                <button
-                    onClick={onClearChat}
-                    className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors md:hidden"
-                    title="Clear chat"
-                >
-                    <Eraser className="w-5 h-5" />
-                </button>
-                <button
-                    onClick={onEditConnection}
-                    className="p-2 hover:bg-neo-gray rounded-lg transition-colors md:hidden"
-                    title="Edit connection"
-                >
-                    <Pencil className="w-5 h-5" />
-                </button>
+                <div className="relative group md:hidden">
+                    <button
+                        onClick={() => setShowRefreshSchema(true)}
+                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
+                        aria-label="Refresh Knowledge Base"
+                    >
+                        <ListRestart className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Refresh Knowledge Base
+                    </div>
+                </div>
+
+                <div className="relative group md:hidden">
+                    <button
+                        onClick={onClearChat}
+                        className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors"
+                        aria-label="Clear chat"
+                    >
+                        <Eraser className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Clear chat
+                    </div>
+                </div>
+
+                <div className="relative group md:hidden">
+                    <button
+                        onClick={onEditConnection}
+                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
+                        aria-label="Edit connection"
+                    >
+                        <Pencil className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Edit connection
+                    </div>
+                </div>
+
                 {isConnected ? (
-                    <button
-                        onClick={onShowCloseConfirm}
-                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors md:hidden"
-                        title="Disconnect connection"
-                    >
-                        <PlugZap className="w-5 h-5 text-gray-800" />
-                    </button>
+                    <div className="relative group md:hidden">
+                        <button
+                            onClick={onShowCloseConfirm}
+                            className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
+                            aria-label="Disconnect connection"
+                        >
+                            <PlugZap className="w-5 h-5 text-gray-800" />
+                        </button>
+                        <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                            Disconnect connection
+                        </div>
+                    </div>
                 ) : (
-                    <button
-                        onClick={onReconnect}
-                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors md:hidden"
-                        title="Reconnect"
-                    >
-                        <RefreshCw className="w-5 h-5 text-gray-800" />
-                    </button>
+                    <div className="relative group md:hidden">
+                        <button
+                            onClick={onReconnect}
+                            className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
+                            aria-label="Reconnect"
+                        >
+                            <RefreshCw className="w-5 h-5 text-gray-800" />
+                        </button>
+                        <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                            Reconnect
+                        </div>
+                    </div>
                 )}
             </div>
         </div>

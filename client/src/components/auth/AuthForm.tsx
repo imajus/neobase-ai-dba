@@ -30,6 +30,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
   const validateUserName = (userName: string) => {
     if (!userName) return 'Username is required';
     if (userName.length < 3) return 'Username must be at least 3 characters';
+    if (userName.includes(' ')) return 'Username cannot contain spaces';
     return '';
   };
 
@@ -90,6 +91,23 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
+    
+    // Prevent spaces in username
+    if (name === 'userName' && value.includes(' ')) {
+      // Remove spaces from the input
+      const valueWithoutSpaces = value.replace(/\s/g, '');
+      setFormData(prev => ({
+        ...prev,
+        [name]: valueWithoutSpaces
+      }));
+      
+      if (touched[name]) {
+        const error = validateUserName(valueWithoutSpaces);
+        setErrors(prev => ({ ...prev, userName: error }));
+      }
+      return;
+    }
+    
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -97,7 +115,8 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
 
     if (touched[name]) {
       if (name === 'userName') {
-        const error = validateUserName(value);
+        const trimmedValue = value.trim();
+        const error = validateUserName(trimmedValue);
         setErrors(prev => ({ ...prev, userName: error }));
       } else if (name === 'password') {
         const error = validatePassword(value);
@@ -116,7 +135,18 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
     setTouched(prev => ({ ...prev, [name]: true }));
 
     if (name === 'userName') {
-      const error = validateUserName(value);
+      // Trim spaces on blur for username
+      const trimmedValue = value.trim();
+      
+      // Update the form data with trimmed value
+      if (trimmedValue !== value) {
+        setFormData(prev => ({
+          ...prev,
+          [name]: trimmedValue
+        }));
+      }
+      
+      const error = validateUserName(trimmedValue);
       setErrors(prev => ({ ...prev, userName: error }));
     } else if (name === 'password') {
       const error = validatePassword(value);
@@ -126,6 +156,13 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
         ...prev,
         confirmPassword: value !== formData.password ? 'Passwords do not match' : ''
       }));
+    }
+  };
+
+  // Prevent spaces in username input
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.currentTarget.name === 'userName' && e.key === ' ') {
+      e.preventDefault();
     }
   };
 
@@ -160,6 +197,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
                 value={formData.userName}
                 onChange={handleChange}
                 onBlur={handleBlur}
+                onKeyDown={handleKeyDown}
                 className={`neo-input pl-12 w-full ${errors.userName && touched.userName ? 'border-neo-error' : ''
                   }`}
                 required
@@ -190,7 +228,7 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
                 />
               </div>
               <p className="text-gray-500 text-sm mt-2">
-                Required to signup new user, ask admin for the secret
+                Required to signup a user, ask the admin for this secret.
               </p>
               {errors.userSignupSecret && touched.userSignupSecret && (
                 <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
