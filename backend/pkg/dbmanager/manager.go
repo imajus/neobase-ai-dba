@@ -225,6 +225,12 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 			ConfigKey:   configKey, // Store the config key for reference
 		}
 
+		// Set MongoDBObj for MongoDB connections when reusing from pool
+		if config.Type == "mongodb" && pool.MongoDBObj != nil {
+			conn.MongoDBObj = pool.MongoDBObj
+			log.Printf("DBManager -> Connect -> Set MongoDBObj from pool for MongoDB connection")
+		}
+
 		// Update metrics
 		m.poolMetrics.reuseCount++
 	} else {
@@ -962,6 +968,17 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			Details: "Failed to start transaction",
 		}
 	}
+
+	// Check if transaction has an error (MongoDB transaction might return a non-nil transaction with an error)
+	if mongoTx, ok := tx.(*MongoDBTransaction); ok && mongoTx.Error != nil {
+		log.Printf("Manager -> ExecuteQuery -> MongoDB transaction error: %v", mongoTx.Error)
+		return nil, &dtos.QueryError{
+			Code:    "FAILED_TO_START_TRANSACTION",
+			Message: "failed to start transaction",
+			Details: mongoTx.Error.Error(),
+		}
+	}
+
 	execution.Tx = tx
 
 	// Execute query with proper cancellation handling

@@ -2166,10 +2166,18 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
 	log.Printf("MongoDBDriver -> BeginTx -> Beginning MongoDB transaction")
 
+	// Debug logging: Is MongoDBObj set in the connection?
+	if conn.MongoDBObj == nil {
+		log.Printf("MongoDBDriver -> BeginTx -> ERROR: MongoDBObj is nil in connection struct")
+		return &MongoDBTransaction{
+			Error: fmt.Errorf("MongoDBObj is not connected properly, try disconnecting and reconnecting"),
+		}
+	}
+
 	// Get the MongoDB wrapper
 	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
 	if !ok {
-		log.Printf("MongoDBDriver -> BeginTx -> Invalid MongoDB connection")
+		log.Printf("MongoDBDriver -> BeginTx -> Invalid MongoDB connection, type: %T", conn.MongoDBObj)
 		return &MongoDBTransaction{
 			Error: fmt.Errorf("invalid MongoDB connection"),
 			// Session is nil here, but that's expected since we have an error
