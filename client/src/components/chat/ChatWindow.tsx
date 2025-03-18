@@ -1,4 +1,4 @@
-import { ArrowDown, Loader2, XCircle } from 'lucide-react';
+import { ArrowDown, Loader2, RefreshCcw, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -903,7 +903,10 @@ export default function ChatWindow({
 
       {showRefreshSchema && (
         <ConfirmationModal
+          icon={<RefreshCcw className="w-6 h-6 text-black" />}
+          themeColor="black"
           title="Refresh Knowledge Base"
+          buttonText="Refresh"
           message="This action will refetch the schema from the database and update the knowledge base. This may take a few minutes depending on the size of the database."
           onConfirm={async () => {
             await onRefreshSchema();

@@ -1,6 +1,9 @@
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { useState } from 'react';
 interface ConfirmationModalProps {
+  themeColor?: string;
+  buttonText?: string;
+  icon?: React.ReactNode;
   title: string;
   message: string;
   onConfirm: () => Promise<void>;
@@ -12,6 +15,9 @@ export default function ConfirmationModal({
   message,
   onConfirm,
   onCancel,
+  themeColor = 'neo-error',
+  icon = <AlertTriangle className={`w-6 h-6 text-${themeColor}`} />,
+  buttonText = 'Confirm',
 }: ConfirmationModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   return (
@@ -19,7 +25,7 @@ export default function ConfirmationModal({
       <div className="bg-white neo-border rounded-lg w-full max-w-md">
         <div className="flex justify-between items-center p-6 border-b-4 border-black">
           <div className="flex items-center gap-3">
-            <AlertTriangle className="w-6 h-6 text-neo-error" />
+            {icon}
             <h2 className="text-2xl font-bold">{title}</h2>
           </div>
           <button
@@ -40,7 +46,7 @@ export default function ConfirmationModal({
                 await onConfirm();
                 setIsLoading(false);
               }}
-              className="neo-border bg-neo-error text-white px-4 py-2 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1"
+              className={`neo-border bg-${themeColor} text-white px-4 py-2 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1`}
             >
               {isLoading ? (
                 <div className="flex items-center justify-center gap-2">
@@ -48,7 +54,7 @@ export default function ConfirmationModal({
                   <span>Refreshing...</span>
                 </div>
               ) : (
-                'Confirm'
+                buttonText
               )}
             </button>
             <button
