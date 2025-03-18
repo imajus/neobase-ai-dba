@@ -68,8 +68,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       “queryType”: “SELECT/INSERT/UPDATE/DELETE/DDL…”,
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
           },
         },
        “tables”: “users,orders”,
@@ -147,8 +147,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -229,8 +229,8 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -308,8 +308,8 @@ json
       "query": "SQL query with actual values (no placeholders)",
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same LIMIT in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any LIMIT in the countQuery. For example, if the original user query explicitly included 'LIMIT 10', the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 10' WITH the LIMIT. But if the original user query had 'LIMIT 100' or no LIMIT specified, the countQuery should be 'SELECT COUNT(*) FROM users WHERE status = 'active'' WITHOUT any LIMIT. Never include OFFSET in countQuery."
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
           },
         },
        "tables": "users,orders",
@@ -412,16 +412,11 @@ json
   "queries": [
     {
       "query": "MongoDB query with actual values (no placeholders)",
-      "queryType": "FIND/INSERT/UPDATE/DELETE/AGGREGATE/CREATE_COLLECTION/DROP_COLLECTION...",
-      "isCritical": "true when the query is critical like adding, updating or deleting data",
-      "estimateResponseTime": "response time in milliseconds(example:78)",
-      "exampleResult": [
-        { "column1": "example_value1", "column2": "example_value2" }
-      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
+      "queryType": "Find/InsertOne/InsertMany/UpdateOne/UpdateMany/DeleteOne/DeleteMany…",
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))",
-		  "countQuery": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions from the original query but uses countDocuments instead of find. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(100)', the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50."
-          },
+           "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. It should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has limit() < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a count query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"db.users.find().limit(5)\" → countQuery: \"\"\n- Original: \"db.users.find().sort({created_at: -1}).limit(10)\" → countQuery: \"\"\n- Original: \"db.users.find({status: 'active'})\" → countQuery: \"db.users.countDocuments({status: 'active'})\"\n- Original: \"db.users.find({created_at: {$gt: new Date('2023-01-01')}})\" → countQuery: \"db.users.countDocuments({created_at: {$gt: new Date('2023-01-01')}})\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never use countDocuments() without filter conditions if the original query had conditions."
+            },
         },
       "collections": "users,orders",
       "explanation": "User-friendly description of the query's purpose",
@@ -474,11 +469,11 @@ const OpenAIPostgresLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
                            }
                        }
                    },
@@ -590,11 +585,11 @@ const OpenAIYugabyteDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
                            }
                        }
                    },
@@ -706,11 +701,11 @@ const OpenAIMySQLLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
                            }
                        }
                    },
@@ -834,11 +829,11 @@ const OpenAIClickhouseLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "(Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination"
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
                            }
                        }
                    },
@@ -912,7 +907,7 @@ const OpenAIClickhouseLLMResponseSchema = `{
    "additionalProperties": false
 }`
 
-var OpenAIMongoDBLLMResponseSchema = `{
+var OpenAIPGSQLLLMResponseSchema = `{
    "type": "object",
    "required": ["assistantMessage"],
    "properties": {
@@ -931,15 +926,15 @@ var OpenAIMongoDBLLMResponseSchema = `{
                "properties": {
                    "query": {
                        "type": "string",
-                       "description": "MongoDB query to fetch order details."
+                       "description": "SQL query to fetch order details."
                    },
-                   "collections": {
+                   "tables": {
                        "type": "string",
-                       "description": "Collections being used in the query(comma separated)"
+                       "description": "Tables being used in the query(comma separated)"
                    },
                    "queryType": {
                        "type": "string",
-                       "description": "MongoDB query type(find,insert,update,delete,aggregate,createCollection,dropCollection)"
+                       "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
                    },
                    "pagination": {
                        "type": "object",
@@ -950,11 +945,11 @@ var OpenAIMongoDBLLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))"
+                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size.",
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "(Only applicable for Fetching, Getting data) A fetch count query that preserves ALL filter conditions (WHERE clauses) from the original query but uses COUNT(*) instead of selecting specific columns. IMPORTANT: For pagination purposes: (1) If the user explicitly requested a small result set with LIMIT < 50, INCLUDE that same limit in the countQuery. (2) If the user explicitly requested a large result set with LIMIT ≥ 50, or if the user did not specify a LIMIT at all (even if you added one for safety), do NOT include any limit in the countQuery. For example, if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(10)', the countQuery should be 'db.users.countDocuments({status: \"active\"}).limit(10)' WITH the limit because 10 < 50. But if the original query is 'db.users.find({status: \"active\"}).sort({created_at: -1}).limit(100)', the countQuery should be 'db.users.countDocuments({status: \"active\"})' WITHOUT the limit because 100 ≥ 50."
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery."
                            }
                        }
                    },
@@ -992,6 +987,180 @@ var OpenAIMongoDBLLMResponseSchema = `{
                    "rollbackDependentQuery": {
                        "type": "string",
                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                   }
+               },
+               "additionalProperties": false
+           },
+           "description": "List of queries related to orders."
+       },
+       "actionButtons": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": ["label", "action", "isPrimary"],
+               "properties": {
+                   "label": {
+                       "type": "string",
+                       "description": "Display text for the button that the user will see."
+                   },
+                   "action": {
+                       "type": "string",
+                       "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                   },
+                   "isPrimary": {
+                       "type": "boolean",
+                       "description": "Whether this is a primary (highlighted) action button."
+                   }
+               }
+           },
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+       },
+       "assistantMessage": {
+           "type": "string",
+           "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
+       }
+   },
+   "additionalProperties": false
+}`
+
+var OpenAIMongoDBLLMResponseSchema = `{
+     "type": "object",
+     "required": ["assistantMessage"],
+     "properties": {
+         "assistantMessage": {
+             "type": "object",
+             "required": ["queries"],
+             "properties": {
+                 "queries": {
+                     "type": "array",
+                     "description": "Array of queries generated by AI",
+                     "items": {
+                         "type": "object",
+                         "required": ["query", "queryType", "isCritical", "canRollback", "explanation", "estimateResponseTime"],
+                         "properties": {
+                             "query": {
+                                 "type": "string",
+                                 "description": "MongoDB query with actual values (no placeholders)"
+                             },
+                             "queryType": {
+                                 "type": "string",
+                                 "description": "Find/InsertOne/InsertMany/UpdateOne/UpdateMany/DeleteOne/DeleteMany…"
+                             },
+                             "isCritical": {
+                                 "type": "boolean",
+                                 "description": "true when the query is critical like adding, updating or deleting data"
+                             },
+                             "canRollback": {
+                                 "type": "boolean",
+                                 "description": "true if the query can be rolled back"
+                             },
+                             "explanation": {
+                                 "type": "string",
+                                 "description": "Explanation of what the query does in human-readable form"
+                             },
+                             "estimateResponseTime": {
+                                 "type": "integer",
+                                 "description": "response time in milliseconds (example: 78)"
+                             },
+                             "pagination": {
+                                 "type": "object",
+                                 "description": "Information about pagination for the query",
+                                 "required": ["paginatedQuery", "countQuery"],
+                                 "properties": {
+                                     "paginatedQuery": {
+                                         "type": "string",
+                                         "description": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. It should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+                                     },
+                                     "countQuery": {
+                                         "type": "string",
+                                         "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has limit() < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a count query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"db.users.find().limit(5)\" → countQuery: \"\"\n- Original: \"db.users.find().sort({created_at: -1}).limit(10)\" → countQuery: \"\"\n- Original: \"db.users.find({status: 'active'})\" → countQuery: \"db.users.countDocuments({status: 'active'})\"\n- Original: \"db.users.find({created_at: {$gt: new Date('2023-01-01')}})\" → countQuery: \"db.users.countDocuments({created_at: {$gt: new Date('2023-01-01')}})\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never use countDocuments() without filter conditions if the original query had conditions."
+                                     }
+                                 }
+                             },
+                             "exampleResultString": {
+                                 "type": "string",
+                                 "description": "Example of what the query would return (Avoid giving too much data, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)"
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+     }
+}`
+
+var OpenAIGPT4MongoDBLLMResponseSchema = `{
+   "type": "object",
+   "required": ["assistantMessage"],
+   "properties": {
+       "queries": {
+           "type": "array",
+           "items": {
+               "type": "object",
+               "required": [
+                   "query",
+                   "queryType",
+                   "explanation",
+                   "isCritical",
+                   "canRollback",
+                   "estimateResponseTime"
+               ],
+               "properties": {
+                   "query": {
+                       "type": "string",
+                       "description": "MongoDB query to fetch order details."
+                   },
+                   "collections": {
+                       "type": "string",
+                       "description": "Collections being used in the query(comma separated)"
+                   },
+                   "queryType": {
+                       "type": "string",
+                       "description": "MongoDB query type(find,insert,update,delete,aggregate,createCollection,dropCollection)"
+                   },
+                   "pagination": {
+                       "type": "object",
+                       "required": [
+                           "paginatedQuery",
+                           "countQuery"
+                       ],
+                       "properties": {
+                           "paginatedQuery": {
+                               "type": "string",
+                               "description": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. It should have replaceable placeholder such as offset_size, always generate this query whenever there can be large volume of data or fetching data"
+                           },
+                           "countQuery": {
+                               "type": "string",
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has limit() < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a count query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"db.users.find().limit(5)\" → countQuery: \"\"\n- Original: \"db.users.find().sort({created_at: -1}).limit(10)\" → countQuery: \"\"\n- Original: \"db.users.find({status: 'active'})\" → countQuery: \"db.users.countDocuments({status: 'active'})\"\n- Original: \"db.users.find({created_at: {$gt: new Date('2023-01-01')}})\" → countQuery: \"db.users.countDocuments({created_at: {$gt: new Date('2023-01-01')}})\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never use countDocuments() without filter conditions if the original query had conditions."
+                           }
+                       }
+                   },
+                   "isCritical": {
+                       "type": "boolean",
+                       "description": "Indicates if the query is critical."
+                   },
+                   "canRollback": {
+                       "type": "boolean",
+                       "description": "Indicates if the operation can be rolled back."
+                   },
+                   "explanation": {
+                       "type": "string",
+                       "description": "Description of what the query does. It should be descriptive and helpful to the user and guide the user with appropriate actions & results."
+                   },
+                   "exampleResult": {
+                       "type": "array",
+                       "items": {
+                           "type": "object",
+                           "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
+                           "additionalProperties": {
+                               "type": "string"
+                           }
+                       },
+                       "description": "An example array of results that the query might return."
+                   },
+                   "rollbackQuery": {
+                       "type": "string",
+                       "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
                    }
                },
                "additionalProperties": false
