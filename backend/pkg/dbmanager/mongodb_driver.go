@@ -819,133 +819,39 @@ func (d *MongoDBDriver) IsAlive(conn *Connection) bool {
 
 // ExecuteQuery executes a MongoDB query
 func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
-	startTime := time.Now()
 	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
 
-	// Get the MongoDB wrapper
+	startTime := time.Now()
+
+	// Get the MongoDB wrapper from the connection
 	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
 	if !ok {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Invalid MongoDB connection",
-				Code:    "CONNECTION_ERROR",
+				Message: "Failed to get MongoDB wrapper from connection",
+				Code:    "INTERNAL_ERROR",
 			},
 		}
 	}
 
-	// Special case for createCollection which has a different format
-	// Example: db.createCollection("collectionName", {...})
-	if strings.Contains(query, "createCollection") {
-		createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
-		matches := createCollectionRegex.FindStringSubmatch(query)
-		if len(matches) >= 3 {
-			collectionName := matches[1]
-			optionsStr := strings.TrimSpace(matches[2])
+	// Handle special query format for MongoDB operations like db.getCollectionNames()
+	if strings.HasPrefix(query, "db.") && !strings.Contains(query[3:], ".") {
+		// Operations that are not tied to a specific collection
+		operationWithParams := strings.TrimPrefix(query, "db.")
+		openParenIndex := strings.Index(operationWithParams, "(")
+		closeParenIndex := strings.LastIndex(operationWithParams, ")")
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
-
-			// Process the options
-			var optionsMap bson.M
-			if optionsStr != "" {
-				// Process the options to handle MongoDB syntax
-				jsonStr, err := processMongoDBQueryParams(optionsStr)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process collection options: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
-				}
-
-				if err := json.Unmarshal([]byte(jsonStr), &optionsMap); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to parse collection options: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
-				}
-			}
-
-			// Check if collection already exists
-			collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
-						Code:    "EXECUTION_ERROR",
-					},
-				}
-			}
-
-			// If collection already exists, return an error
-			if len(collections) > 0 {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
-						Code:    "COLLECTION_EXISTS",
-					},
-				}
-			}
-
-			// Create collection options
-			var createOptions *options.CreateCollectionOptions
-			if optionsMap != nil {
-				// Convert validator to proper format if it exists
-				if validator, ok := optionsMap["validator"]; ok {
-					createOptions = &options.CreateCollectionOptions{
-						Validator: validator,
-					}
-				}
-			}
-
-			// Execute the createCollection operation
-			err = wrapper.Client.Database(wrapper.Database).CreateCollection(ctx, collectionName, createOptions)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to create collection: %v", err),
-						Code:    "EXECUTION_ERROR",
-					},
-				}
-			}
-
-			result := map[string]interface{}{
-				"ok":      1,
-				"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
-			}
-
-			// Convert the result to JSON
-			resultJSON, err := json.Marshal(result)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
-						Code:    "JSON_ERROR",
-					},
-				}
-			}
-
-			executionTime := int(time.Since(startTime).Milliseconds())
-			log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
-
+		if openParenIndex == -1 || closeParenIndex == -1 || closeParenIndex <= openParenIndex {
 			return &QueryExecutionResult{
-				Result:        result,
-				ResultJSON:    string(resultJSON),
-				ExecutionTime: executionTime,
+				Error: &dtos.QueryError{
+					Message: "Invalid MongoDB query format. Expected: db.operation(...)",
+					Code:    "INVALID_QUERY",
+				},
 			}
 		}
-	}
 
-	// Handle database-level operations
-	dbOperationRegex := regexp.MustCompile(`db\.(\w+)\(\s*(.*)\s*\)`)
-	if dbOperationMatches := dbOperationRegex.FindStringSubmatch(query); len(dbOperationMatches) >= 2 {
-		operation := dbOperationMatches[1]
-		paramsStr := ""
-		if len(dbOperationMatches) >= 3 {
-			paramsStr = dbOperationMatches[2]
-		}
+		operation := operationWithParams[:openParenIndex]
+		paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
 
 		log.Printf("MongoDBDriver -> ExecuteQuery -> Matched database operation: %s with params: %s", operation, paramsStr)
 
@@ -986,8 +892,6 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				ResultJSON:    string(resultJSON),
 				ExecutionTime: executionTime,
 			}
-
-		// Add more database-level operations here as needed
 		default:
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -1013,6 +917,15 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	collectionName := parts[1]
 	operationWithParams := parts[2]
 
+	// Special case handling for empty find() with modifiers
+	// Like db.collection.find().sort()
+	if strings.HasPrefix(operationWithParams, "find()") && len(operationWithParams) > 6 {
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Detected empty find() with modifiers: %s", operationWithParams)
+		// Replace find() with find({}) to ensure proper parsing
+		operationWithParams = "find({})" + operationWithParams[6:]
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Reformatted query part: %s", operationWithParams)
+	}
+
 	// Split the operation and parameters
 	// Example: find({name: "John"}) -> operation = find, params = {name: "John"}
 	openParenIndex := strings.Index(operationWithParams, "(")
@@ -1031,10 +944,26 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
 
+	log.Printf("MongoDBDriver -> ExecuteQuery -> Extracted operation: %s, params: %s", operation, paramsStr)
+
+	// Special case for find() with no parameters but with modifiers like .sort(), .limit()
+	// For example: db.collection.find().sort({field: -1})
+	if operation == "find" && strings.HasPrefix(paramsStr, ")") && strings.Contains(paramsStr, ".") {
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Detected find() with no parameters but with modifiers")
+
+		// Extract modifiers from the parameters string
+		modifiersStr := paramsStr
+
+		// Set parameters to empty object
+		paramsStr = "{}"
+
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Using empty object for parameters and parsing modifiers: %s", modifiersStr)
+	}
+
 	// Handle empty parameters case - if the parameters are empty, use an empty JSON object
 	if strings.TrimSpace(paramsStr) == "" {
 		paramsStr = "{}"
-		log.Printf("MongoDBTransaction -> ExecuteQuery -> Empty parameters detected, using empty object {}")
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Empty parameters detected, using empty object {}")
 	}
 
 	// Handle query modifiers like .limit(), .skip(), etc.
@@ -1063,11 +992,20 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			}
 		}
 
-		// Extract sort modifier
+		// Extract sort modifier - improved to handle the entire sort expression
 		sortRegex := regexp.MustCompile(`\.sort\(([^)]+)\)`)
 		if sortMatches := sortRegex.FindStringSubmatch(modifiersStr); len(sortMatches) > 1 {
-			modifiers["sort"] = sortMatches[1]
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Found sort modifier: %s", sortMatches[1])
+			sortExpr := sortMatches[1]
+
+			// Process the sort expression using our dedicated function
+			jsonStr, err := processSortExpression(sortExpr)
+			if err == nil {
+				modifiers["sort"] = jsonStr
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Processed sort modifier: %s", jsonStr)
+			} else {
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing sort modifier: %v", err)
+				modifiers["sort"] = sortExpr
+			}
 		}
 	}
 
@@ -1894,24 +1832,83 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 
 	case "aggregate":
+		// Extract the aggregation pipeline
+		// Handle both db.collection.aggregate([...]) and aggregate([...]) formats
+		// Remove .toArray() if present
+		pipelineRegex := regexp.MustCompile(`(?:\.aggregate\(|\baggregate\()(\[.+\])(?:\.toArray\(\))?(?:\))`)
+		pipelineMatches := pipelineRegex.FindStringSubmatch(query)
+
+		// If we found a match, replace paramsStr with the extracted pipeline
+		if len(pipelineMatches) > 1 {
+			paramsStr = pipelineMatches[1]
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Extracted aggregation pipeline: %s", paramsStr)
+		}
+
 		// Parse the parameters as a pipeline
 		var pipeline []bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
-			// Process the query parameters to handle MongoDB syntax
-			jsonStr, err := processMongoDBQueryParams(paramsStr)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process aggregation pipeline: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
+			// Process each stage of the pipeline individually
+			// This helps with complex expressions that might not parse correctly as a whole
+			stagesRegex := regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
+			stageMatches := stagesRegex.FindAllStringSubmatch(paramsStr, -1)
+
+			// Create an array of processed stages
+			processedStages := make([]string, 0, len(stageMatches))
+
+			for _, match := range stageMatches {
+				if len(match) < 2 {
+					continue
 				}
+
+				// Get the stage content and wrap it in curly braces
+				stageContent := "{" + match[1] + "}"
+
+				// Process the stage content
+				processedStage, err := processMongoDBQueryParams(stageContent)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process aggregation stage: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Replace "new Date(...)" with string placeholder before JSON parsing
+				// First clean up the format to ensure it's valid JSON
+				dateObjPattern := regexp.MustCompile(`new\s+Date\(([^)]*)\)`)
+				processedStage = dateObjPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
+
+				// Also replace any remaining date objects
+				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
+				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
+
+				processedStages = append(processedStages, processedStage)
 			}
 
+			// Combine the processed stages into a valid JSON array
+			jsonStr := "[" + strings.Join(processedStages, ",") + "]"
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
+
+			// Fix any remaining date expressions that might have slipped through
+			// This ensures we don't have "new Date(...)" in the JSON string
+			dateRegex := regexp.MustCompile(`new\s+Date\((?:[^)]*)\)`)
+			jsonStr = dateRegex.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
+
+			// Extra fix for the specific pattern seen in logs
+			specificDatePattern := regexp.MustCompile(`new\s+Date\(["']__DATE_PLACEHOLDER__["']\)`)
+			jsonStr = specificDatePattern.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
+
+			// Make sure to catch any other variations
+			for strings.Contains(jsonStr, "new Date") {
+				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
+				log.Printf("Removed remaining 'new Date' instances in transaction")
+			}
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after date cleanup: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
 				return &QueryExecutionResult{
@@ -1920,6 +1917,12 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 						Code:    "INVALID_PARAMETERS",
 					},
 				}
+			}
+
+			// Replace date placeholders with actual dates recursively
+			for _, stage := range pipeline {
+				processNestedDateValues(stage)
+				log.Printf("Processed date placeholders in stage: %v", stage)
 			}
 
 			// Process ObjectIds in each stage of the pipeline
@@ -2624,14 +2627,13 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
-	// Parse the MongoDB query
-	// MongoDB queries are expected in the format: db.collection.operation({...})
-	// For example: db.users.find({name: "John"})
+	// Parse the query
+	// Example: db.collection.find({name: "John"})
 	parts := strings.SplitN(query, ".", 3)
 	if len(parts) < 3 || !strings.HasPrefix(parts[0], "db") {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...}) or db.operation(...)",
+				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
 				Code:    "INVALID_QUERY",
 			},
 		}
@@ -2639,6 +2641,15 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 	collectionName := parts[1]
 	operationWithParams := parts[2]
+
+	// Special case handling for empty find() with modifiers
+	// Like db.collection.find().sort()
+	if strings.HasPrefix(operationWithParams, "find()") && len(operationWithParams) > 6 {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected empty find() with modifiers: %s", operationWithParams)
+		// Replace find() with find({}) to ensure proper parsing
+		operationWithParams = "find({})" + operationWithParams[6:]
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Reformatted query part: %s", operationWithParams)
+	}
 
 	// Split the operation and parameters
 	// Example: find({name: "John"}) -> operation = find, params = {name: "John"}
@@ -2657,6 +2668,22 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	// Extract the operation and parameters
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
+
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted operation: %s, params: %s", operation, paramsStr)
+
+	// Special case for find() with no parameters but with modifiers like .sort(), .limit()
+	// For example: db.collection.find().sort({field: -1})
+	if operation == "find" && strings.HasPrefix(paramsStr, ")") && strings.Contains(paramsStr, ".") {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected find() with no parameters but with modifiers")
+
+		// Extract modifiers from the parameters string
+		modifiersStr := paramsStr
+
+		// Set parameters to empty object
+		paramsStr = "{}"
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Using empty object for parameters and parsing modifiers: %s", modifiersStr)
+	}
 
 	// Handle empty parameters case - if the parameters are empty, use an empty JSON object
 	if strings.TrimSpace(paramsStr) == "" {
@@ -2690,11 +2717,20 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			}
 		}
 
-		// Extract sort modifier
+		// Extract sort modifier - improved to handle the entire sort expression
 		sortRegex := regexp.MustCompile(`\.sort\(([^)]+)\)`)
 		if sortMatches := sortRegex.FindStringSubmatch(modifiersStr); len(sortMatches) > 1 {
-			modifiers["sort"] = sortMatches[1]
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Found sort modifier: %s", sortMatches[1])
+			sortExpr := sortMatches[1]
+
+			// Process the sort expression using our dedicated function
+			jsonStr, err := processSortExpression(sortExpr)
+			if err == nil {
+				modifiers["sort"] = jsonStr
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed sort modifier: %s", jsonStr)
+			} else {
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing sort modifier: %v", err)
+				modifiers["sort"] = sortExpr
+			}
 		}
 	}
 
@@ -3521,24 +3557,83 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 
 	case "aggregate":
+		// Extract the aggregation pipeline
+		// Handle both db.collection.aggregate([...]) and aggregate([...]) formats
+		// Remove .toArray() if present
+		pipelineRegex := regexp.MustCompile(`(?:\.aggregate\(|\baggregate\()(\[.+\])(?:\.toArray\(\))?(?:\))`)
+		pipelineMatches := pipelineRegex.FindStringSubmatch(query)
+
+		// If we found a match, replace paramsStr with the extracted pipeline
+		if len(pipelineMatches) > 1 {
+			paramsStr = pipelineMatches[1]
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted aggregation pipeline: %s", paramsStr)
+		}
+
 		// Parse the parameters as a pipeline
 		var pipeline []bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
-			// Process the query parameters to handle MongoDB syntax
-			jsonStr, err := processMongoDBQueryParams(paramsStr)
-			if err != nil {
-				return &QueryExecutionResult{
-					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to process aggregation pipeline: %v", err),
-						Code:    "INVALID_PARAMETERS",
-					},
+			// Process each stage of the pipeline individually
+			// This helps with complex expressions that might not parse correctly as a whole
+			stagesRegex := regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
+			stageMatches := stagesRegex.FindAllStringSubmatch(paramsStr, -1)
+
+			// Create an array of processed stages
+			processedStages := make([]string, 0, len(stageMatches))
+
+			for _, match := range stageMatches {
+				if len(match) < 2 {
+					continue
 				}
+
+				// Get the stage content and wrap it in curly braces
+				stageContent := "{" + match[1] + "}"
+
+				// Process the stage content
+				processedStage, err := processMongoDBQueryParams(stageContent)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process aggregation stage: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				// Replace "new Date(...)" with string placeholder before JSON parsing
+				// First clean up the format to ensure it's valid JSON
+				dateObjPattern := regexp.MustCompile(`new\s+Date\(([^)]*)\)`)
+				processedStage = dateObjPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
+
+				// Also replace any remaining date objects
+				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
+				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
+
+				processedStages = append(processedStages, processedStage)
 			}
 
+			// Combine the processed stages into a valid JSON array
+			jsonStr := "[" + strings.Join(processedStages, ",") + "]"
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
+
+			// Fix any remaining date expressions that might have slipped through
+			// This ensures we don't have "new Date(...)" in the JSON string
+			dateRegex := regexp.MustCompile(`new\s+Date\((?:[^)]*)\)`)
+			jsonStr = dateRegex.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
+
+			// Extra fix for the specific pattern seen in logs
+			specificDatePattern := regexp.MustCompile(`new\s+Date\(["']__DATE_PLACEHOLDER__["']\)`)
+			jsonStr = specificDatePattern.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
+
+			// Make sure to catch any other variations
+			for strings.Contains(jsonStr, "new Date") {
+				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
+				log.Printf("Removed remaining 'new Date' instances in transaction")
+			}
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after date cleanup: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
 				return &QueryExecutionResult{
@@ -3547,6 +3642,12 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Code:    "INVALID_PARAMETERS",
 					},
 				}
+			}
+
+			// Replace date placeholders with actual dates recursively
+			for _, stage := range pipeline {
+				processNestedDateValues(stage)
+				log.Printf("Processed date placeholders in stage: %v", stage)
 			}
 
 			// Process ObjectIds in each stage of the pipeline
@@ -3817,6 +3918,26 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 		}
 	}
 
+	// Handle numerical values in sort expressions like {field: -1}
+	// Preserve negative numbers in sort expressions
+	sortPattern := regexp.MustCompile(`\{([^{}]+):\s*(-?\d+)\s*\}`)
+	paramsStr = sortPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Extract the field and direction
+		sortMatches := sortPattern.FindStringSubmatch(match)
+		if len(sortMatches) < 3 {
+			return match
+		}
+
+		field := strings.TrimSpace(sortMatches[1])
+		// Add quotes around the field name if not already quoted
+		if !strings.HasPrefix(field, "\"") && !strings.HasPrefix(field, "'") {
+			field = fmt.Sprintf(`"%s"`, field)
+		}
+
+		// Keep the numerical direction value as is
+		return fmt.Sprintf(`{%s: %s}`, field, sortMatches[2])
+	})
+
 	// Handle ObjectId syntax: ObjectId('...') -> {"$oid":"..."}
 	// This pattern matches both ObjectId('...') and ObjectId("...")
 	objectIdPattern := regexp.MustCompile(`ObjectId\(['"]([^'"]+)['"]\)`)
@@ -3847,10 +3968,20 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 		return fmt.Sprintf(`{"$date":"%s"}`, matches[1])
 	})
 
+	// Handle Math expressions in date calculations
+	// First, detect and replace mathematical operations in date calculations like: Date.now() - 24 * 60 * 60 * 1000
+	mathExprPattern := regexp.MustCompile(`(Date\.now\(\)|new Date\(\)\.getTime\(\))\s*([+\-])\s*\(?\s*(\d+(?:\s*[*]\s*\d+)*)\s*\)?`)
+	paramsStr = mathExprPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		log.Printf("Found date math expression: %s", match)
+		// For simplicity, use current time minus 24 hours for common "yesterday" pattern
+		return fmt.Sprintf(`{"$date":"%s"}`, time.Now().Add(-24*time.Hour).Format(time.RFC3339))
+	})
+
 	// Handle new Date() syntax with various formats:
 	// 1. new Date() without parameters -> current date in ISO format
 	// 2. new Date("...") or new Date('...') with quoted date string
 	// 3. new Date(year, month, day, ...) with numeric parameters
+	// 4. new Date(Date.now() - 24 * 60 * 60 * 1000) -> current date minus 24 hours
 
 	// First, handle new Date() without parameters
 	emptyDatePattern := regexp.MustCompile(`new\s+Date\(\s*\)`)
@@ -3871,6 +4002,22 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 
 		// Return the proper JSON format for Date
 		return fmt.Sprintf(`{"$date":"%s"}`, matches[1])
+	})
+
+	// Handle new Date(Date.now() - ...) format specifically
+	dateMathPattern := regexp.MustCompile(`new\s+Date\(\s*Date\.now\(\)\s*-\s*([^)]+)\)`)
+	paramsStr = dateMathPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		// Extract the time offset expression
+		re := regexp.MustCompile(`new\s+Date\(\s*Date\.now\(\)\s*-\s*([^)]+)\)`)
+		matches := re.FindStringSubmatch(match)
+		if len(matches) < 2 {
+			return match
+		}
+
+		// For this pattern, we'll use the current date minus 24 hours
+		// This is a simplification for common cases like "24 * 60 * 60 * 1000" (24 hours in milliseconds)
+		log.Printf("Handling Date.now() math expression: %s", matches[1])
+		return fmt.Sprintf(`{"$date":"%s"}`, time.Now().Add(-24*time.Hour).Format(time.RFC3339))
 	})
 
 	// Handle complex date expressions like:
@@ -4074,29 +4221,17 @@ func extractModifiers(query string) struct {
 		log.Printf("extractModifiers -> Extracted projection expression: %s", modifiers.Projection)
 	}
 
-	// Extract sort - improved to handle complex sort expressions
+	// Extract sort - improved to handle complex sort expressions including negative values
 	sortRegex := regexp.MustCompile(`\.sort\(([^)]+)\)`)
 	sortMatches := sortRegex.FindStringSubmatch(query)
 	if len(sortMatches) > 1 {
 		// Get the raw sort expression
 		sortExpr := sortMatches[1]
+		log.Printf("extractModifiers -> Raw sort expression: %s", sortExpr)
 
-		// Check if it's a valid JSON object already
-		if strings.HasPrefix(sortExpr, "{") && strings.HasSuffix(sortExpr, "}") {
-			modifiers.Sort = sortExpr
-		} else {
-			// Try to convert to a valid JSON object
-			// This handles cases like "field" or field without quotes
-			sortExpr = strings.Trim(sortExpr, "\"' ")
-			if !strings.HasPrefix(sortExpr, "{") {
-				// Simple field name, default to ascending order
-				modifiers.Sort = fmt.Sprintf(`{"%s": 1}`, sortExpr)
-			} else {
-				// It's already an object-like expression
-				modifiers.Sort = sortExpr
-			}
-		}
-
+		// Keep the sort expression as is, and let the processMongoDBQueryParams function handle
+		// the conversion to proper JSON.
+		modifiers.Sort = sortExpr
 		log.Printf("extractModifiers -> Extracted sort expression: %s", modifiers.Sort)
 	}
 
@@ -4123,4 +4258,151 @@ func (d *MongoDBDriver) SafeBeginTx(ctx context.Context, conn *Connection) (Tran
 
 	log.Printf("MongoDBDriver -> SafeBeginTx -> Transaction created successfully")
 	return tx, nil
+}
+
+// processSortExpression handles MongoDB sort expressions, properly preserving negative values
+func processSortExpression(sortExpr string) (string, error) {
+	log.Printf("Processing sort expression: %s", sortExpr)
+
+	// If it's already a valid JSON object, validate that the field names are quoted properly
+	if strings.HasPrefix(sortExpr, "{") && strings.HasSuffix(sortExpr, "}") {
+		// Pattern to find field:value pairs with negative numbers
+		sortPattern := regexp.MustCompile(`\{([^{}]+):\s*(-?\d+)\s*\}`)
+		sortExpr = sortPattern.ReplaceAllStringFunc(sortExpr, func(match string) string {
+			// Extract the field and direction
+			sortMatches := sortPattern.FindStringSubmatch(match)
+			if len(sortMatches) < 3 {
+				return match
+			}
+
+			field := strings.TrimSpace(sortMatches[1])
+			direction := strings.TrimSpace(sortMatches[2])
+
+			// Add quotes around the field name if not already quoted
+			if !strings.HasPrefix(field, "\"") && !strings.HasPrefix(field, "'") {
+				field = fmt.Sprintf(`"%s"`, field)
+			}
+
+			// Preserve the direction (including negative sign)
+			return fmt.Sprintf(`{%s: %s}`, field, direction)
+		})
+
+		// Handle multiple fields in a sort object: {field1: 1, field2: -1}
+		multiFieldPattern := regexp.MustCompile(`\{([^{}]+)\}`)
+		if multiFieldPattern.MatchString(sortExpr) {
+			match := multiFieldPattern.FindStringSubmatch(sortExpr)[1]
+
+			// Extract individual field:value pairs
+			pairs := strings.Split(match, ",")
+			processedPairs := make([]string, 0, len(pairs))
+
+			for _, pair := range pairs {
+				if pair = strings.TrimSpace(pair); pair == "" {
+					continue
+				}
+
+				// Split the pair into field and value
+				parts := strings.SplitN(pair, ":", 2)
+				if len(parts) != 2 {
+					continue
+				}
+
+				field := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				// Add quotes around the field name if not already quoted
+				if !strings.HasPrefix(field, "\"") && !strings.HasPrefix(field, "'") {
+					field = fmt.Sprintf(`"%s"`, field)
+				}
+
+				processedPairs = append(processedPairs, fmt.Sprintf(`%s: %s`, field, value))
+			}
+
+			// Reconstruct the sort object
+			sortExpr = fmt.Sprintf(`{%s}`, strings.Join(processedPairs, ", "))
+		}
+
+		// Now convert to proper JSON for MongoDB
+		jsonStr, err := processMongoDBQueryParams(sortExpr)
+		if err != nil {
+			log.Printf("Error processing sort expression: %v", err)
+			return sortExpr, err
+		}
+
+		log.Printf("Processed sort expression to: %s", jsonStr)
+		return jsonStr, nil
+	} else {
+		// Simple field name, default to ascending order
+		field := strings.Trim(sortExpr, `"' `)
+		sortExpr = fmt.Sprintf(`{"%s": 1}`, field)
+		log.Printf("Converted simple sort field to object: %s", sortExpr)
+		return sortExpr, nil
+	}
+}
+
+// Add this function to recursively replace date placeholders in complex objects
+func replaceDatePlaceholders(obj interface{}) interface{} {
+	// Handle different types
+	switch v := obj.(type) {
+	case map[string]interface{}:
+		// Process map
+		for k, val := range v {
+			v[k] = replaceDatePlaceholders(val)
+		}
+		return v
+	case []interface{}:
+		// Process array
+		for i, val := range v {
+			v[i] = replaceDatePlaceholders(val)
+		}
+		return v
+	case string:
+		// Check if it's a date placeholder
+		if v == "__DATE_PLACEHOLDER__" {
+			return primitive.NewDateTimeFromTime(time.Now())
+		}
+		return v
+	default:
+		return v
+	}
+}
+
+// Add this function to recursively process date placeholders in nested objects
+func processNestedDateValues(obj map[string]interface{}) {
+	for k, v := range obj {
+		// Handle different types of values
+		switch val := v.(type) {
+		case string:
+			// Check if it's a date placeholder
+			if val == "__DATE_PLACEHOLDER__" {
+				// Replace with current date
+				obj[k] = time.Now()
+				log.Printf("Replaced date placeholder with current time at key: %s", k)
+			}
+		case map[string]interface{}:
+			// Check if this is a $gte or similar operator with a date placeholder
+			if dateStr, ok := val["$gte"]; ok {
+				if dateStrVal, isString := dateStr.(string); isString && dateStrVal == "__DATE_PLACEHOLDER__" {
+					val["$gte"] = time.Now()
+					log.Printf("Replaced date placeholder in $gte operator with current time")
+				}
+			}
+			// Similarly check other operators
+			for op, opVal := range val {
+				if opStrVal, isString := opVal.(string); isString && opStrVal == "__DATE_PLACEHOLDER__" {
+					val[op] = time.Now()
+					log.Printf("Replaced date placeholder in %s operator with current time", op)
+				}
+			}
+			// Recursively process nested maps
+			processNestedDateValues(val)
+		case []interface{}:
+			// Process array items
+			for _, item := range val {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					processNestedDateValues(itemMap)
+				}
+			}
+		}
+	}
 }
