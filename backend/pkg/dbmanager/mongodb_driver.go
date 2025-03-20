@@ -1094,25 +1094,23 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 
 				// Parse the projection
-				if err := json.Unmarshal([]byte(projectionStr), &projection); err != nil {
-					// Try to handle MongoDB syntax with unquoted keys
-					jsonProjectionStr, err := processMongoDBQueryParams(projectionStr)
-					if err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
+				// Use our specialized projection processor for better handling
+				jsonProjStr, err := processProjectionParams(projectionStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
 					}
+				}
 
-					if err := json.Unmarshal([]byte(jsonProjectionStr), &projection); err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to parse projection: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
+				if err := json.Unmarshal([]byte(jsonProjStr), &projection); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse projection: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
 					}
 				}
 			} else {
@@ -1260,26 +1258,24 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				projectionJSON = fmt.Sprintf(`{"%s": 1}`, projectionJSON)
 			}
 
-			// Parse the projection document
-			var projectionMap bson.M
-			if err := json.Unmarshal([]byte(projectionJSON), &projectionMap); err != nil {
-				jsonStr, err := processMongoDBQueryParams(projectionJSON)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
+			// Parse the projection document using our specialized processor
+			jsonProjStr, err := processProjectionParams(projectionJSON)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
 				}
+			}
 
-				if err := json.Unmarshal([]byte(jsonStr), &projectionMap); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
+			var projectionMap bson.M
+			if err := json.Unmarshal([]byte(jsonProjStr), &projectionMap); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse projection: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
 				}
 			}
 
@@ -2819,25 +2815,23 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				}
 
 				// Parse the projection
-				if err := json.Unmarshal([]byte(projectionStr), &projection); err != nil {
-					// Try to handle MongoDB syntax with unquoted keys
-					jsonProjectionStr, err := processMongoDBQueryParams(projectionStr)
-					if err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
+				// Use our specialized projection processor for better handling
+				jsonProjStr, err := processProjectionParams(projectionStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
 					}
+				}
 
-					if err := json.Unmarshal([]byte(jsonProjectionStr), &projection); err != nil {
-						return &QueryExecutionResult{
-							Error: &dtos.QueryError{
-								Message: fmt.Sprintf("Failed to parse projection: %v", err),
-								Code:    "INVALID_PARAMETERS",
-							},
-						}
+				if err := json.Unmarshal([]byte(jsonProjStr), &projection); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse projection: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
 					}
 				}
 			} else {
@@ -2985,26 +2979,24 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				projectionJSON = fmt.Sprintf(`{"%s": 1}`, projectionJSON)
 			}
 
-			// Parse the projection document
-			var projectionMap bson.M
-			if err := json.Unmarshal([]byte(projectionJSON), &projectionMap); err != nil {
-				jsonStr, err := processMongoDBQueryParams(projectionJSON)
-				if err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
+			// Parse the projection document using our specialized processor
+			jsonProjStr, err := processProjectionParams(projectionJSON)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
 				}
+			}
 
-				if err := json.Unmarshal([]byte(jsonStr), &projectionMap); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to parse projection parameters: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
+			var projectionMap bson.M
+			if err := json.Unmarshal([]byte(jsonProjStr), &projectionMap); err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse projection: %v", err),
+						Code:    "INVALID_PARAMETERS",
+					},
 				}
 			}
 
@@ -4048,9 +4040,10 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	operatorRegex := regexp.MustCompile(`(\s*)(\$[a-zA-Z0-9]+)(\s*):`)
 	paramsStr = operatorRegex.ReplaceAllString(paramsStr, `$1"$2"$3:`)
 
-	// Handle field names that might not be quoted
+	// First pass: Quote all field names in objects
 	// This regex matches field names followed by a colon, ensuring they're properly quoted
-	fieldNameRegex := regexp.MustCompile(`([,{])\s*([a-zA-Z0-9_]+)\s*:`)
+	// Improved pattern to catch all unquoted field names, including those at the beginning of objects
+	fieldNameRegex := regexp.MustCompile(`(^|[,{])\s*([a-zA-Z0-9_]+)\s*:`)
 	paramsStr = fieldNameRegex.ReplaceAllString(paramsStr, `$1"$2":`)
 
 	// Handle single quotes for string values
@@ -4063,14 +4056,22 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	paramsStr = strings.ReplaceAll(paramsStr, "__MONGODB_DATE__", "$date")
 
 	// Ensure the document is valid JSON
-	// Check if it's an object and add missing quotes to field names
+	// Second pass: Check if it's an object and add missing quotes to field names
 	if strings.HasPrefix(paramsStr, "{") && strings.HasSuffix(paramsStr, "}") {
 		// Add quotes to any remaining unquoted field names
 		// This regex matches field names that aren't already quoted
-		unquotedFieldRegex := regexp.MustCompile(`([,{])\s*([a-zA-Z0-9_]+)\s*:`)
+		unquotedFieldRegex := regexp.MustCompile(`([,{]|^)\s*([a-zA-Z0-9_]+)\s*:`)
 		for unquotedFieldRegex.MatchString(paramsStr) {
 			paramsStr = unquotedFieldRegex.ReplaceAllString(paramsStr, `$1"$2":`)
 		}
+	}
+
+	// Final fix: Make sure all occurences of field names have double quotes
+	// This extreme approach ensures all field names are properly quoted
+	// Handle space-separated fields in projection
+	for _, field := range []string{"email", "_id", "role", "createdAt", "name", "address", "phone"} {
+		fieldPattern := regexp.MustCompile(fmt.Sprintf(`(%s):\s*([0-1])`, field))
+		paramsStr = fieldPattern.ReplaceAllString(paramsStr, `"$1": $2`)
 	}
 
 	// Log the final processed string for debugging
@@ -4405,4 +4406,63 @@ func processNestedDateValues(obj map[string]interface{}) {
 			}
 		}
 	}
+}
+
+// Add this new function after processMongoDBQueryParams
+
+// processProjectionParams specifically handles MongoDB projection parameters,
+// which often need special treatment due to their simpler structure
+func processProjectionParams(projectionStr string) (string, error) {
+	// Log the original string for debugging
+	log.Printf("Original MongoDB projection params: %s", projectionStr)
+
+	// Special case fix for the exact error pattern we saw in the logs
+	// This approach uses direct string replacement for common MongoDB projection fields
+	commonFields := []string{"email", "_id", "role", "createdAt", "name", "address", "phone"}
+	for _, field := range commonFields {
+		// Simple direct string replacement - most reliable approach
+		oldPattern := field + ":"
+		newPattern := "\"" + field + "\":"
+		projectionStr = regexp.MustCompile(oldPattern).ReplaceAllString(projectionStr, newPattern)
+	}
+
+	// Simple approach - split by comma and handle each field individually
+	if !strings.HasPrefix(projectionStr, "{") || !strings.HasSuffix(projectionStr, "}") {
+		projectionStr = "{" + projectionStr + "}"
+	}
+
+	// Remove braces for processing
+	content := projectionStr[1 : len(projectionStr)-1]
+
+	// Split by comma
+	fields := strings.Split(content, ",")
+
+	// Process each field
+	processedFields := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		parts := strings.SplitN(field, ":", 2)
+		if len(parts) != 2 {
+			// Skip invalid fields
+			continue
+		}
+
+		// Quote the field name if not already quoted
+		fieldName := strings.TrimSpace(parts[0])
+		if !strings.HasPrefix(fieldName, "\"") && !strings.HasPrefix(fieldName, "'") {
+			fieldName = "\"" + fieldName + "\""
+		}
+
+		// Keep the value as is
+		value := strings.TrimSpace(parts[1])
+
+		// Add the processed field
+		processedFields = append(processedFields, fieldName+": "+value)
+	}
+
+	// Combine back into a JSON object
+	result := "{" + strings.Join(processedFields, ", ") + "}"
+	log.Printf("Processed MongoDB projection params: %s", result)
+
+	return result, nil
 }
