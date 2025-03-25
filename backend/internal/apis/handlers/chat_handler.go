@@ -848,7 +848,7 @@ func (h *ChatHandler) GetTables(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
-	response, statusCode, err := h.chatService.GetTables(c.Request.Context(), userID, chatID)
+	response, statusCode, err := h.chatService.GetAllTables(c.Request.Context(), userID, chatID)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{
