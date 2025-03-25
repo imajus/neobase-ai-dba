@@ -1,4 +1,4 @@
-import { Github, Menu, X } from 'lucide-react'
+import { Boxes, Github, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 
 const Navbar = ({ forks }: { forks: number }) => {
@@ -23,7 +23,7 @@ const Navbar = ({ forks }: { forks: number }) => {
           <div className="flex items-center justify-between">
             {/* Logo */}
             <a href="/" className="flex items-center gap-2">
-              <img src="/neobase-logo.svg" alt="NeoBase Logo" className="w-10 h-10" />
+            <Boxes className="w-8 h-8" />
               <span className="text-2xl font-bold">NeoBase</span>
             </a>
 
