@@ -139,7 +139,7 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		baseParams += " sslmode=verify-full"
 
 		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 		if err != nil {
 			return nil, err
 		}

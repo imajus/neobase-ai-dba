@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/utils"
 	"os"
 	"strings"
 	"sync"
@@ -120,7 +121,7 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		tlsConfigName := fmt.Sprintf("custom-%d", time.Now().UnixNano())
 
 		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 		if err != nil {
 			return nil, err
 		}

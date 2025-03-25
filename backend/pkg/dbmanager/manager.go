@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -21,12 +19,12 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL/YugabyteDB Driver
 	"gorm.io/gorm"
 
-	"neobase-ai/internal/apis/dtos"
-	"neobase-ai/internal/constants"
-	"neobase-ai/pkg/redis"
-
 	"crypto/tls"
 	"crypto/x509"
+	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/constants"
+	"neobase-ai/internal/utils"
+	"neobase-ai/pkg/redis"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -143,6 +141,47 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 	return m, nil
 }
 
+func (m *Manager) registerDefaultDrivers() {
+	// Register PostgreSQL driver
+	m.RegisterDriver("postgresql", NewPostgresDriver())
+
+	// Register YugabyteDB driver (uses PostgreSQL driver)
+	m.RegisterDriver("yugabytedb", NewPostgresDriver())
+
+	// Register MySQL driver
+	m.RegisterDriver("mysql", NewMySQLDriver())
+
+	// Register ClickHouse driver
+	m.RegisterDriver("clickhouse", NewClickHouseDriver())
+
+	// Register MongoDB driver
+	m.RegisterDriver("mongodb", NewMongoDBDriver())
+
+	// Register MongoDB schema fetcher
+	m.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
+		return NewMongoDBSchemaFetcher(db)
+	})
+}
+
+// GetPoolMetrics returns metrics about the connection pools
+func (m *Manager) GetPoolMetrics() map[string]interface{} {
+	m.dbPoolsMu.RLock()
+	defer m.dbPoolsMu.RUnlock()
+
+	totalRefs := 0
+	for _, pool := range m.dbPools {
+		pool.Mutex.Lock()
+		totalRefs += pool.RefCount
+		pool.Mutex.Unlock()
+	}
+
+	return map[string]interface{}{
+		"total_pools":       len(m.dbPools),
+		"total_connections": totalRefs,
+		"reuse_count":       m.poolMetrics.reuseCount,
+	}
+}
+
 // RegisterDriver registers a new database driver
 func (m *Manager) RegisterDriver(dbType string, driver DatabaseDriver) {
 	m.drivers[dbType] = driver
@@ -176,7 +215,13 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 	}
 
 	// Generate a unique key for this database configuration
-	configKey := generateConfigKey(config)
+	configKey := utils.GenerateConfigKey(map[string]interface{}{
+		"type":     config.Type,
+		"host":     config.Host,
+		"port":     config.Port,
+		"username": config.Username,
+		"password": config.Password,
+	})
 	log.Printf("DBManager -> Connect -> Generated config key: %s", configKey)
 
 	// Check if we already have a connection to this database
@@ -1098,7 +1143,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 			baseParams += " sslmode=verify-full"
 
 			// Fetch certificates from URLs
-			certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
 				return err
 			}
@@ -1181,7 +1226,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 			tlsConfigName := fmt.Sprintf("custom-test-%d", time.Now().UnixNano())
 
 			// Fetch certificates from URLs
-			certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
 				return err
 			}
@@ -1277,7 +1322,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		// Configure SSL/TLS
 		if config.UseSSL {
 			// Fetch certificates from URLs
-			_, _, _, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			_, _, _, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
 				return err
 			}
@@ -1413,7 +1458,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		// Configure SSL/TLS
 		if config.UseSSL {
 			// Fetch certificates from URLs
-			certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(*config)
+			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
 				return err
 			}
@@ -1642,147 +1687,4 @@ func (m *Manager) RefreshSchemaWithExamples(ctx context.Context, chatID string, 
 
 	log.Printf("DBManager -> RefreshSchemaWithExamples -> Successfully refreshed schema for chatID: %s (schema length: %d)", chatID, len(formattedSchema))
 	return formattedSchema, nil
-}
-
-func (m *Manager) registerDefaultDrivers() {
-	// Register PostgreSQL driver
-	m.RegisterDriver("postgresql", NewPostgresDriver())
-
-	// Register YugabyteDB driver (uses PostgreSQL driver)
-	m.RegisterDriver("yugabytedb", NewPostgresDriver())
-
-	// Register MySQL driver
-	m.RegisterDriver("mysql", NewMySQLDriver())
-
-	// Register ClickHouse driver
-	m.RegisterDriver("clickhouse", NewClickHouseDriver())
-
-	// Register MongoDB driver
-	m.RegisterDriver("mongodb", NewMongoDBDriver())
-
-	// Register MongoDB schema fetcher
-	m.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
-		return NewMongoDBSchemaFetcher(db)
-	})
-}
-
-// generateConfigKey creates a unique string key for a database configuration
-func generateConfigKey(config ConnectionConfig) string {
-	var username string
-	if config.Username != nil {
-		username = *config.Username
-	}
-
-	port := ""
-	if config.Port != nil {
-		port = *config.Port
-	}
-	// Create a unique key based on connection details
-	key := fmt.Sprintf("%s:%s:%s:%s:%s",
-		config.Type,
-		config.Host,
-		port,
-		username,
-		config.Database)
-
-	return key
-}
-
-// GetPoolMetrics returns metrics about the connection pools
-func (m *Manager) GetPoolMetrics() map[string]interface{} {
-	m.dbPoolsMu.RLock()
-	defer m.dbPoolsMu.RUnlock()
-
-	totalRefs := 0
-	for _, pool := range m.dbPools {
-		pool.Mutex.Lock()
-		totalRefs += pool.RefCount
-		pool.Mutex.Unlock()
-	}
-
-	return map[string]interface{}{
-		"total_pools":       len(m.dbPools),
-		"total_connections": totalRefs,
-		"reuse_count":       m.poolMetrics.reuseCount,
-	}
-}
-
-// fetchCertificateFromURL downloads a certificate from a URL and stores it temporarily
-func fetchCertificateFromURL(url string) (string, error) {
-	// Create a temporary file
-	tmpFile, err := ioutil.TempFile("", "cert-*.pem")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temporary file: %v", err)
-	}
-	defer tmpFile.Close()
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	// Fetch the certificate
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch certificate from URL: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch certificate, status: %s", resp.Status)
-	}
-
-	// Copy the certificate to the temporary file
-	_, err = io.Copy(tmpFile, resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to save certificate: %v", err)
-	}
-
-	// Return the path to the temporary file
-	return tmpFile.Name(), nil
-}
-
-// prepareCertificatesFromURLs fetches certificates from URLs and returns their local paths
-func prepareCertificatesFromURLs(config ConnectionConfig) (certPath, keyPath, rootCertPath string, tempFiles []string, err error) {
-	// Fetch client certificate if URL provided
-	if config.SSLCertURL != nil && *config.SSLCertURL != "" {
-		certPath, err = fetchCertificateFromURL(*config.SSLCertURL)
-		if err != nil {
-			// Clean up any files already created
-			for _, file := range tempFiles {
-				os.Remove(file)
-			}
-			return "", "", "", nil, fmt.Errorf("failed to fetch client certificate: %v", err)
-		}
-		tempFiles = append(tempFiles, certPath)
-	}
-
-	// Fetch client key if URL provided
-	if config.SSLKeyURL != nil && *config.SSLKeyURL != "" {
-		keyPath, err = fetchCertificateFromURL(*config.SSLKeyURL)
-		if err != nil {
-			// Clean up any files already created
-			for _, file := range tempFiles {
-				os.Remove(file)
-			}
-			return "", "", "", nil, fmt.Errorf("failed to fetch client key: %v", err)
-		}
-		tempFiles = append(tempFiles, keyPath)
-	}
-
-	// Fetch CA certificate if URL provided
-	if config.SSLRootCertURL != nil && *config.SSLRootCertURL != "" {
-		rootCertPath, err = fetchCertificateFromURL(*config.SSLRootCertURL)
-		if err != nil {
-			// Clean up any files already created
-			for _, file := range tempFiles {
-				os.Remove(file)
-			}
-			return "", "", "", nil, fmt.Errorf("failed to fetch CA certificate: %v", err)
-		}
-		tempFiles = append(tempFiles, rootCertPath)
-	}
-
-	return certPath, keyPath, rootCertPath, tempFiles, nil
 }
