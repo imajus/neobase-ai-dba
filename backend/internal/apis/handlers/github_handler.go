@@ -18,6 +18,12 @@ func NewGitHubHandler(githubService services.GitHubService) *GitHubHandler {
 	}
 }
 
+// @Summary Get GitHub Stats
+// @Description Get GitHub stats
+// @Accept json
+// @Produce json
+// @Success 200 {object} dtos.Response
+
 func (h *GitHubHandler) GetGitHubStats(c *gin.Context) {
 	stats, err := h.githubService.GetStats(c.Request.Context())
 	if err != nil {

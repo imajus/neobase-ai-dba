@@ -29,6 +29,13 @@ func NewChatHandler(chatService services.ChatService) *ChatHandler {
 	}
 }
 
+// @Summary Create a new chat
+// @Description Create a new chat
+// @Accept json
+// @Produce json
+// @Param createChatRequest body dtos.CreateChatRequest true "Create chat request"
+// @Success 200 {object} dtos.Response
+
 func (h *ChatHandler) Create(c *gin.Context) {
 	var req dtos.CreateChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -57,6 +64,13 @@ func (h *ChatHandler) Create(c *gin.Context) {
 	})
 }
 
+// @Summary List chats
+// @Description List all chats
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param page_size query int false "Page size" default(10)
+
 func (h *ChatHandler) List(c *gin.Context) {
 	userID := c.GetString("userID")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -78,6 +92,12 @@ func (h *ChatHandler) List(c *gin.Context) {
 	})
 }
 
+// @Summary Get chat by ID
+// @Description Get a chat by its ID
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) GetByID(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
@@ -97,6 +117,12 @@ func (h *ChatHandler) GetByID(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+// @Summary Update a chat
+// @Description Update a chat
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 func (h *ChatHandler) Update(c *gin.Context) {
 	var req dtos.UpdateChatRequest
@@ -128,6 +154,12 @@ func (h *ChatHandler) Update(c *gin.Context) {
 	})
 }
 
+// @Summary Delete a chat
+// @Description Delete a chat
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) Delete(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
@@ -147,6 +179,12 @@ func (h *ChatHandler) Delete(c *gin.Context) {
 		Data:    "Chat deleted successfully",
 	})
 }
+
+// @Summary List messages
+// @Description List all messages for a chat
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 func (h *ChatHandler) ListMessages(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -169,6 +207,12 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+// @Summary Create a new message
+// @Description Create a new message
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 func (h *ChatHandler) CreateMessage(c *gin.Context) {
 	var req dtos.CreateMessageRequest
@@ -199,6 +243,12 @@ func (h *ChatHandler) CreateMessage(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+// @Summary Update a message
+// @Description Update a message
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 func (h *ChatHandler) UpdateMessage(c *gin.Context) {
 	var req dtos.CreateMessageRequest
@@ -231,6 +281,12 @@ func (h *ChatHandler) UpdateMessage(c *gin.Context) {
 	})
 }
 
+// @Summary Delete messages
+// @Description Delete messages
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) DeleteMessages(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
@@ -250,6 +306,13 @@ func (h *ChatHandler) DeleteMessages(c *gin.Context) {
 		Data:    "Messages deleted successfully",
 	})
 }
+
+// @Summary Handle stream event
+// @Description Handle stream event
+// @Accept json
+// @Produce json
+// @Param userID path string true "User ID"
+// @Param chatID path string true "Chat ID"
 
 // HandleStreamEvent implements the StreamHandler interface
 func (h *ChatHandler) HandleStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse) {
@@ -272,6 +335,12 @@ func (h *ChatHandler) HandleStreamEvent(userID, chatID, streamID string, respons
 		log.Printf("Timeout sending event to stream: %s", streamKey)
 	}
 }
+
+// @Summary Stream chat
+// @Description Stream chat
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 // StreamChat handles SSE endpoint
 func (h *ChatHandler) StreamChat(c *gin.Context) {
@@ -357,6 +426,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 }
 
+// @Summary Cancel stream
+// @Description Cancel currently streaming response
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 // CancelStream cancels currently streaming response
 func (h *ChatHandler) CancelStream(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -391,6 +466,12 @@ func (h *ChatHandler) CancelStream(c *gin.Context) {
 	})
 }
 
+// @Summary Connect DB
+// @Description Connect to a database
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 // ConnectDB establishes a database connection
 func (h *ChatHandler) ConnectDB(c *gin.Context) {
 
@@ -421,6 +502,12 @@ func (h *ChatHandler) ConnectDB(c *gin.Context) {
 	})
 }
 
+// @Summary Disconnect DB
+// @Description Disconnect from a database
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 // DisconnectDB closes a database connection
 func (h *ChatHandler) DisconnectDB(c *gin.Context) {
 	var req dtos.DisconnectDBRequest
@@ -449,6 +536,12 @@ func (h *ChatHandler) DisconnectDB(c *gin.Context) {
 	})
 }
 
+// @Summary Get DB Connection Status
+// @Description Get the current connection status of a database
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 // GetDBConnectionStatus checks the current connection status
 func (h *ChatHandler) GetDBConnectionStatus(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -469,6 +562,12 @@ func (h *ChatHandler) GetDBConnectionStatus(c *gin.Context) {
 	})
 }
 
+// @Summary Refresh Schema
+// @Description Refresh the schema of a database
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) RefreshSchema(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
@@ -487,6 +586,12 @@ func (h *ChatHandler) RefreshSchema(c *gin.Context) {
 		Data:    "Schema refreshed successfully",
 	})
 }
+
+// @Summary Execute query
+// @Description Execute a query
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 // Add query execution methods
 func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
@@ -518,6 +623,12 @@ func (h *ChatHandler) ExecuteQuery(c *gin.Context) {
 	})
 }
 
+// @Summary Rollback query
+// @Description Rollback a query
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) RollbackQuery(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
@@ -546,6 +657,12 @@ func (h *ChatHandler) RollbackQuery(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+// @Summary Cancel query execution
+// @Description Cancel a query execution
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 func (h *ChatHandler) CancelQueryExecution(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -655,6 +772,12 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 	}
 }
 
+// @Summary Get query results
+// @Description Get the results of a query
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) GetQueryResults(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
@@ -681,6 +804,12 @@ func (h *ChatHandler) GetQueryResults(c *gin.Context) {
 		Data:    response,
 	})
 }
+
+// @Summary Edit query
+// @Description Edit a query
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
 
 func (h *ChatHandler) EditQuery(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -709,7 +838,12 @@ func (h *ChatHandler) EditQuery(c *gin.Context) {
 	})
 }
 
-// GetTables retrieves all tables with their columns for a specific chat, marking which ones are selected
+// @Summary Get tables
+// @Description Get all tables with their columns for a specific chat, marking which ones are selected
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
 func (h *ChatHandler) GetTables(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
