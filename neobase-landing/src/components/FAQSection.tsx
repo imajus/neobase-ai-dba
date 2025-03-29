@@ -105,7 +105,7 @@ const FAQSection: React.FC = () => {
   ];
 
   return (
-    <section id="faq" className="py-14 sm:py-16 md:py-20 lg:pt-12 bg-white relative overflow-hidden">
+    <section id="faq" className="py-14 sm:py-16 md:py-20 lg:pt-24 bg-white relative overflow-hidden">
       <FloatingBackground count={12} opacity={0.02} />
       
       <div className="container mx-auto px-4 sm:px-6 md:px-8 max-w-6xl">

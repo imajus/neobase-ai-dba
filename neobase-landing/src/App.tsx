@@ -5,6 +5,8 @@ import SupportedTechnologiesSection from './components/SupportedTechnologiesSect
 import Footer from './components/Footer'
 import CompactFeaturesSection from './components/CompactFeaturesSection'
 import HowItWorksSection from './components/HowItWorksSection'
+import ComparisonSection from './components/ComparisonSection'
+import UseCasesSection from './components/UseCasesSection'
 import FAQSection from './components/FAQSection'
 import Clarity from '@microsoft/clarity';
 import { initializeApp } from "firebase/app";
@@ -54,9 +56,11 @@ function fetchStats() {
       <main className="flex flex-col space-y-8 md:space-y-0">
         <HeroSection />
         <VideoSection />
+        <UseCasesSection />
         <SupportedTechnologiesSection />
         <CompactFeaturesSection stars={stars}/>
         <HowItWorksSection />
+        <ComparisonSection />
         <FAQSection />
       </main>
       <Footer />
@@ -107,6 +111,8 @@ function trackSectionViews(analytics: any) {
     { id: 'technologies', name: 'technologies_section_view' },
     { id: 'features', name: 'features_section_view' },
     { id: 'how-it-works', name: 'how_it_works_section_view' },
+    { id: 'comparison', name: 'comparison_section_view' },
+    { id: 'use-cases', name: 'use_cases_section_view' },
     { id: 'faq', name: 'faq_section_view' }
   ];
 
