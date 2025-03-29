@@ -2,703 +2,336 @@ package dbmanager
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
-	"neobase-ai/internal/utils"
-	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"crypto/x509"
-
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-// MongoDBDriver implements the DatabaseDriver interface for MongoDB
-type MongoDBDriver struct{}
-
-// NewMongoDBDriver creates a new MongoDB driver
-func NewMongoDBDriver() DatabaseDriver {
-	return &MongoDBDriver{}
+// MongoDBTransaction implements the Transaction interface for MongoDB
+type MongoDBTransaction struct {
+	Session mongo.Session
+	Wrapper *MongoDBWrapper
+	Error   error
 }
 
-// GetSchema retrieves the schema information for MongoDB
-func (d *MongoDBDriver) GetSchema(ctx context.Context, db DBExecutor, selectedCollections []string) (*SchemaInfo, error) {
-	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
-		log.Printf("MongoDBDriver -> GetSchema -> Context cancelled: %v", err)
-		return nil, err
-	}
+// Commit commits a MongoDB transaction
+func (tx *MongoDBTransaction) Commit() error {
+	log.Printf("MongoDBTransaction -> Commit -> Committing MongoDB transaction")
 
-	// Get the MongoDB wrapper
-	executor, ok := db.(*MongoDBExecutor)
-	if !ok {
-		return nil, fmt.Errorf("invalid MongoDB executor")
-	}
-
-	wrapper := executor.wrapper
-	if wrapper == nil {
-		return nil, fmt.Errorf("invalid MongoDB connection")
-	}
-
-	// Get all collections in the database
-	var filter bson.M
-	if len(selectedCollections) > 0 && selectedCollections[0] != "ALL" {
-		filter = bson.M{"name": bson.M{"$in": selectedCollections}}
-	}
-
-	collections, err := wrapper.Client.Database(wrapper.Database).ListCollections(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list collections: %v", err)
-	}
-	defer collections.Close(ctx)
-
-	// Create a map to store all collections
-	mongoSchema := MongoDBSchema{
-		Collections: make(map[string]MongoDBCollection),
-		Indexes:     make(map[string][]MongoDBIndex),
-	}
-
-	// Process each collection
-	for collections.Next(ctx) {
-		// Check for context cancellation
-		if err := ctx.Err(); err != nil {
-			log.Printf("MongoDBDriver -> GetSchema -> Context cancelled: %v", err)
-			return nil, err
+	// Check if the session is nil (which can happen if there was an error creating the transaction)
+	if tx.Session == nil {
+		log.Printf("MongoDBTransaction -> Commit -> No session to commit (session is nil)")
+		if tx.Error != nil {
+			log.Printf("MongoDBTransaction -> Commit -> Original error: %v", tx.Error)
+			return fmt.Errorf("cannot commit transaction: %v", tx.Error)
 		}
-
-		var collInfo bson.M
-		if err := collections.Decode(&collInfo); err != nil {
-			log.Printf("MongoDBDriver -> GetSchema -> Error decoding collection info: %v", err)
-			continue
-		}
-
-		collName, ok := collInfo["name"].(string)
-		if !ok {
-			log.Printf("MongoDBDriver -> GetSchema -> Invalid collection name")
-			continue
-		}
-
-		log.Printf("MongoDBDriver -> GetSchema -> Processing collection: %s", collName)
-
-		// Get collection details
-		collection, err := d.getCollectionDetails(ctx, wrapper, collName)
-		if err != nil {
-			log.Printf("MongoDBDriver -> GetSchema -> Error getting collection details: %v", err)
-			continue
-		}
-
-		// Get indexes for the collection
-		indexes, err := d.getCollectionIndexes(ctx, wrapper, collName)
-		if err != nil {
-			log.Printf("MongoDBDriver -> GetSchema -> Error getting collection indexes: %v", err)
-			continue
-		}
-
-		// Add to schema
-		mongoSchema.Collections[collName] = collection
-		mongoSchema.Indexes[collName] = indexes
+		return fmt.Errorf("cannot commit transaction: session is nil")
 	}
 
-	if err := collections.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating collections: %v", err)
+	// Check if the wrapper or client is nil
+	if tx.Wrapper == nil || tx.Wrapper.Client == nil {
+		log.Printf("MongoDBTransaction -> Commit -> Wrapper or client is nil")
+		return fmt.Errorf("cannot commit: wrapper or client is nil")
 	}
 
-	// Convert to generic SchemaInfo
-	return convertMongoDBSchemaToSchemaInfo(mongoSchema), nil
-}
+	// Check if there was an error starting the transaction
+	if tx.Error != nil {
+		log.Printf("MongoDBTransaction -> Commit -> Cannot commit with error: %v", tx.Error)
+		// End the session if it exists
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-// getCollectionDetails retrieves details about a MongoDB collection
-func (d *MongoDBDriver) getCollectionDetails(ctx context.Context, wrapper *MongoDBWrapper, collName string) (MongoDBCollection, error) {
-	// Create a new collection
-	collection := MongoDBCollection{
-		Name:   collName,
-		Fields: make(map[string]MongoDBField),
+		tx.Session.EndSession(ctx)
+		return fmt.Errorf("cannot commit transaction with error: %v", tx.Error)
 	}
 
-	// Get document count
-	count, err := wrapper.Client.Database(wrapper.Database).Collection(collName).CountDocuments(ctx, bson.M{})
-	if err != nil {
-		return collection, fmt.Errorf("failed to count documents: %v", err)
-	}
-	collection.DocumentCount = count
-
-	// If collection is empty, return empty schema
-	if count == 0 {
-		return collection, nil
-	}
-
-	// Sample documents to infer schema
-	sampleLimit := int64(50) // Sample up to 50 documents
-	log.Printf("MongoDBDriver -> getCollectionDetails -> Will sample up to %d documents from collection %s for schema inference", sampleLimit, collName)
-
-	opts := options.Find().SetLimit(sampleLimit)
-	cursor, err := wrapper.Client.Database(wrapper.Database).Collection(collName).Find(ctx, bson.M{}, opts)
-	if err != nil {
-		return collection, fmt.Errorf("failed to sample documents: %v", err)
-	}
-	defer cursor.Close(ctx)
-
-	// Process each document to infer schema
-	var documents []bson.M
-	if err := cursor.All(ctx, &documents); err != nil {
-		return collection, fmt.Errorf("failed to decode documents: %v", err)
-	}
-
-	log.Printf("MongoDBDriver -> getCollectionDetails -> Retrieved exactly %d documents from collection %s for schema inference", len(documents), collName)
-
-	// Store a sample document
-	if len(documents) > 0 {
-		collection.SampleDocument = documents[0]
-	}
-
-	// Infer schema from documents
-	fields := make(map[string]MongoDBField)
-	for _, doc := range documents {
-		for key, value := range doc {
-			field, exists := fields[key]
-			if !exists {
-				field = MongoDBField{
-					Name:         key,
-					IsRequired:   true,
-					NestedFields: make(map[string]MongoDBField),
-				}
-			}
-
-			// Determine field type
-			fieldType := getMongoDBFieldType(value)
-			if field.Type == "" {
-				field.Type = fieldType
-			} else if field.Type != fieldType && fieldType != "null" {
-				// If types don't match, use a more generic type
-				field.Type = "mixed"
-			}
-
-			// Check if it's an array
-			if _, isArray := value.(primitive.A); isArray {
-				field.IsArray = true
-			}
-
-			// Handle nested fields for objects
-			if doc, isDoc := value.(bson.M); isDoc {
-				for nestedKey, nestedValue := range doc {
-					nestedField := MongoDBField{
-						Name:       nestedKey,
-						Type:       getMongoDBFieldType(nestedValue),
-						IsRequired: true,
-					}
-					field.NestedFields[nestedKey] = nestedField
-				}
-			}
-
-			fields[key] = field
-		}
-	}
-
-	// Update required flag based on presence in all documents
-	for _, doc := range documents {
-		for key := range fields {
-			if _, exists := doc[key]; !exists {
-				field := fields[key]
-				field.IsRequired = false
-				fields[key] = field
-			}
-		}
-	}
-
-	collection.Fields = fields
-	return collection, nil
-}
-
-// getCollectionIndexes retrieves indexes for a MongoDB collection
-func (d *MongoDBDriver) getCollectionIndexes(ctx context.Context, wrapper *MongoDBWrapper, collName string) ([]MongoDBIndex, error) {
-	// Get indexes
-	cursor, err := wrapper.Client.Database(wrapper.Database).Collection(collName).Indexes().List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list indexes: %v", err)
-	}
-	defer cursor.Close(ctx)
-
-	// Process each index
-	var indexes []MongoDBIndex
-	for cursor.Next(ctx) {
-		var idx bson.M
-		if err := cursor.Decode(&idx); err != nil {
-			log.Printf("MongoDBDriver -> getCollectionIndexes -> Error decoding index: %v", err)
-			continue
-		}
-
-		// Extract index information
-		name, _ := idx["name"].(string)
-		keys, _ := idx["key"].(bson.D)
-		unique, _ := idx["unique"].(bool)
-		sparse, _ := idx["sparse"].(bool)
-
-		// Create index
-		index := MongoDBIndex{
-			Name:     name,
-			Keys:     keys,
-			IsUnique: unique,
-			IsSparse: sparse,
-		}
-
-		indexes = append(indexes, index)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating indexes: %v", err)
-	}
-
-	return indexes, nil
-}
-
-// GetTableChecksum calculates a checksum for a MongoDB collection
-func (d *MongoDBDriver) GetTableChecksum(ctx context.Context, db DBExecutor, collection string) (string, error) {
-	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
-		log.Printf("MongoDBDriver -> GetTableChecksum -> Context cancelled: %v", err)
-		return "", err
-	}
-
-	// Get the MongoDB wrapper
-	executor, ok := db.(*MongoDBExecutor)
-	if !ok {
-		return "", fmt.Errorf("invalid MongoDB executor")
-	}
-
-	wrapper := executor.wrapper
-	if wrapper == nil {
-		return "", fmt.Errorf("invalid MongoDB connection")
-	}
-
-	// Get collection schema
-	coll, err := d.getCollectionDetails(ctx, wrapper, collection)
-	if err != nil {
-		return "", fmt.Errorf("failed to get collection details: %v", err)
-	}
-
-	// Get collection indexes
-	indexes, err := d.getCollectionIndexes(ctx, wrapper, collection)
-	if err != nil {
-		return "", fmt.Errorf("failed to get collection indexes: %v", err)
-	}
-
-	// Create a checksum from collection fields
-	fieldsChecksum := ""
-	for fieldName, field := range coll.Fields {
-		fieldType := field.Type
-		if field.IsArray {
-			fieldType = "array<" + fieldType + ">"
-		}
-		fieldsChecksum += fmt.Sprintf("%s:%s:%v,", fieldName, fieldType, field.IsRequired)
-	}
-
-	// Create a checksum from indexes
-	indexesChecksum := ""
-	for _, idx := range indexes {
-		// Skip _id_ index as it's implicit
-		if idx.Name == "_id_" {
-			continue
-		}
-
-		// Extract key information
-		keyInfo := ""
-		for _, key := range idx.Keys {
-			keyInfo += fmt.Sprintf("%s:%v,", key.Key, key.Value)
-		}
-
-		indexesChecksum += fmt.Sprintf("%s:%v:%v,", keyInfo, idx.IsUnique, idx.IsSparse)
-	}
-
-	// Combine checksums
-	finalChecksum := fmt.Sprintf("%s:%s", fieldsChecksum, indexesChecksum)
-	return utils.MD5Hash(finalChecksum), nil
-}
-
-// FetchExampleRecords fetches example records from a MongoDB collection
-func (d *MongoDBDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, collection string, limit int) ([]map[string]interface{}, error) {
-	// Ensure limit is reasonable
-	if limit <= 0 {
-		limit = 3 // Default to 3 records
-		log.Printf("MongoDBDriver -> FetchExampleRecords -> Using default limit of 3 records for collection %s", collection)
-	} else if limit > 10 {
-		limit = 10 // Cap at 10 records to avoid large data transfers
-		log.Printf("MongoDBDriver -> FetchExampleRecords -> Capping limit to maximum of 10 records for collection %s", collection)
-	} else {
-		log.Printf("MongoDBDriver -> FetchExampleRecords -> Using requested limit of %d records for collection %s", limit, collection)
-	}
-
-	// Get the MongoDB wrapper
-	executor, ok := db.(*MongoDBExecutor)
-	if !ok {
-		return nil, fmt.Errorf("invalid MongoDB executor")
-	}
-
-	wrapper := executor.wrapper
-	if wrapper == nil {
-		return nil, fmt.Errorf("invalid MongoDB connection")
-	}
-
-	// Fetch sample documents
-	opts := options.Find().SetLimit(int64(limit))
-	cursor, err := wrapper.Client.Database(wrapper.Database).Collection(collection).Find(ctx, bson.M{}, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch example records: %v", err)
-	}
-	defer cursor.Close(ctx)
-
-	// Process results
-	var results []map[string]interface{}
-	for cursor.Next(ctx) {
-		var doc bson.M
-		if err := cursor.Decode(&doc); err != nil {
-			return nil, fmt.Errorf("failed to decode document: %v", err)
-		}
-
-		// Convert BSON to map
-		result := make(map[string]interface{})
-		for k, v := range doc {
-			// Convert MongoDB-specific types to JSON-friendly formats
-			result[k] = convertMongoDBValue(v)
-		}
-
-		results = append(results, result)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating documents: %v", err)
-	}
-
-	// Log the exact number of records fetched
-	log.Printf("MongoDBDriver -> FetchExampleRecords -> Retrieved exactly %d example records from collection %s", len(results), collection)
-
-	// If no records found, return empty slice
-	if len(results) == 0 {
-		return []map[string]interface{}{}, nil
-	}
-
-	return results, nil
-}
-
-// Connect establishes a connection to a MongoDB database
-func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
-	var tempFiles []string
-	log.Printf("MongoDBDriver -> Connect -> Connecting to MongoDB at %s:%v", config.Host, config.Port)
-
-	var uri string
-	port := "27017" // Default port for MongoDB
-
-	// Check if we're using SRV records (mongodb+srv://)
-	// Only check for .mongodb.net in non-encrypted hosts
-	isSRV := false
-	if !strings.Contains(config.Host, "+") && !strings.Contains(config.Host, "/") && !strings.Contains(config.Host, "=") {
-		isSRV = strings.Contains(config.Host, ".mongodb.net")
-	}
-
-	protocol := "mongodb"
-	if isSRV {
-		protocol = "mongodb+srv"
-	}
-
-	// Validate port value if not using SRV
-	if !isSRV && config.Port != nil {
-		// Log the port value for debugging
-		log.Printf("MongoDBDriver -> Connect -> Port value before validation: %v", *config.Port)
-
-		// Check if port is empty
-		if *config.Port == "" {
-			log.Printf("MongoDBDriver -> Connect -> Port is empty, using default port 27017")
-		} else {
-			port = *config.Port
-
-			// Skip port validation for encrypted ports (containing base64 characters)
-			if strings.Contains(port, "+") || strings.Contains(port, "/") || strings.Contains(port, "=") {
-				log.Printf("MongoDBDriver -> Connect -> Port appears to be encrypted, skipping validation")
-			} else {
-				// Verify port is numeric for non-encrypted ports
-				if _, err := strconv.Atoi(port); err != nil {
-					log.Printf("MongoDBDriver -> Connect -> Invalid port value: %v, error: %v", port, err)
-					return nil, fmt.Errorf("invalid port value: %v, must be a number", port)
-				}
-			}
-		}
-	}
-
-	// Base connection parameters with authentication
-	if config.Username != nil && *config.Username != "" {
-		// URL encode username and password to handle special characters
-		encodedUsername := url.QueryEscape(*config.Username)
-		var encodedPassword string
-		if config.Password != nil {
-			encodedPassword = url.QueryEscape(*config.Password)
-		}
-
-		if isSRV {
-			// For SRV records, don't include port
-			uri = fmt.Sprintf("%s://%s:%s@%s/%s",
-				protocol, encodedUsername, encodedPassword, config.Host, config.Database)
-		} else {
-			// Include port for standard connections
-			uri = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-				protocol, encodedUsername, encodedPassword, config.Host, port, config.Database)
-		}
-	} else {
-		// Without authentication
-		if isSRV {
-			// For SRV records, don't include port
-			uri = fmt.Sprintf("%s://%s/%s", protocol, config.Host, config.Database)
-		} else {
-			// Include port for standard connections
-			uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, port, config.Database)
-		}
-	}
-
-	// Log the final URI (with sensitive parts masked)
-	maskedUri := uri
-	if config.Password != nil && *config.Password != "" {
-		maskedUri = strings.Replace(maskedUri, *config.Password, "********", -1)
-	}
-	log.Printf("MongoDBDriver -> Connect -> Connection URI: %s", maskedUri)
-
-	// Add connection options
-	if isSRV {
-		uri += "?retryWrites=true&w=majority"
-	} else {
-		// For non-SRV connections, add a shorter server selection timeout
-		uri += "?serverSelectionTimeoutMS=5000"
-	}
-
-	// Configure client options
-	clientOptions := options.Client().ApplyURI(uri)
-
-	// Set a shorter connection timeout for encrypted connections
-	if strings.Contains(config.Host, "+") || strings.Contains(config.Host, "/") || strings.Contains(config.Host, "=") {
-		clientOptions.SetConnectTimeout(5 * time.Second)
-		clientOptions.SetServerSelectionTimeout(5 * time.Second)
-		log.Printf("MongoDBDriver -> Connect -> Using shorter timeouts for encrypted connection")
-	}
-
-	// Configure SSL/TLS
-	if config.UseSSL {
-		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
-		if err != nil {
-			return nil, err
-		}
-
-		// Track temporary files for cleanup
-		tempFiles = certTempFiles
-
-		// Configure TLS
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: false, // Always verify certificates
-		}
-
-		// Add client certificates if provided
-		if certPath != "" && keyPath != "" {
-			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-			if err != nil {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to load client certificates: %v", err)
-			}
-			tlsConfig.Certificates = []tls.Certificate{cert}
-		}
-
-		// Add root CA if provided
-		if rootCertPath != "" {
-			rootCA, err := os.ReadFile(rootCertPath)
-			if err != nil {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to read root CA: %v", err)
-			}
-
-			rootCertPool := x509.NewCertPool()
-			if ok := rootCertPool.AppendCertsFromPEM(rootCA); !ok {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to parse root CA certificate")
-			}
-
-			tlsConfig.RootCAs = rootCertPool
-		}
-
-		clientOptions.SetTLSConfig(tlsConfig)
-	} else {
-		// Disable SSL verification for encrypted connections
-		clientOptions.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
-	}
-
-	// Configure connection pool
-	clientOptions.SetMaxPoolSize(25)
-	clientOptions.SetMinPoolSize(5)
-	clientOptions.SetMaxConnIdleTime(time.Hour)
-
-	// Connect to MongoDB with timeout
+	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := mongo.Connect(ctx, clientOptions)
-	if err != nil {
-		// Clean up temporary files
-		for _, file := range tempFiles {
-			os.Remove(file)
+	// Commit the transaction with retry logic
+	var err error
+	for attempts := 0; attempts < 3; attempts++ {
+		err = tx.Session.CommitTransaction(ctx)
+		if err == nil {
+			break
 		}
-		log.Printf("MongoDBDriver -> Connect -> Error connecting to MongoDB: %v", err)
-		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
+		log.Printf("MongoDBTransaction -> Commit -> Error committing transaction (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(500 * time.Millisecond) // Wait before retrying
 	}
 
-	// Ping the database to verify connection
-	err = client.Ping(ctx, readpref.Primary())
 	if err != nil {
-		// Clean up temporary files
-		for _, file := range tempFiles {
-			os.Remove(file)
-		}
-		client.Disconnect(ctx)
-		log.Printf("MongoDBDriver -> Connect -> Error pinging MongoDB: %v", err)
-		return nil, fmt.Errorf("failed to ping MongoDB: %v", err)
+		log.Printf("MongoDBTransaction -> Commit -> Failed to commit transaction after retries: %v", err)
+		// Still try to end the session even if commit fails
+		tx.Session.EndSession(ctx)
+		return fmt.Errorf("failed to commit MongoDB transaction: %v", err)
 	}
 
-	// Create a wrapper for the MongoDB client
-	mongoWrapper := &MongoDBWrapper{
-		Client:   client,
-		Database: config.Database,
-	}
+	// End the session
+	tx.Session.EndSession(ctx)
 
-	// Create a connection object
-	conn := &Connection{
-		DB:         nil, // MongoDB doesn't use GORM
-		LastUsed:   time.Now(),
-		Status:     StatusConnected,
-		Config:     config,
-		MongoDBObj: mongoWrapper, // Store MongoDB client in a custom field
-		TempFiles:  tempFiles,    // Store temporary files for cleanup
-		// Other fields will be set by the manager
-	}
-
-	log.Printf("MongoDBDriver -> Connect -> Successfully connected to MongoDB at %s:%v", config.Host, config.Port)
-	return conn, nil
+	log.Printf("MongoDBTransaction -> Commit -> MongoDB transaction committed successfully")
+	return nil
 }
 
-// Disconnect closes the MongoDB connection
-func (d *MongoDBDriver) Disconnect(conn *Connection) error {
-	log.Printf("MongoDBDriver -> Disconnect -> Disconnecting from MongoDB")
+// Rollback rolls back a MongoDB transaction
+func (tx *MongoDBTransaction) Rollback() error {
+	log.Printf("MongoDBTransaction -> Rollback -> Rolling back MongoDB transaction")
 
-	// Get the MongoDB wrapper from the connection
-	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
-	if !ok {
-		return fmt.Errorf("invalid MongoDB connection")
+	// Check if the session is nil (which can happen if there was an error creating the transaction)
+	if tx.Session == nil {
+		log.Printf("MongoDBTransaction -> Rollback -> No session to roll back (session is nil)")
+		if tx.Error != nil {
+			log.Printf("MongoDBTransaction -> Rollback -> Original error: %v", tx.Error)
+			return tx.Error
+		}
+		return nil
 	}
 
-	// Disconnect from MongoDB
+	// Check if the wrapper or client is nil
+	if tx.Wrapper == nil || tx.Wrapper.Client == nil {
+		log.Printf("MongoDBTransaction -> Rollback -> Wrapper or client is nil")
+		return fmt.Errorf("cannot rollback: wrapper or client is nil")
+	}
+
+	// Check if there was an error starting the transaction
+	if tx.Error != nil {
+		// If there was an error starting the transaction, just end the session
+		log.Printf("MongoDBTransaction -> Rollback -> Rolling back with error: %v", tx.Error)
+
+		// Use a timeout context for ending the session
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		tx.Session.EndSession(ctx)
+		return tx.Error
+	}
+
+	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err := wrapper.Client.Disconnect(ctx)
+	// Abort the transaction with retry logic
+	var err error
+	for attempts := 0; attempts < 3; attempts++ {
+		err = tx.Session.AbortTransaction(ctx)
+		if err == nil {
+			break
+		}
+		log.Printf("MongoDBTransaction -> Rollback -> Error aborting transaction (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(500 * time.Millisecond) // Wait before retrying
+	}
+
 	if err != nil {
-		log.Printf("MongoDBDriver -> Disconnect -> Error disconnecting from MongoDB: %v", err)
-		return fmt.Errorf("failed to disconnect from MongoDB: %v", err)
+		log.Printf("MongoDBTransaction -> Rollback -> Failed to abort transaction after retries: %v", err)
+		// Still try to end the session even if abort fails
+		tx.Session.EndSession(ctx)
+		return fmt.Errorf("failed to abort MongoDB transaction: %v", err)
 	}
 
-	// Clean up temporary certificate files
-	for _, file := range conn.TempFiles {
-		os.Remove(file)
-	}
+	// End the session
+	tx.Session.EndSession(ctx)
 
-	log.Printf("MongoDBDriver -> Disconnect -> Successfully disconnected from MongoDB")
+	log.Printf("MongoDBTransaction -> Rollback -> MongoDB transaction rolled back successfully")
 	return nil
 }
 
-// Ping checks if the MongoDB connection is alive
-func (d *MongoDBDriver) Ping(conn *Connection) error {
-	log.Printf("MongoDBDriver -> Ping -> Pinging MongoDB")
-
-	// Get the MongoDB wrapper from the connection
-	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
-	if !ok {
-		return fmt.Errorf("invalid MongoDB connection")
-	}
-
-	// Ping MongoDB
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := wrapper.Client.Ping(ctx, readpref.Primary())
-	if err != nil {
-		log.Printf("MongoDBDriver -> Ping -> Error pinging MongoDB: %v", err)
-		return fmt.Errorf("failed to ping MongoDB: %v", err)
-	}
-
-	log.Printf("MongoDBDriver -> Ping -> Successfully pinged MongoDB")
-	return nil
-}
-
-// IsAlive checks if the MongoDB connection is alive
-func (d *MongoDBDriver) IsAlive(conn *Connection) bool {
-	err := d.Ping(conn)
-	return err == nil
-}
-
-// ExecuteQuery executes a MongoDB query
-func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
-	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
-
+// ExecuteQuery executes a MongoDB query within a transaction
+func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> Executing MongoDB query in transaction: %s", query)
 	startTime := time.Now()
 
-	// Get the MongoDB wrapper from the connection
-	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
-	if !ok {
+	// Check if the session is nil (which can happen if there was an error creating the transaction)
+	if tx.Session == nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Cannot execute query: session is nil")
+		errorMsg := "Cannot execute query: transaction session is nil"
+		if tx.Error != nil {
+			errorMsg = fmt.Sprintf("Cannot execute query: %v", tx.Error)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Original error: %v", tx.Error)
+		}
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Failed to get MongoDB wrapper from connection",
-				Code:    "INTERNAL_ERROR",
+				Message: errorMsg,
+				Code:    "TRANSACTION_ERROR",
 			},
 		}
 	}
 
-	// Handle special query format for MongoDB operations like db.getCollectionNames()
-	if strings.HasPrefix(query, "db.") && !strings.Contains(query[3:], ".") {
-		// Operations that are not tied to a specific collection
-		operationWithParams := strings.TrimPrefix(query, "db.")
-		openParenIndex := strings.Index(operationWithParams, "(")
-		closeParenIndex := strings.LastIndex(operationWithParams, ")")
+	// Check if there was an error starting the transaction
+	if tx.Error != nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Transaction error: %v", tx.Error)
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Transaction error: %v", tx.Error),
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
 
-		if openParenIndex == -1 || closeParenIndex == -1 || closeParenIndex <= openParenIndex {
+	// Check if the wrapper is nil
+	if tx.Wrapper == nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Wrapper is nil")
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "Transaction wrapper is nil",
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
+
+	// Verify the client is not nil
+	if tx.Wrapper.Client == nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB client is nil")
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "MongoDB client is nil",
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
+
+	// Verify the session is still valid by checking if the client is still connected
+	// This is a lightweight check that doesn't require a full ping
+	if tx.Wrapper.Client.NumberSessionsInProgress() == 0 {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> No active sessions, session may have expired")
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: "Transaction session may have expired",
+				Code:    "TRANSACTION_ERROR",
+			},
+		}
+	}
+
+	// Special case for createCollection which has a different format
+	// Example: db.createCollection("collectionName", {...})
+	if strings.Contains(query, "createCollection") {
+		createCollectionRegex := regexp.MustCompile(`(?s)db\.createCollection\(["']([^"']+)["'](?:\s*,\s*)(.*)\)`)
+		matches := createCollectionRegex.FindStringSubmatch(query)
+		if len(matches) >= 3 {
+			collectionName := matches[1]
+			optionsStr := strings.TrimSpace(matches[2])
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Matched createCollection with collection: %s and options length: %d", collectionName, len(optionsStr))
+
+			// Process the options
+			var optionsMap bson.M
+			if optionsStr != "" {
+				// Process the options to handle MongoDB syntax
+				jsonStr, err := processMongoDBQueryParams(optionsStr)
+				if err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to process collection options: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+
+				if err := json.Unmarshal([]byte(jsonStr), &optionsMap); err != nil {
+					return &QueryExecutionResult{
+						Error: &dtos.QueryError{
+							Message: fmt.Sprintf("Failed to parse collection options: %v", err),
+							Code:    "INVALID_PARAMETERS",
+						},
+					}
+				}
+			}
+
+			// Check if collection already exists
+			collections, err := tx.Wrapper.Client.Database(tx.Wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			// If collection already exists, return an error
+			if len(collections) > 0 {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
+						Code:    "COLLECTION_EXISTS",
+					},
+				}
+			}
+
+			// Create collection options
+			var createOptions *options.CreateCollectionOptions
+			if optionsMap != nil {
+				// Convert validator to proper format if it exists
+				if validator, ok := optionsMap["validator"]; ok {
+					createOptions = &options.CreateCollectionOptions{
+						Validator: validator,
+					}
+				}
+			}
+
+			// Execute the createCollection operation
+			err = tx.Wrapper.Client.Database(tx.Wrapper.Database).CreateCollection(ctx, collectionName, createOptions)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to create collection: %v", err),
+						Code:    "EXECUTION_ERROR",
+					},
+				}
+			}
+
+			result := map[string]interface{}{
+				"ok":      1,
+				"message": fmt.Sprintf("Collection '%s' created successfully", collectionName),
+			}
+
+			// Convert the result to JSON
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
+						Code:    "JSON_ERROR",
+					},
+				}
+			}
+
+			executionTime := int(time.Since(startTime).Milliseconds())
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+
 			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: "Invalid MongoDB query format. Expected: db.operation(...)",
-					Code:    "INVALID_QUERY",
-				},
+				Result:        result,
+				ResultJSON:    string(resultJSON),
+				ExecutionTime: executionTime,
 			}
 		}
+	}
 
-		operation := operationWithParams[:openParenIndex]
-		paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
+	// Handle database-level operations
+	dbOperationRegex := regexp.MustCompile(`db\.(\w+)\(\s*(.*)\s*\)`)
+	if dbOperationMatches := dbOperationRegex.FindStringSubmatch(query); len(dbOperationMatches) >= 2 {
+		operation := dbOperationMatches[1]
+		paramsStr := ""
+		if len(dbOperationMatches) >= 3 {
+			paramsStr = dbOperationMatches[2]
+		}
 
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Matched database operation: %s with params: %s", operation, paramsStr)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Matched database operation: %s with params: %s", operation, paramsStr)
 
 		switch operation {
 		case "getCollectionNames":
 			// List all collections in the database
-			collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{})
+			collections, err := tx.Wrapper.Client.Database(tx.Wrapper.Database).ListCollectionNames(ctx, bson.M{})
 			if err != nil {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
@@ -725,13 +358,15 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			}
 
 			executionTime := int(time.Since(startTime).Milliseconds())
-			log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
 
 			return &QueryExecutionResult{
 				Result:        result,
 				ResultJSON:    string(resultJSON),
 				ExecutionTime: executionTime,
 			}
+
+		// Add more database-level operations here as needed
 		default:
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -748,7 +383,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	if len(parts) < 3 || !strings.HasPrefix(parts[0], "db") {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
-				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...}) or db.operation(...)",
+				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
 				Code:    "INVALID_QUERY",
 			},
 		}
@@ -760,10 +395,10 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	// Special case handling for empty find() with modifiers
 	// Like db.collection.find().sort()
 	if strings.HasPrefix(operationWithParams, "find()") && len(operationWithParams) > 6 {
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Detected empty find() with modifiers: %s", operationWithParams)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected empty find() with modifiers: %s", operationWithParams)
 		// Replace find() with find({}) to ensure proper parsing
 		operationWithParams = "find({})" + operationWithParams[6:]
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Reformatted query part: %s", operationWithParams)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Reformatted query part: %s", operationWithParams)
 	}
 
 	// Split the operation and parameters
@@ -784,12 +419,12 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	operation := operationWithParams[:openParenIndex]
 	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
 
-	log.Printf("MongoDBDriver -> ExecuteQuery -> Extracted operation: %s, params: %s", operation, paramsStr)
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted operation: %s, params: %s", operation, paramsStr)
 
 	// Special case for find() with no parameters but with modifiers like .sort(), .limit()
 	// For example: db.collection.find().sort({field: -1})
 	if operation == "find" && strings.HasPrefix(paramsStr, ")") && strings.Contains(paramsStr, ".") {
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Detected find() with no parameters but with modifiers")
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected find() with no parameters but with modifiers")
 
 		// Extract modifiers from the parameters string
 		modifiersStr := paramsStr
@@ -797,13 +432,13 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// Set parameters to empty object
 		paramsStr = "{}"
 
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Using empty object for parameters and parsing modifiers: %s", modifiersStr)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Using empty object for parameters and parsing modifiers: %s", modifiersStr)
 	}
 
 	// Handle empty parameters case - if the parameters are empty, use an empty JSON object
 	if strings.TrimSpace(paramsStr) == "" {
 		paramsStr = "{}"
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Empty parameters detected, using empty object {}")
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Empty parameters detected, using empty object {}")
 	}
 
 	// Handle query modifiers like .limit(), .skip(), etc.
@@ -812,14 +447,14 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		// There might be modifiers after the closing parenthesis
 		modifiersStr := operationWithParams[closeParenIndex+1:]
 
-		log.Printf("MongoDBDriver -> ExecuteQuery -> Modifiers string: %s", modifiersStr)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Modifiers string: %s", modifiersStr)
 
 		// Extract limit modifier
 		limitRegex := regexp.MustCompile(`\.limit\((\d+)\)`)
 		if limitMatches := limitRegex.FindStringSubmatch(modifiersStr); len(limitMatches) > 1 {
 			if limit, err := strconv.Atoi(limitMatches[1]); err == nil {
 				modifiers["limit"] = limit
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Found limit modifier: %d", limit)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Found limit modifier: %d", limit)
 			}
 		}
 
@@ -828,7 +463,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		if skipMatches := skipRegex.FindStringSubmatch(modifiersStr); len(skipMatches) > 1 {
 			if skip, err := strconv.Atoi(skipMatches[1]); err == nil {
 				modifiers["skip"] = skip
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Found skip modifier: %d", skip)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Found skip modifier: %d", skip)
 			}
 		}
 
@@ -841,16 +476,16 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			jsonStr, err := processSortExpression(sortExpr)
 			if err == nil {
 				modifiers["sort"] = jsonStr
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Processed sort modifier: %s", jsonStr)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed sort modifier: %s", jsonStr)
 			} else {
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing sort modifier: %v", err)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing sort modifier: %v", err)
 				modifiers["sort"] = sortExpr
 			}
 		}
 	}
 
 	// Get the MongoDB collection
-	collection := wrapper.Client.Database(wrapper.Database).Collection(collectionName)
+	collection := tx.Wrapper.Client.Database(tx.Wrapper.Database).Collection(collectionName)
 
 	// Check if the collection exists (except for dropCollection operation)
 	if operation != "dropCollection" {
@@ -878,7 +513,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	var result interface{}
 	var err error
 
-	log.Printf("MongoDBDriver -> ExecuteQuery -> operation: %s", operation)
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> operation: %s", operation)
 	// Execute the operation based on the type
 	switch operation {
 	case "find":
@@ -898,7 +533,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				filterStr := parts[0] + "}"
 				projectionStr := "{" + parts[1]
 
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Split parameters into filter: %s and projection: %s", filterStr, projectionStr)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Split parameters into filter: %s and projection: %s", filterStr, projectionStr)
 
 				// Parse the filter
 				if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
@@ -965,7 +600,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			// Just a filter
 			if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
 				// Try to handle MongoDB syntax with unquoted keys and ObjectId
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
 
 				// Process the query parameters to handle MongoDB syntax
 				jsonStr, err := processMongoDBQueryParams(paramsStr)
@@ -978,7 +613,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					}
 				}
 
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
 
 				if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
 					return &QueryExecutionResult{
@@ -1001,7 +636,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 				// Log the final filter for debugging
 				filterJSON, _ := json.Marshal(filter)
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 			}
 		}
 
@@ -1139,25 +774,23 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 		defer cursor.Close(ctx)
 
-		// Decode the results
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode find results: %v", err),
-					Code:    "DECODE_ERROR",
-				},
-			}
-		}
+		// Process the results
+		result := processAggregationResultsFromCursor(cursor, ctx)
 
-		result = results
+		// Set the execution time
+		result.ExecutionTime = int(time.Since(startTime).Milliseconds())
+
+		// Log the execution time
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
+
+		return result
 
 	case "findOne":
 		// Parse the parameters as a BSON filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
@@ -1170,7 +803,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
 				return &QueryExecutionResult{
@@ -1193,7 +826,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
 		// Execute the findOne operation
@@ -1220,7 +853,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		var document bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &document); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and special types like Date
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB document: %s", paramsStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB document: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
@@ -1233,7 +866,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted document: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted document: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &document); err != nil {
 				return &QueryExecutionResult{
@@ -1285,7 +918,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		var documents []interface{}
 		if err := json.Unmarshal([]byte(paramsStr), &documents); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB documents: %s", paramsStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB documents: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
@@ -1298,7 +931,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted documents: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted documents: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &documents); err != nil {
 				return &QueryExecutionResult{
@@ -1347,7 +980,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		var filter bson.M
 		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonFilterStr, err := processMongoDBQueryParams(filterStr)
@@ -1360,7 +993,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
 
 			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
 				return &QueryExecutionResult{
@@ -1383,14 +1016,14 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
 		// Process update with MongoDB syntax
 		var update bson.M
 		if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonUpdateStr, err := processMongoDBQueryParams(updateStr)
@@ -1403,7 +1036,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
 
 			if err := json.Unmarshal([]byte(jsonUpdateStr), &update); err != nil {
 				return &QueryExecutionResult{
@@ -1428,7 +1061,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 		// Check if any document was matched
 		if updateResult.MatchedCount == 0 {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> No document matched the filter criteria for updateOne")
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> No document matched the filter criteria for updateOne")
 		}
 
 		result = map[string]interface{}{
@@ -1458,7 +1091,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		var filter bson.M
 		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", filterStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonFilterStr, err := processMongoDBQueryParams(filterStr)
@@ -1471,7 +1104,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
 
 			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
 				return &QueryExecutionResult{
@@ -1494,14 +1127,14 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
 		// Process update with MongoDB syntax
 		var update bson.M
 		if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB update: %s", updateStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonUpdateStr, err := processMongoDBQueryParams(updateStr)
@@ -1514,7 +1147,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
 
 			if err := json.Unmarshal([]byte(jsonUpdateStr), &update); err != nil {
 				return &QueryExecutionResult{
@@ -1548,7 +1181,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB query: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
 			jsonStr, err := processMongoDBQueryParams(paramsStr)
@@ -1561,7 +1194,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted query: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
 				return &QueryExecutionResult{
@@ -1584,7 +1217,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
 		}
 
 		// Execute the deleteOne operation
@@ -1600,7 +1233,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 		// Check if any document was deleted
 		if deleteResult.DeletedCount == 0 {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> No document matched the filter criteria for deleteOne")
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> No document matched the filter criteria for deleteOne")
 		}
 
 		result = map[string]interface{}{
@@ -1612,7 +1245,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		var filter bson.M
 		if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and operators like $or
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
 
 			// Process the query parameters to handle MongoDB syntax
 
@@ -1626,7 +1259,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonStr)
 
 			if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
 				return &QueryExecutionResult{
@@ -1649,7 +1282,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final filter after conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after conversion: %s", string(filterJSON))
 		}
 
 		// Execute the deleteMany operation
@@ -1668,26 +1301,14 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 
 	case "aggregate":
-		// Extract the aggregation pipeline
-		// Handle both db.collection.aggregate([...]) and aggregate([...]) formats
-		// Remove .toArray() if present
-		pipelineRegex := regexp.MustCompile(`(?:\.aggregate\(|\baggregate\()(\[.+\])(?:\.toArray\(\))?(?:\))`)
-		pipelineMatches := pipelineRegex.FindStringSubmatch(query)
-
-		// If we found a match, replace paramsStr with the extracted pipeline
-		if len(pipelineMatches) > 1 {
-			paramsStr = pipelineMatches[1]
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Extracted aggregation pipeline: %s", paramsStr)
-		}
-
-		// Parse the parameters as a pipeline
 		var pipeline []bson.M
+
+		// Try to parse the pipeline directly as a JSON array
 		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
-			// Try to handle MongoDB syntax with unquoted keys and ObjectId
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
+			// If direct parsing fails, handle MongoDB syntax with unquoted keys
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
 			// Process each stage of the pipeline individually
-			// This helps with complex expressions that might not parse correctly as a whole
 			stagesRegex := regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
 			stageMatches := stagesRegex.FindAllStringSubmatch(paramsStr, -1)
 
@@ -1702,9 +1323,9 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				// Get the stage content and wrap it in curly braces
 				stageContent := "{" + match[1] + "}"
 
-				// Check if this is a $project stage to use special handling
+				// Check if this is a $project stage
 				if strings.Contains(stageContent, "$project") {
-					log.Printf("MongoDBDriver -> ExecuteQuery -> Detected $project stage in pipeline: %s", stageContent)
+					log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected $project stage in pipeline: %s", stageContent)
 				}
 
 				// Process the stage content
@@ -1719,7 +1340,6 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				}
 
 				// Replace "new Date(...)" with string placeholder before JSON parsing
-				// First clean up the format to ensure it's valid JSON
 				dateObjPattern := regexp.MustCompile(`new\s+Date\(([^)]*)\)`)
 				processedStage = dateObjPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
 
@@ -1727,16 +1347,15 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
 				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
 
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Processed stage: %s", processedStage)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed stage: %s", processedStage)
 				processedStages = append(processedStages, processedStage)
 			}
 
 			// Combine the processed stages into a valid JSON array
 			jsonStr := "[" + strings.Join(processedStages, ",") + "]"
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
 
 			// Fix any remaining date expressions that might have slipped through
-			// This ensures we don't have "new Date(...)" in the JSON string
 			dateRegex := regexp.MustCompile(`new\s+Date\((?:[^)]*)\)`)
 			jsonStr = dateRegex.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
 
@@ -1749,16 +1368,16 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			fixFieldNamesPattern := regexp.MustCompile(`""([^"]+)""`)
 			jsonStr = fixFieldNamesPattern.ReplaceAllString(jsonStr, `"$1"`)
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
 
-			// Make sure to catch any other variations
+			// Make sure to catch any other variations of date expressions
 			for strings.Contains(jsonStr, "new Date") {
 				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
 			}
 
 			// Try to parse the cleaned-up JSON
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Error parsing pipeline JSON: %v", err)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing pipeline JSON: %v", err)
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
 						Message: fmt.Sprintf("Failed to parse aggregation pipeline after conversion: %v", err),
@@ -1766,7 +1385,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					},
 				}
 			}
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
 		}
 
 		// Process dot notation fields in the pipeline for improved support of
@@ -1775,13 +1394,13 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 		// Also use specialized processor for dot notation in aggregations
 		if err := processDotNotationInAggregation(pipeline); err != nil {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
 
 		// Execute the aggregation
 		cursor, err := collection.Aggregate(ctx, pipeline)
 		if err != nil {
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Error executing aggregation: %v", err)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error executing aggregation: %v", err)
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
 					Message: fmt.Sprintf("Failed to execute aggregation: %v", err),
@@ -1798,7 +1417,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		result.ExecutionTime = int(time.Since(startTime).Milliseconds())
 
 		// Log the execution time
-		log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
 
 		return result
 
@@ -1814,10 +1433,9 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			// Parse the provided filter
 			if err := json.Unmarshal([]byte(paramsStr), &filter); err != nil {
 				// Try to handle MongoDB syntax with unquoted keys
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB filter: %s", paramsStr)
 
 				// Process the query parameters to handle MongoDB syntax
-
 				jsonStr, err := processMongoDBQueryParams(paramsStr)
 				if err != nil {
 					return &QueryExecutionResult{
@@ -1828,7 +1446,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					}
 				}
 
-				log.Printf("MongoDBDriver -> ExecuteQuery -> Converted filter: %s", jsonStr)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonStr)
 
 				if err := json.Unmarshal([]byte(jsonStr), &filter); err != nil {
 					return &QueryExecutionResult{
@@ -1913,7 +1531,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 	case "drop":
 		// Check if collection exists before dropping
-		collections, err := wrapper.Client.Database(wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
+		collections, err := tx.Wrapper.Client.Database(tx.Wrapper.Database).ListCollectionNames(ctx, bson.M{"name": collectionName})
 		if err != nil {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
@@ -1958,29 +1576,35 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		}
 	}
 
-	// Convert the result to JSON
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return &QueryExecutionResult{
-			Error: &dtos.QueryError{
-				Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
-				Code:    "JSON_ERROR",
-			},
-		}
-	}
+	// After creating the result map
+	executionTime := int(time.Since(startTime).Milliseconds())
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
 
+	// Create a proper map[string]interface{} for the Result field
 	var resultMap map[string]interface{}
 	if tempResultMap, ok := result.(map[string]interface{}); ok {
-		// Create a result map
+		// Result is already a map, use it directly
 		resultMap = tempResultMap
 	} else {
+		// Wrap the result in a map with "results" key
 		resultMap = map[string]interface{}{
 			"results": result,
 		}
 	}
 
-	executionTime := int(time.Since(startTime).Milliseconds())
-	log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+	// Marshal the result to JSON format for the ResultJSON field
+	resultJSON, err := json.Marshal(resultMap)
+	if err != nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Error marshalling results to JSON: %v", err)
+		return &QueryExecutionResult{
+			Result: resultMap,
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Failed to marshal results to JSON: %v", err),
+				Code:    "MARSHAL_ERROR",
+			},
+			ExecutionTime: executionTime,
+		}
+	}
 
 	return &QueryExecutionResult{
 		Result:        resultMap,
@@ -1989,98 +1613,60 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	}
 }
 
-// BeginTx begins a MongoDB transaction
-func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
-	log.Printf("MongoDBDriver -> BeginTx -> Beginning MongoDB transaction")
+// ExecuteCommand executes a MongoDB command and returns the result
+func (t *MongoDBTransaction) ExecuteCommand(ctx context.Context, dbName string, command interface{}, readPreference *readpref.ReadPref) (*QueryExecutionResult, error) {
+	startTime := time.Now()
+	log.Printf("Executing MongoDB command on database %s: %+v", dbName, command)
 
-	// Debug logging: Is MongoDBObj set in the connection?
-	if conn.MongoDBObj == nil {
-		log.Printf("MongoDBDriver -> BeginTx -> ERROR: MongoDBObj is nil in connection struct")
-		return &MongoDBTransaction{
-			Error: fmt.Errorf("MongoDBObj is not connected properly, try disconnecting and reconnecting"),
-		}
+	// Get the database
+	db := t.Wrapper.Client.Database(dbName)
+	if db == nil {
+		return nil, fmt.Errorf("database %s not found", dbName)
 	}
 
-	// Get the MongoDB wrapper
-	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
-	if !ok {
-		log.Printf("MongoDBDriver -> BeginTx -> Invalid MongoDB connection, type: %T", conn.MongoDBObj)
-		return &MongoDBTransaction{
-			Error: fmt.Errorf("invalid MongoDB connection"),
-			// Session is nil here, but that's expected since we have an error
-		}
+	// Set read preference if provided
+	opts := options.RunCmd()
+	if readPreference != nil {
+		opts.SetReadPreference(readPreference)
 	}
 
-	// Ensure the client is not nil
-	if wrapper.Client == nil {
-		log.Printf("MongoDBDriver -> BeginTx -> MongoDB client is nil")
-		return &MongoDBTransaction{
-			Error:   fmt.Errorf("MongoDB client is nil"),
-			Wrapper: wrapper,
-			// Session is nil here, but that's expected since we have an error
-		}
-	}
-
-	// Verify the connection is alive before starting a transaction
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if err := wrapper.Client.Ping(pingCtx, readpref.Primary()); err != nil {
-		log.Printf("MongoDBDriver -> BeginTx -> MongoDB connection is not alive: %v", err)
-		return &MongoDBTransaction{
-			Error:   fmt.Errorf("MongoDB connection is not alive: %v", err),
-			Wrapper: wrapper,
-		}
-	}
-
-	// Start a new session with retry logic
-	var session mongo.Session
-	var err error
-
-	// Try up to 3 times to start a session
-	for attempts := 0; attempts < 3; attempts++ {
-		session, err = wrapper.Client.StartSession()
-		if err == nil {
-			break
-		}
-		log.Printf("MongoDBDriver -> BeginTx -> Error starting MongoDB session (attempt %d/3): %v", attempts+1, err)
-		time.Sleep(500 * time.Millisecond) // Wait before retrying
-	}
+	// Run the command
+	var result bson.M
+	err := db.RunCommand(ctx, command, opts).Decode(&result)
+	executionTime := time.Since(startTime)
 
 	if err != nil {
-		log.Printf("MongoDBDriver -> BeginTx -> Failed to start MongoDB session after retries: %v", err)
-		return &MongoDBTransaction{
-			Error:   fmt.Errorf("failed to start MongoDB session after retries: %v", err),
-			Wrapper: wrapper,
-		}
+		log.Printf("Error executing MongoDB command: %v", err)
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Error executing command: %v", err),
+				Code:    "COMMAND_EXECUTION_ERROR",
+			},
+			ExecutionTime: int(executionTime.Milliseconds()),
+			ResultJSON:    "{\"results\":[]}",
+		}, err
 	}
 
-	// Start a transaction with retry logic
-	for attempts := 0; attempts < 3; attempts++ {
-		err = session.StartTransaction()
-		if err == nil {
-			break
-		}
-		log.Printf("MongoDBDriver -> BeginTx -> Error starting MongoDB transaction (attempt %d/3): %v", attempts+1, err)
-		time.Sleep(500 * time.Millisecond) // Wait before retrying
+	log.Printf("MongoDB command execution completed in %v", executionTime)
+
+	// Create the result map
+	executionResult := &QueryExecutionResult{
+		Result:        result,
+		ExecutionTime: int(executionTime.Milliseconds()),
 	}
 
+	// Format the result as JSON
+	resultJSON, err := FormatQueryResult(result)
 	if err != nil {
-		log.Printf("MongoDBDriver -> BeginTx -> Failed to start MongoDB transaction after retries: %v", err)
-		session.EndSession(ctx)
-		return &MongoDBTransaction{
-			Error:   fmt.Errorf("failed to start MongoDB transaction after retries: %v", err),
-			Wrapper: wrapper,
+		log.Printf("Error formatting command results: %v", err)
+		executionResult.Error = &dtos.QueryError{
+			Message: fmt.Sprintf("Error formatting command results: %v", err),
+			Code:    "COMMAND_RESULT_FORMAT_ERROR",
 		}
+		executionResult.ResultJSON = "{\"results\":[]}"
+		return executionResult, err
 	}
 
-	// Create a new transaction object
-	tx := &MongoDBTransaction{
-		Session: session,
-		Wrapper: wrapper,
-		Error:   nil,
-	}
-
-	log.Printf("MongoDBDriver -> BeginTx -> MongoDB transaction started successfully")
-	return tx
+	executionResult.ResultJSON = resultJSON
+	return executionResult, nil
 }

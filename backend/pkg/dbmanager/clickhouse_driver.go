@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/utils"
 	"os"
 	"strings"
 	"sync"
@@ -26,52 +27,6 @@ func NewClickHouseDriver() DatabaseDriver {
 	return &ClickHouseDriver{}
 }
 
-// ClickHouse schema structures
-type ClickHouseSchema struct {
-	Tables       map[string]ClickHouseTable
-	Views        map[string]ClickHouseView
-	Dictionaries map[string]ClickHouseDictionary
-}
-
-type ClickHouseTable struct {
-	Name         string
-	Columns      map[string]ClickHouseColumn
-	Engine       string
-	PartitionKey string
-	OrderBy      string
-	PrimaryKey   []string
-	RowCount     int64
-}
-
-type ClickHouseColumn struct {
-	Name         string
-	Type         string
-	IsNullable   bool
-	DefaultValue string
-	Comment      string
-}
-
-type ClickHouseView struct {
-	Name       string
-	Definition string
-}
-
-type ClickHouseDictionary struct {
-	Name       string
-	Definition string
-}
-
-// Convert ClickHouseColumn to generic ColumnInfo
-func (cc ClickHouseColumn) toColumnInfo() ColumnInfo {
-	return ColumnInfo{
-		Name:         cc.Name,
-		Type:         cc.Type,
-		IsNullable:   cc.IsNullable,
-		DefaultValue: cc.DefaultValue,
-		Comment:      cc.Comment,
-	}
-}
-
 // Connect establishes a connection to a ClickHouse database
 func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	var dsn string
@@ -84,7 +39,7 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 	var tlsConfig *tls.Config
 	if config.UseSSL {
 		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 		if err != nil {
 			return nil, err
 		}
@@ -419,44 +374,6 @@ func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, q
 	return result
 }
 
-// splitClickHouseStatements splits a ClickHouse query string into individual statements
-func splitClickHouseStatements(query string) []string {
-	// Split by semicolons, but handle cases where semicolons are within quotes
-	var statements []string
-	var currentStmt strings.Builder
-	inQuote := false
-	quoteChar := rune(0)
-
-	for _, char := range query {
-		switch char {
-		case '\'', '"', '`':
-			if inQuote && char == quoteChar {
-				inQuote = false
-			} else if !inQuote {
-				inQuote = true
-				quoteChar = char
-			}
-			currentStmt.WriteRune(char)
-		case ';':
-			if inQuote {
-				currentStmt.WriteRune(char)
-			} else {
-				statements = append(statements, currentStmt.String())
-				currentStmt.Reset()
-			}
-		default:
-			currentStmt.WriteRune(char)
-		}
-	}
-
-	// Add the last statement if there's anything left
-	if currentStmt.Len() > 0 {
-		statements = append(statements, currentStmt.String())
-	}
-
-	return statements
-}
-
 // BeginTx starts a new transaction
 func (d *ClickHouseDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
 	if conn == nil || conn.DB == nil {
@@ -475,156 +392,6 @@ func (d *ClickHouseDriver) BeginTx(ctx context.Context, conn *Connection) Transa
 		tx:   tx,
 		conn: conn,
 	}
-}
-
-// ClickHouseTransaction implements the Transaction interface for ClickHouse
-type ClickHouseTransaction struct {
-	tx   *gorm.DB
-	conn *Connection
-}
-
-// ExecuteQuery executes a query within a transaction
-func (t *ClickHouseTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
-	if t.tx == nil {
-		return &QueryExecutionResult{
-			Error: &dtos.QueryError{
-				Message: "No active transaction",
-				Code:    "TRANSACTION_ERROR",
-			},
-		}
-	}
-
-	startTime := time.Now()
-	result := &QueryExecutionResult{}
-
-	// Split the query into individual statements
-	statements := splitClickHouseStatements(query)
-
-	// Execute each statement
-	for _, stmt := range statements {
-		if strings.TrimSpace(stmt) == "" {
-			continue
-		}
-
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			result.Error = &dtos.QueryError{
-				Message: "Query execution cancelled",
-				Code:    "EXECUTION_CANCELLED",
-			}
-			return result
-		}
-
-		// Execute the statement based on query type
-		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "SELECT") ||
-			strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "SHOW") ||
-			strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "DESCRIBE") {
-			// For SELECT, SHOW, DESCRIBE queries, return the results
-			var rows []map[string]interface{}
-			if err := t.tx.WithContext(ctx).Raw(stmt).Scan(&rows).Error; err != nil {
-				result.Error = &dtos.QueryError{
-					Message: err.Error(),
-					Code:    "EXECUTION_ERROR",
-				}
-				return result
-			}
-
-			// Process the rows to ensure proper type handling
-			processedRows := make([]map[string]interface{}, len(rows))
-			for i, row := range rows {
-				processedRow := make(map[string]interface{})
-				for key, val := range row {
-					// Handle different types properly
-					switch v := val.(type) {
-					case []byte:
-						// Convert []byte to string
-						processedRow[key] = string(v)
-					case string:
-						// Keep strings as is
-						processedRow[key] = v
-					case float64:
-						// Keep numbers as is
-						processedRow[key] = v
-					case int64:
-						// Keep integers as is
-						processedRow[key] = v
-					case bool:
-						// Keep booleans as is
-						processedRow[key] = v
-					case nil:
-						// Keep nulls as is
-						processedRow[key] = nil
-					default:
-						// For other types, convert to string
-						processedRow[key] = fmt.Sprintf("%v", v)
-					}
-				}
-				processedRows[i] = processedRow
-			}
-
-			result.Result = map[string]interface{}{
-				"results": processedRows,
-			}
-		} else {
-			// For other queries (INSERT, CREATE, ALTER, etc.), execute and return affected rows
-			execResult := t.tx.WithContext(ctx).Exec(stmt)
-			if execResult.Error != nil {
-				result.Error = &dtos.QueryError{
-					Message: execResult.Error.Error(),
-					Code:    "EXECUTION_ERROR",
-				}
-				return result
-			}
-
-			rowsAffected := execResult.RowsAffected
-			if rowsAffected > 0 {
-				result.Result = map[string]interface{}{
-					"rowsAffected": rowsAffected,
-					"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
-				}
-			} else {
-				result.Result = map[string]interface{}{
-					"message": "Query performed successfully",
-				}
-			}
-		}
-	}
-
-	// Calculate execution time
-	executionTime := int(time.Since(startTime).Milliseconds())
-	result.ExecutionTime = executionTime
-
-	// Marshal the result to JSON
-	resultJSON, err := json.Marshal(result.Result)
-	if err != nil {
-		return &QueryExecutionResult{
-			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Error: &dtos.QueryError{
-				Code:    "JSON_MARSHAL_FAILED",
-				Message: err.Error(),
-				Details: "Failed to marshal query results",
-			},
-		}
-	}
-	result.ResultJSON = string(resultJSON)
-
-	return result
-}
-
-// Commit commits the transaction
-func (t *ClickHouseTransaction) Commit() error {
-	if t.tx == nil {
-		return fmt.Errorf("no active transaction to commit")
-	}
-	return t.tx.Commit().Error
-}
-
-// Rollback rolls back the transaction
-func (t *ClickHouseTransaction) Rollback() error {
-	if t.tx == nil {
-		return fmt.Errorf("no active transaction to rollback")
-	}
-	return t.tx.Rollback().Error
 }
 
 // GetSchema retrieves the database schema

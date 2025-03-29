@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, Download, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -886,7 +886,7 @@ export default function MessageTile({
         const resultToShow = shouldShowExampleResult ? query.example_result : query.execution_result;
         const isCurrentlyStreaming = !isMessageStreaming && streamingQueryIndex === index;
 
-        const shouldShowRollback = query.can_rollback &&
+        const shouldShowRollback = query.can_rollback && ((query.rollback_query != null && query.rollback_query != "") || (query.rollback_dependent_query != null && query.rollback_dependent_query != "")) &&
             query.is_executed &&
             !query.is_rolled_back &&
             !query.error;

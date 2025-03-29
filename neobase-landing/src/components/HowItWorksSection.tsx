@@ -71,7 +71,7 @@ const HowItWorksSection: React.FC = () => {
                   rel="noopener noreferrer" 
                   className="neo-button inline-flex items-center justify-center gap-2 py-2 px-6 md:py-3 md:px-8 text-base md:text-lg"
                 >
-                  <span className="flex items-center gap-2 md:gap-4"><Server className="w-4 h-4 md:w-5 md:h-5" /> Setup Yours</span>
+                  <span className="flex items-center gap-2 md:gap-4"><Server className="w-4 h-4 md:w-5 md:h-5" /> Start Setup Now</span>
                 </a>
               </div>
             </div>

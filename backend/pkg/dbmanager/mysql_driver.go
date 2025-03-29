@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/utils"
 	"os"
 	"strings"
 	"sync"
@@ -26,71 +27,6 @@ type MySQLDriver struct{}
 // NewMySQLDriver creates a new MySQL driver
 func NewMySQLDriver() DatabaseDriver {
 	return &MySQLDriver{}
-}
-
-// MySQL schema structures
-type MySQLSchema struct {
-	Tables      map[string]MySQLTable
-	Indexes     map[string][]MySQLIndex
-	Views       map[string]MySQLView
-	Constraints map[string][]MySQLConstraint
-}
-
-type MySQLTable struct {
-	Name        string
-	Columns     map[string]MySQLColumn
-	Indexes     map[string]MySQLIndex
-	PrimaryKey  []string
-	ForeignKeys map[string]MySQLForeignKey
-	RowCount    int64
-}
-
-type MySQLColumn struct {
-	Name         string
-	Type         string
-	IsNullable   bool
-	DefaultValue string
-	Comment      string
-}
-
-type MySQLIndex struct {
-	Name      string
-	Columns   []string
-	IsUnique  bool
-	TableName string
-}
-
-type MySQLView struct {
-	Name       string
-	Definition string
-}
-
-type MySQLForeignKey struct {
-	Name      string
-	Column    string
-	RefTable  string
-	RefColumn string
-	OnDelete  string
-	OnUpdate  string
-}
-
-type MySQLConstraint struct {
-	Name       string
-	Type       string // PRIMARY KEY, UNIQUE, CHECK, etc.
-	TableName  string
-	Definition string
-	Columns    []string
-}
-
-// Convert MySQLColumn to generic ColumnInfo
-func (mc MySQLColumn) toColumnInfo() ColumnInfo {
-	return ColumnInfo{
-		Name:         mc.Name,
-		Type:         mc.Type,
-		IsNullable:   mc.IsNullable,
-		DefaultValue: mc.DefaultValue,
-		Comment:      mc.Comment,
-	}
 }
 
 // Connect establishes a connection to a MySQL database
@@ -120,7 +56,7 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		tlsConfigName := fmt.Sprintf("custom-%d", time.Now().UnixNano())
 
 		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := prepareCertificatesFromURLs(config)
+		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 		if err != nil {
 			return nil, err
 		}
@@ -405,44 +341,6 @@ func (d *MySQLDriver) ExecuteQuery(ctx context.Context, conn *Connection, query 
 	return result
 }
 
-// splitMySQLStatements splits a MySQL query string into individual statements
-func splitMySQLStatements(query string) []string {
-	// Split by semicolons, but handle cases where semicolons are within quotes
-	var statements []string
-	var currentStmt strings.Builder
-	inQuote := false
-	quoteChar := rune(0)
-
-	for _, char := range query {
-		switch char {
-		case '\'', '"', '`':
-			if inQuote && char == quoteChar {
-				inQuote = false
-			} else if !inQuote {
-				inQuote = true
-				quoteChar = char
-			}
-			currentStmt.WriteRune(char)
-		case ';':
-			if inQuote {
-				currentStmt.WriteRune(char)
-			} else {
-				statements = append(statements, currentStmt.String())
-				currentStmt.Reset()
-			}
-		default:
-			currentStmt.WriteRune(char)
-		}
-	}
-
-	// Add the last statement if there's anything left
-	if currentStmt.Len() > 0 {
-		statements = append(statements, currentStmt.String())
-	}
-
-	return statements
-}
-
 // BeginTx starts a new transaction
 func (d *MySQLDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
 	if conn == nil || conn.DB == nil {
@@ -461,156 +359,6 @@ func (d *MySQLDriver) BeginTx(ctx context.Context, conn *Connection) Transaction
 		tx:   tx,
 		conn: conn,
 	}
-}
-
-// MySQLTransaction implements the Transaction interface for MySQL
-type MySQLTransaction struct {
-	tx   *gorm.DB
-	conn *Connection
-}
-
-// ExecuteQuery executes a query within a transaction
-func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
-	if t.tx == nil {
-		return &QueryExecutionResult{
-			Error: &dtos.QueryError{
-				Message: "No active transaction",
-				Code:    "TRANSACTION_ERROR",
-			},
-		}
-	}
-
-	startTime := time.Now()
-	result := &QueryExecutionResult{}
-
-	// Split the query into individual statements
-	statements := splitMySQLStatements(query)
-
-	// Execute each statement
-	for _, stmt := range statements {
-		if strings.TrimSpace(stmt) == "" {
-			continue
-		}
-
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			result.Error = &dtos.QueryError{
-				Message: "Query execution cancelled",
-				Code:    "EXECUTION_CANCELLED",
-			}
-			return result
-		}
-
-		// Execute the statement based on query type
-		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "SELECT") ||
-			strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "SHOW") ||
-			strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "DESCRIBE") {
-			// For SELECT, SHOW, DESCRIBE queries, return the results
-			var rows []map[string]interface{}
-			if err := t.tx.WithContext(ctx).Raw(stmt).Scan(&rows).Error; err != nil {
-				result.Error = &dtos.QueryError{
-					Message: err.Error(),
-					Code:    "EXECUTION_ERROR",
-				}
-				return result
-			}
-
-			// Process the rows to ensure proper type handling
-			processedRows := make([]map[string]interface{}, len(rows))
-			for i, row := range rows {
-				processedRow := make(map[string]interface{})
-				for key, val := range row {
-					// Handle different types properly
-					switch v := val.(type) {
-					case []byte:
-						// Convert []byte to string
-						processedRow[key] = string(v)
-					case string:
-						// Keep strings as is
-						processedRow[key] = v
-					case float64:
-						// Keep numbers as is
-						processedRow[key] = v
-					case int64:
-						// Keep integers as is
-						processedRow[key] = v
-					case bool:
-						// Keep booleans as is
-						processedRow[key] = v
-					case nil:
-						// Keep nulls as is
-						processedRow[key] = nil
-					default:
-						// For other types, convert to string
-						processedRow[key] = fmt.Sprintf("%v", v)
-					}
-				}
-				processedRows[i] = processedRow
-			}
-
-			result.Result = map[string]interface{}{
-				"results": processedRows,
-			}
-		} else {
-			// For other queries (INSERT, UPDATE, DELETE, etc.), execute and return affected rows
-			execResult := t.tx.WithContext(ctx).Exec(stmt)
-			if execResult.Error != nil {
-				result.Error = &dtos.QueryError{
-					Message: execResult.Error.Error(),
-					Code:    "EXECUTION_ERROR",
-				}
-				return result
-			}
-
-			rowsAffected := execResult.RowsAffected
-			if rowsAffected > 0 {
-				result.Result = map[string]interface{}{
-					"rowsAffected": rowsAffected,
-					"message":      fmt.Sprintf("%d row(s) affected", rowsAffected),
-				}
-			} else {
-				result.Result = map[string]interface{}{
-					"message": "Query performed successfully",
-				}
-			}
-		}
-	}
-
-	// Calculate execution time
-	executionTime := int(time.Since(startTime).Milliseconds())
-	result.ExecutionTime = executionTime
-
-	// Marshal the result to JSON
-	resultJSON, err := json.Marshal(result.Result)
-	if err != nil {
-		return &QueryExecutionResult{
-			ExecutionTime: int(time.Since(startTime).Milliseconds()),
-			Error: &dtos.QueryError{
-				Code:    "JSON_MARSHAL_FAILED",
-				Message: err.Error(),
-				Details: "Failed to marshal query results",
-			},
-		}
-	}
-	result.ResultJSON = string(resultJSON)
-
-	return result
-}
-
-// Commit commits the transaction
-func (t *MySQLTransaction) Commit() error {
-	if t.tx == nil {
-		return fmt.Errorf("no active transaction to commit")
-	}
-	return t.tx.Commit().Error
-}
-
-// Rollback rolls back the transaction
-func (t *MySQLTransaction) Rollback() error {
-	if t.tx == nil {
-		return fmt.Errorf("no active transaction to rollback")
-	}
-	return t.tx.Rollback().Error
 }
 
 // GetSchema retrieves the database schema

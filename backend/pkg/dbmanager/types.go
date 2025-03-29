@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"gorm.io/gorm"
 )
 
@@ -75,6 +76,17 @@ type QueryExecutionResult struct {
 	ResultJSON    string                 `json:"result_json"`
 	ExecutionTime int                    `json:"execution_time"`
 	Error         *dtos.QueryError       `json:"error,omitempty"`
+
+	// Additional fields for testing and query parsing
+	Database   string    `json:"-"` // Database name
+	Collection string    `json:"-"` // Collection name
+	Query      string    `json:"-"` // Original query string
+	Timestamp  time.Time `json:"-"` // Time the query was executed
+	Pipeline   []bson.M  `json:"-"` // Aggregation pipeline
+	Filter     bson.M    `json:"-"` // Query filter
+	Projection bson.M    `json:"-"` // Query projection
+	Update     bson.M    `json:"-"` // Update document
+	Documents  []bson.M  `json:"-"` // Documents for insert operations
 }
 
 type DatabaseDriver interface {
