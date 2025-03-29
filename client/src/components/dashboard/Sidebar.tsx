@@ -10,7 +10,8 @@ import {
   Pencil,
   Plus,
   Settings,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
@@ -80,6 +81,7 @@ export default function Sidebar({
   const [openConnectionMenu, setOpenConnectionMenu] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [showDemoModal, setShowDemoModal] = useState(false);
+  const [isTutorialClosed, setIsTutorialClosed] = useState(false);
   
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -105,6 +107,12 @@ export default function Sidebar({
       previousConnectionRef.current = selectedId;
     }
   }, [selectedConnection]);
+
+  useEffect(() => {
+    // Check localStorage when component mounts
+    const tutorialClosed = localStorage.getItem("isTutorialClosed") === "true";
+    setIsTutorialClosed(tutorialClosed);
+  }, []);
 
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
@@ -188,6 +196,12 @@ export default function Sidebar({
     setOpenConnectionMenu(openConnectionMenu === connectionId ? null : connectionId);
   };
 
+  const handleCloseTutorial = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering the parent button's onClick
+    localStorage.setItem("isTutorialClosed", "true");
+    setIsTutorialClosed(true);
+  };
+
   return (
     <>
       <div
@@ -260,10 +274,10 @@ export default function Sidebar({
             </>
           )}
         </div>
-                  {/* How to Use Card - Moved to bottom */}
-                  {isExpanded && (
+          {/* How to Use Card - Moved to bottom */}
+           {isExpanded && !isTutorialClosed && (
                     <div className="px-4">
-            <div className="mb-3">
+            <div className="mb-3 relative">
               <button
                 onClick={() => setShowDemoModal(true)}
                 className="w-full p-4 rounded-lg bg-purple-100 hover:bg-purple-200 transition-colors border-2 border-purple-300 flex items-center gap-3"
@@ -275,6 +289,14 @@ export default function Sidebar({
                   <h3 className="font-bold text-lg leading-tight text-base">How to Use NeoBase</h3>
                   <p className="text-gray-600 text-sm">Try this quick tutorial</p>
                 </div>
+              </button>
+              {/* Close button */}
+              <button
+                onClick={handleCloseTutorial}
+                className="absolute top-1.5 right-1.5 p-1 rounded-full hover:bg-purple-200 transition-colors"
+                aria-label="Close tutorial"
+              >
+                <X className="w-4 h-4 text-purple-700" />
               </button>
             </div>
             </div>
