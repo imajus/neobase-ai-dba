@@ -13,12 +13,20 @@ import (
 func GenerateConfigKey(config map[string]interface{}) string {
 	var username string
 	if config["username"] != nil {
-		username = config["username"].(string)
+		if username, ok := config["username"].(string); ok {
+			username = username
+		} else if usernameString, ok := config["username"].(*string); ok {
+			username = *usernameString
+		}
 	}
 
 	port := ""
 	if config["port"] != nil {
-		port = config["port"].(string)
+		if portStr, ok := config["port"].(string); ok {
+			port = portStr
+		} else if portString, ok := config["port"].(*string); ok {
+			port = *portString
+		}
 	}
 	// Create a unique key based on connection details
 	key := fmt.Sprintf("%s:%s:%s:%s:%s",
