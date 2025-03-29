@@ -411,54 +411,6 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor, selectedT
 	return d.convertToSchemaInfo(tables, indexes, views), nil
 }
 
-// Update the function signature to include indexes
-func convertTablesToSchemaFormat(tables map[string]PostgresTable, indexes map[string][]PostgresIndex) map[string]TableSchema {
-	result := make(map[string]TableSchema)
-	for name, table := range tables {
-		schema := TableSchema{
-			Name:        name,
-			Columns:     make(map[string]ColumnInfo),
-			Indexes:     make(map[string]IndexInfo),
-			ForeignKeys: make(map[string]ForeignKey),
-			Constraints: make(map[string]ConstraintInfo),
-			RowCount:    table.RowCount,
-		}
-
-		// Convert columns
-		for colName, col := range table.Columns {
-			schema.Columns[colName] = col.toColumnInfo()
-		}
-
-		// Convert indexes
-		if tableIndexes, ok := indexes[name]; ok {
-			for _, idx := range tableIndexes {
-				schema.Indexes[idx.Name] = IndexInfo{
-					Name:     idx.Name,
-					Columns:  idx.Columns,
-					IsUnique: idx.IsUnique,
-				}
-			}
-		}
-
-		// Convert foreign keys
-		if table.ForeignKeys != nil {
-			for fkName, fk := range table.ForeignKeys {
-				schema.ForeignKeys[fkName] = ForeignKey{
-					Name:       fk.Name,
-					ColumnName: fk.Column,
-					RefTable:   fk.RefTable,
-					RefColumn:  fk.RefColumn,
-					OnDelete:   fk.OnDelete,
-					OnUpdate:   fk.OnUpdate,
-				}
-			}
-		}
-
-		result[name] = schema
-	}
-	return result
-}
-
 // Update the convertToSchemaInfo function to pass indexes
 func (d *PostgresDriver) convertToSchemaInfo(tables map[string]PostgresTable, indexes map[string][]PostgresIndex, views map[string]PostgresView) *SchemaInfo {
 	schema := &SchemaInfo{
