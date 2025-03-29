@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Code, PieChart, Users, Database, Briefcase, LayoutDashboard } from 'lucide-react';
+import { Code, PieChart, Users, Database, Briefcase, LayoutDashboard, LineChart } from 'lucide-react';
 import FloatingBackground from './FloatingBackground';
 
 interface UseCase {
@@ -17,22 +17,22 @@ const UseCasesSection: React.FC = () => {
 
   const useCases: UseCase[] = [
     {
-      title: "Software Developer",
-      icon: <Code className="w-6 h-6 text-green-600" />,
-      description: "Developers can quickly inspect and update database records without writing complex SQL queries.",
-      examples: [
-        "Debug application issues by querying relevant data",
-        "Check database state during development",
-        "Validate database migrations and schema changes"
-      ],
-      benefits: [
-        "Save time writing complex queries",
-        "Reduce context switching between code and SQL",
-        "Faster debugging and issue resolution"
-      ],
-      query: "Show me all users who registered in the last week but haven't confirmed their email",
-      result: "A list of users who registered in the last week but haven't confirmed their email"
-    },
+        title: "Software Developer",
+        icon: <Code className="w-6 h-6 text-green-600" />,
+        description: "Developers can quickly inspect and update database records without writing complex SQL queries.",
+        examples: [
+          "Debug application issues by querying relevant data",
+          "Check database state during development",
+          "Validate database migrations and schema changes"
+        ],
+        benefits: [
+          "Save time writing complex queries",
+          "Reduce context switching between code and SQL",
+          "Faster debugging and issue resolution"
+        ],
+        query: "Show me all users who registered in the last week but haven't confirmed their email",
+        result: "A list of users who registered in the last week but haven't confirmed their email"
+      },
     {
       title: "Data Analyst",
       icon: <PieChart className="w-6 h-6 text-blue-600" />,
@@ -50,6 +50,23 @@ const UseCasesSection: React.FC = () => {
       query: "What's the average order value by country for the last quarter, sorted by highest first?",
       result: "A list of countries with the average order value for the last quarter, sorted by highest first"
     },
+    {
+        title: "C-Suite Executive",
+        icon: <LineChart className="w-6 h-6 text-red-600" />,
+        description: "Executives can access critical business insights instantly without relying on multiple teams and reports.",
+        examples: [
+          "Monitor key performance indicators across the entire business",
+          "Analyze growth trends and identify emerging opportunities",
+          "Track progress on strategic initiatives in real-time"
+        ],
+        benefits: [
+          "Make data-driven decisions with up-to-the-minute information",
+          "Break down data silos across departments",
+          "Reduce time from question to insight from days to seconds"
+        ],
+        query: "Show me revenue growth by product line compared to last year, with customer acquisition costs",
+        result: "A comprehensive breakdown of revenue growth by product line with year-over-year comparison and CAC metrics"
+      },
     {
       title: "Product Manager",
       icon: <Users className="w-6 h-6 text-purple-600" />,
@@ -83,7 +100,7 @@ const UseCasesSection: React.FC = () => {
       ],
       query: "Show me our top 10 customers by revenue this year and how they compare to last year",
       result: "A list of the top 10 customers by revenue this year and how they compare to last year"
-    }
+    },
   ];
 
   return (

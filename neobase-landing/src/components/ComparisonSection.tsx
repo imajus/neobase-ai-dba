@@ -42,7 +42,7 @@ const ComparisonSection: React.FC = () => {
     { 
       feature: "Data Visualization", 
       neobase: true, 
-      traditional: false,
+      traditional: true,
       highlight: true
     },
     { 
