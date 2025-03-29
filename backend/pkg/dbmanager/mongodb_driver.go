@@ -1702,6 +1702,11 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				// Get the stage content and wrap it in curly braces
 				stageContent := "{" + match[1] + "}"
 
+				// Check if this is a $project stage to use special handling
+				if strings.Contains(stageContent, "$project") {
+					log.Printf("MongoDBDriver -> ExecuteQuery -> Detected $project stage in pipeline: %s", stageContent)
+				}
+
 				// Process the stage content
 				processedStage, err := processMongoDBQueryParams(stageContent)
 				if err != nil {
@@ -1722,6 +1727,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
 				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
 
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Processed stage: %s", processedStage)
 				processedStages = append(processedStages, processedStage)
 			}
 
@@ -1738,15 +1744,21 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			specificDatePattern := regexp.MustCompile(`new\s+Date\(["']__DATE_PLACEHOLDER__["']\)`)
 			jsonStr = specificDatePattern.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
 
+			// Fix any corrupted field names with extra double quotes
+			// This matches patterns like ""user.email"" and replaces them with "user.email"
+			fixFieldNamesPattern := regexp.MustCompile(`""([^"]+)""`)
+			jsonStr = fixFieldNamesPattern.ReplaceAllString(jsonStr, `"$1"`)
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
+
 			// Make sure to catch any other variations
 			for strings.Contains(jsonStr, "new Date") {
 				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
-				log.Printf("Removed remaining 'new Date' instances in transaction")
 			}
 
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after date cleanup: %s", jsonStr)
-
+			// Try to parse the cleaned-up JSON
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Error parsing pipeline JSON: %v", err)
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
 						Message: fmt.Sprintf("Failed to parse aggregation pipeline after conversion: %v", err),
@@ -1754,65 +1766,41 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					},
 				}
 			}
-
-			// Replace date placeholders with actual dates recursively
-			for _, stage := range pipeline {
-				processNestedDateValues(stage)
-				log.Printf("Processed date placeholders in stage: %v", stage)
-			}
-
-			// Process ObjectIds in each stage of the pipeline
-			for _, stage := range pipeline {
-				if err := processObjectIds(stage); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process ObjectIds in aggregation pipeline: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
-				}
-			}
-
-			// Log the final pipeline for debugging
-			pipelineJSON, _ := json.Marshal(pipeline)
-			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after ObjectId conversion: %s", string(pipelineJSON))
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
 		}
 
-		// Convert []bson.M to mongo.Pipeline
-		mongoPipeline := make(mongo.Pipeline, len(pipeline))
-		for i, stage := range pipeline {
-			// Convert each stage to bson.D
-			stageD := bson.D{}
-			for k, v := range stage {
-				stageD = append(stageD, bson.E{Key: k, Value: v})
-			}
-			mongoPipeline[i] = stageD
+		// Process dot notation fields in the pipeline for improved support of
+		// accessing fields from joined documents after $lookup and $unwind
+		ProcessDotNotationFields(map[string]interface{}{"pipeline": pipeline})
+
+		// Also use specialized processor for dot notation in aggregations
+		if err := processDotNotationInAggregation(pipeline); err != nil {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
 
-		// Execute the aggregate operation
-		cursor, err := collection.Aggregate(ctx, mongoPipeline)
+		// Execute the aggregation
+		cursor, err := collection.Aggregate(ctx, pipeline)
 		if err != nil {
+			log.Printf("MongoDBDriver -> ExecuteQuery -> Error executing aggregation: %v", err)
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute aggregate operation: %v", err),
+					Message: fmt.Sprintf("Failed to execute aggregation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
 		}
 		defer cursor.Close(ctx)
 
-		// Decode the results
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode aggregation results: %v", err),
-					Code:    "DECODE_ERROR",
-				},
-			}
-		}
+		// Process the results
+		result := processAggregationResultsFromCursor(cursor, ctx)
 
-		result = results
+		// Set the execution time
+		result.ExecutionTime = int(time.Since(startTime).Milliseconds())
+
+		// Log the execution time
+		log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
+
+		return result
 
 	case "countDocuments":
 		// Parse the parameters as a BSON filter

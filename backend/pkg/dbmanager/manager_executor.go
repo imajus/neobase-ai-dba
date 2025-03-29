@@ -179,7 +179,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 		log.Printf("Manager -> ExecuteQuery -> Query type: %v", queryType)
 
 		go func() {
-			log.Println("Manager -> ExecuteQuery -> Triggering schema check")
+			log.Println("Manager -> ExecuteQuery -> Checking if schema trigger is needed")
 			time.Sleep(2 * time.Second)
 			switch conn.Config.Type {
 			case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:

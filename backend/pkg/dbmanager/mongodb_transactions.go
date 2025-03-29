@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
 // MongoDBTransaction implements the Transaction interface for MongoDB
@@ -773,18 +774,16 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 		defer cursor.Close(ctx)
 
-		// Decode the results
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode find results: %v", err),
-					Code:    "DECODE_ERROR",
-				},
-			}
-		}
+		// Process the results
+		result := processAggregationResultsFromCursor(cursor, ctx)
 
-		result = results
+		// Set the execution time
+		result.ExecutionTime = int(time.Since(startTime).Milliseconds())
+
+		// Log the execution time
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
+
+		return result
 
 	case "findOne":
 		// Parse the parameters as a BSON filter
@@ -1302,26 +1301,14 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 
 	case "aggregate":
-		// Extract the aggregation pipeline
-		// Handle both db.collection.aggregate([...]) and aggregate([...]) formats
-		// Remove .toArray() if present
-		pipelineRegex := regexp.MustCompile(`(?:\.aggregate\(|\baggregate\()(\[.+\])(?:\.toArray\(\))?(?:\))`)
-		pipelineMatches := pipelineRegex.FindStringSubmatch(query)
-
-		// If we found a match, replace paramsStr with the extracted pipeline
-		if len(pipelineMatches) > 1 {
-			paramsStr = pipelineMatches[1]
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted aggregation pipeline: %s", paramsStr)
-		}
-
-		// Parse the parameters as a pipeline
 		var pipeline []bson.M
+
+		// Try to parse the pipeline directly as a JSON array
 		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
-			// Try to handle MongoDB syntax with unquoted keys and ObjectId
+			// If direct parsing fails, handle MongoDB syntax with unquoted keys
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
 			// Process each stage of the pipeline individually
-			// This helps with complex expressions that might not parse correctly as a whole
 			stagesRegex := regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
 			stageMatches := stagesRegex.FindAllStringSubmatch(paramsStr, -1)
 
@@ -1336,6 +1323,11 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				// Get the stage content and wrap it in curly braces
 				stageContent := "{" + match[1] + "}"
 
+				// Check if this is a $project stage
+				if strings.Contains(stageContent, "$project") {
+					log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected $project stage in pipeline: %s", stageContent)
+				}
+
 				// Process the stage content
 				processedStage, err := processMongoDBQueryParams(stageContent)
 				if err != nil {
@@ -1348,7 +1340,6 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				}
 
 				// Replace "new Date(...)" with string placeholder before JSON parsing
-				// First clean up the format to ensure it's valid JSON
 				dateObjPattern := regexp.MustCompile(`new\s+Date\(([^)]*)\)`)
 				processedStage = dateObjPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
 
@@ -1356,6 +1347,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
 				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
 
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed stage: %s", processedStage)
 				processedStages = append(processedStages, processedStage)
 			}
 
@@ -1364,7 +1356,6 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
 
 			// Fix any remaining date expressions that might have slipped through
-			// This ensures we don't have "new Date(...)" in the JSON string
 			dateRegex := regexp.MustCompile(`new\s+Date\((?:[^)]*)\)`)
 			jsonStr = dateRegex.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
 
@@ -1372,15 +1363,21 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			specificDatePattern := regexp.MustCompile(`new\s+Date\(["']__DATE_PLACEHOLDER__["']\)`)
 			jsonStr = specificDatePattern.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
 
-			// Make sure to catch any other variations
+			// Fix any corrupted field names with extra double quotes
+			// This matches patterns like ""user.email"" and replaces them with "user.email"
+			fixFieldNamesPattern := regexp.MustCompile(`""([^"]+)""`)
+			jsonStr = fixFieldNamesPattern.ReplaceAllString(jsonStr, `"$1"`)
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
+
+			// Make sure to catch any other variations of date expressions
 			for strings.Contains(jsonStr, "new Date") {
 				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
-				log.Printf("Removed remaining 'new Date' instances in transaction")
 			}
 
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after date cleanup: %s", jsonStr)
-
+			// Try to parse the cleaned-up JSON
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error parsing pipeline JSON: %v", err)
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
 						Message: fmt.Sprintf("Failed to parse aggregation pipeline after conversion: %v", err),
@@ -1388,65 +1385,41 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					},
 				}
 			}
-
-			// Replace date placeholders with actual dates recursively
-			for _, stage := range pipeline {
-				processNestedDateValues(stage)
-				log.Printf("Processed date placeholders in stage: %v", stage)
-			}
-
-			// Process ObjectIds in each stage of the pipeline
-			for _, stage := range pipeline {
-				if err := processObjectIds(stage); err != nil {
-					return &QueryExecutionResult{
-						Error: &dtos.QueryError{
-							Message: fmt.Sprintf("Failed to process ObjectIds in aggregation pipeline: %v", err),
-							Code:    "INVALID_PARAMETERS",
-						},
-					}
-				}
-			}
-
-			// Log the final pipeline for debugging
-			pipelineJSON, _ := json.Marshal(pipeline)
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after ObjectId conversion: %s", string(pipelineJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
 		}
 
-		// Convert []bson.M to mongo.Pipeline
-		mongoPipeline := make(mongo.Pipeline, len(pipeline))
-		for i, stage := range pipeline {
-			// Convert each stage to bson.D
-			stageD := bson.D{}
-			for k, v := range stage {
-				stageD = append(stageD, bson.E{Key: k, Value: v})
-			}
-			mongoPipeline[i] = stageD
+		// Process dot notation fields in the pipeline for improved support of
+		// accessing fields from joined documents after $lookup and $unwind
+		ProcessDotNotationFields(map[string]interface{}{"pipeline": pipeline})
+
+		// Also use specialized processor for dot notation in aggregations
+		if err := processDotNotationInAggregation(pipeline); err != nil {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
 
-		// Execute the aggregate operation
-		cursor, err := collection.Aggregate(ctx, mongoPipeline)
+		// Execute the aggregation
+		cursor, err := collection.Aggregate(ctx, pipeline)
 		if err != nil {
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error executing aggregation: %v", err)
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute aggregate operation: %v", err),
+					Message: fmt.Sprintf("Failed to execute aggregation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
 			}
 		}
 		defer cursor.Close(ctx)
 
-		// Decode the results
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			return &QueryExecutionResult{
-				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to decode aggregation results: %v", err),
-					Code:    "DECODE_ERROR",
-				},
-			}
-		}
+		// Process the results
+		result := processAggregationResultsFromCursor(cursor, ctx)
 
-		result = results
+		// Set the execution time
+		result.ExecutionTime = int(time.Since(startTime).Milliseconds())
+
+		// Log the execution time
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
+
+		return result
 
 	case "countDocuments":
 		// Parse the parameters as a BSON filter
@@ -1603,33 +1576,97 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
-	// Convert the result to JSON
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return &QueryExecutionResult{
-			Error: &dtos.QueryError{
-				Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
-				Code:    "JSON_ERROR",
-			},
-		}
-	}
+	// After creating the result map
+	executionTime := int(time.Since(startTime).Milliseconds())
+	log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
 
+	// Create a proper map[string]interface{} for the Result field
 	var resultMap map[string]interface{}
 	if tempResultMap, ok := result.(map[string]interface{}); ok {
-		// Create a result map
+		// Result is already a map, use it directly
 		resultMap = tempResultMap
 	} else {
+		// Wrap the result in a map with "results" key
 		resultMap = map[string]interface{}{
 			"results": result,
 		}
 	}
 
-	executionTime := int(time.Since(startTime).Milliseconds())
-	log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
+	// Marshal the result to JSON format for the ResultJSON field
+	resultJSON, err := json.Marshal(resultMap)
+	if err != nil {
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Error marshalling results to JSON: %v", err)
+		return &QueryExecutionResult{
+			Result: resultMap,
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Failed to marshal results to JSON: %v", err),
+				Code:    "MARSHAL_ERROR",
+			},
+			ExecutionTime: executionTime,
+		}
+	}
 
 	return &QueryExecutionResult{
 		Result:        resultMap,
 		ResultJSON:    string(resultJSON),
 		ExecutionTime: executionTime,
 	}
+}
+
+// ExecuteCommand executes a MongoDB command and returns the result
+func (t *MongoDBTransaction) ExecuteCommand(ctx context.Context, dbName string, command interface{}, readPreference *readpref.ReadPref) (*QueryExecutionResult, error) {
+	startTime := time.Now()
+	log.Printf("Executing MongoDB command on database %s: %+v", dbName, command)
+
+	// Get the database
+	db := t.Wrapper.Client.Database(dbName)
+	if db == nil {
+		return nil, fmt.Errorf("database %s not found", dbName)
+	}
+
+	// Set read preference if provided
+	opts := options.RunCmd()
+	if readPreference != nil {
+		opts.SetReadPreference(readPreference)
+	}
+
+	// Run the command
+	var result bson.M
+	err := db.RunCommand(ctx, command, opts).Decode(&result)
+	executionTime := time.Since(startTime)
+
+	if err != nil {
+		log.Printf("Error executing MongoDB command: %v", err)
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Error executing command: %v", err),
+				Code:    "COMMAND_EXECUTION_ERROR",
+			},
+			ExecutionTime: int(executionTime.Milliseconds()),
+			ResultJSON:    "{\"results\":[]}",
+		}, err
+	}
+
+	log.Printf("MongoDB command execution completed in %v", executionTime)
+
+	// Create the result map
+	executionResult := &QueryExecutionResult{
+		Result:        result,
+		ExecutionTime: int(executionTime.Milliseconds()),
+	}
+
+	// Format the result as JSON
+	resultJSON, err := FormatQueryResult(result)
+	if err != nil {
+		log.Printf("Error formatting command results: %v", err)
+		executionResult.Error = &dtos.QueryError{
+			Message: fmt.Sprintf("Error formatting command results: %v", err),
+			Code:    "COMMAND_RESULT_FORMAT_ERROR",
+		}
+		executionResult.ResultJSON = "{\"results\":[]}"
+		return executionResult, err
+	}
+
+	executionResult.ResultJSON = resultJSON
+	return executionResult, nil
 }

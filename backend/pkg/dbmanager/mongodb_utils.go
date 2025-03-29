@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"neobase-ai/internal/apis/dtos"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // convertMongoDBSchemaToSchemaInfo converts MongoDB schema to generic SchemaInfo
@@ -111,6 +113,43 @@ func getMongoDBFieldType(value interface{}) string {
 func processMongoDBQueryParams(paramsStr string) (string, error) {
 	// Log the original string for debugging
 	log.Printf("Original MongoDB query params: %s", paramsStr)
+
+	// Special handling for $project stage in aggregation pipelines
+	if strings.Contains(paramsStr, "$project") {
+		// Detect if this is a $project stage
+		projectPattern := regexp.MustCompile(`\$project\s*:\s*\{([^{}]|(?:\{[^{}]*\}))*\}`)
+		if projectPattern.MatchString(paramsStr) {
+			log.Printf("Detected $project stage in aggregation pipeline")
+
+			// Extract the $project part
+			projectMatches := projectPattern.FindStringSubmatch(paramsStr)
+			if len(projectMatches) > 0 {
+				// Handle the $project stage specially using our projection params processor
+				// First, extract just the projection object
+				projectObjPattern := regexp.MustCompile(`(\$project)\s*:\s*(\{([^{}]|(?:\{[^{}]*\}))*\})`)
+				projectObjMatches := projectObjPattern.FindStringSubmatch(paramsStr)
+
+				if len(projectObjMatches) > 2 {
+					projectStage := projectObjMatches[1] // $project
+					projectObj := projectObjMatches[2]   // The object part
+					log.Printf("Extracted projection stage: %s", projectStage)
+					log.Printf("Extracted projection object: %s", projectObj)
+
+					// Process the projection using our specialized handler
+					processedProjection, err := processProjectionParams(projectObj)
+					if err != nil {
+						return "", fmt.Errorf("failed to process $project stage: %v", err)
+					}
+
+					// Replace the original projection with the processed one while keeping $project
+					// Create a well-formed JSON object with "$project" as the key
+					result := fmt.Sprintf(`{"%s": %s}`, projectStage, processedProjection)
+					paramsStr = result
+					log.Printf("Processed $project stage: %s", paramsStr)
+				}
+			}
+		}
+	}
 
 	// Extract modifiers from the query string
 	var modifiersStr string
@@ -594,47 +633,149 @@ func replaceDatePlaceholders(obj interface{}) interface{} {
 	}
 }
 
-// Add this function to recursively process date placeholders in nested objects
-func processNestedDateValues(obj map[string]interface{}) {
-	for k, v := range obj {
-		// Handle different types of values
-		switch val := v.(type) {
-		case string:
-			// Check if it's a date placeholder
-			if val == "__DATE_PLACEHOLDER__" {
-				// Replace with current date
-				obj[k] = time.Now()
-				log.Printf("Replaced date placeholder with current time at key: %s", k)
-			}
-		case map[string]interface{}:
-			// Check if this is a $gte or similar operator with a date placeholder
-			if dateStr, ok := val["$gte"]; ok {
-				if dateStrVal, isString := dateStr.(string); isString && dateStrVal == "__DATE_PLACEHOLDER__" {
-					val["$gte"] = time.Now()
-					log.Printf("Replaced date placeholder in $gte operator with current time")
-				}
-			}
-			// Similarly check other operators
-			for op, opVal := range val {
-				if opStrVal, isString := opVal.(string); isString && opStrVal == "__DATE_PLACEHOLDER__" {
-					val[op] = time.Now()
-					log.Printf("Replaced date placeholder in %s operator with current time", op)
-				}
-			}
-			// Recursively process nested maps
-			processNestedDateValues(val)
-		case []interface{}:
-			// Process array items
-			for _, item := range val {
+// Process the aggregation results from a cursor
+func processAggregationResultsFromCursor(cursor *mongo.Cursor, ctx context.Context) *QueryExecutionResult {
+	// Decode the results
+	var results []bson.M
+	if err := cursor.All(ctx, &results); err != nil {
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Failed to decode aggregation results: %v", err),
+				Code:    "DECODE_ERROR",
+			},
+		}
+	}
+
+	// Create a wrapper for the results to maintain compatibility with existing code
+	resultMap := map[string]interface{}{
+		"results": results,
+	}
+
+	// Marshal the results to JSON for ResultJSON field
+	resultJSON, err := json.Marshal(resultMap)
+	if err != nil {
+		log.Printf("Error marshalling aggregation results to JSON: %v", err)
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Failed to marshal results to JSON: %v", err),
+				Code:    "MARSHAL_ERROR",
+			},
+		}
+	}
+
+	// Calculate execution time - this will be set by the caller
+	executionTime := 0
+
+	return &QueryExecutionResult{
+		Result:        resultMap,
+		ResultJSON:    string(resultJSON),
+		ExecutionTime: executionTime,
+	}
+}
+
+// processAggregationResults processes the results of an aggregation pipeline
+func processAggregationResults(result interface{}) (*QueryExecutionResult, error) {
+	// Create a variable to hold the result map
+	var resultMap map[string]interface{}
+
+	// Handle the result based on its type
+	switch typedResult := result.(type) {
+	case map[string]interface{}:
+		// Already a map, use directly
+		resultMap = typedResult
+	case []interface{}, []bson.M, primitive.D, []primitive.D:
+		// Wrap arrays and other MongoDB types in a results object
+		resultMap = map[string]interface{}{
+			"results": result,
+		}
+	default:
+		// For any other type, create a new map and assign the result
+		resultMap = map[string]interface{}{
+			"results": result,
+		}
+	}
+
+	executionResult := &QueryExecutionResult{
+		Result: resultMap,
+	}
+
+	// Marshal the result to JSON string for the ResultJSON field
+	resultJSON, err := FormatQueryResult(result)
+	if err != nil {
+		log.Printf("Error formatting aggregation results: %v", err)
+		executionResult.Error = &dtos.QueryError{
+			Message: fmt.Sprintf("Error formatting aggregation results: %v", err),
+			Code:    "AGGREGATION_RESULT_FORMAT_ERROR",
+		}
+		executionResult.ResultJSON = "{\"results\":[]}"
+		return executionResult, err
+	}
+
+	executionResult.ResultJSON = resultJSON
+	return executionResult, nil
+}
+
+// ProcessDotNotationFields handles dot notation in MongoDB query fields
+func ProcessDotNotationFields(queryMap map[string]interface{}) {
+	// Process each field in the map
+	for key, value := range queryMap {
+		// Handle nested maps recursively
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			ProcessDotNotationFields(nestedMap)
+			continue
+		}
+
+		// Handle nested arrays
+		if nestedArray, ok := value.([]interface{}); ok {
+			for _, item := range nestedArray {
 				if itemMap, ok := item.(map[string]interface{}); ok {
-					processNestedDateValues(itemMap)
+					ProcessDotNotationFields(itemMap)
+				}
+			}
+			continue
+		}
+
+		// Check for special operators that might contain field references with dot notation
+		if strings.HasPrefix(key, "$") && (key == "$project" || key == "$match" || key == "$group" || key == "$lookup") {
+			// For projection operators, fields may need special handling
+			if operatorMap, ok := value.(map[string]interface{}); ok {
+				for fieldKey, fieldValue := range operatorMap {
+					// If the field contains a dot and is a string value that's a field reference
+					if strings.Contains(fieldKey, ".") && !strings.HasPrefix(fieldKey, "$") {
+						// Handle field value based on stage type
+						switch key {
+						case "$project":
+							// In $project, if the value is 1 or true, replace with "$fieldname"
+							switch v := fieldValue.(type) {
+							case float64:
+								if v == 1 {
+									operatorMap[fieldKey] = "$" + fieldKey
+									log.Printf("Processed dot notation in %s: %s -> $%s", key, fieldKey, fieldKey)
+								}
+							case bool:
+								if v == true {
+									operatorMap[fieldKey] = "$" + fieldKey
+									log.Printf("Processed dot notation in %s: %s -> $%s", key, fieldKey, fieldKey)
+								}
+							case string:
+								// If not already a field reference, make it one
+								if !strings.HasPrefix(v, "$") {
+									operatorMap[fieldKey] = "$" + fieldKey
+									log.Printf("Processed dot notation in %s: %s -> $%s", key, fieldKey, fieldKey)
+								}
+							}
+						}
+					}
+
+					// Handle nested references in expressions
+					if exprMap, ok := fieldValue.(map[string]interface{}); ok {
+						ProcessDotNotationFields(exprMap)
+					}
 				}
 			}
 		}
 	}
 }
-
-// Add this new function after processMongoDBQueryParams
 
 // processProjectionParams specifically handles MongoDB projection parameters,
 // which often need special treatment due to their simpler structure
@@ -642,21 +783,89 @@ func processProjectionParams(projectionStr string) (string, error) {
 	// Log the original string for debugging
 	log.Printf("Original MongoDB projection params: %s", projectionStr)
 
-	// Special case fix for the exact error pattern we saw in the logs
-	// This approach uses direct string replacement for common MongoDB projection fields
-	commonFields := []string{"email", "_id", "role", "createdAt", "name", "address", "phone"}
-	for _, field := range commonFields {
-		// Simple direct string replacement - most reliable approach
-		oldPattern := field + ":"
-		newPattern := "\"" + field + "\":"
-		projectionStr = regexp.MustCompile(oldPattern).ReplaceAllString(projectionStr, newPattern)
+	// Extract only the projection part if it contains modifiers like .sort() or .limit()
+	modifierIndex := -1
+	for _, modifier := range []string{").sort(", ").limit(", ").skip("} {
+		if idx := strings.Index(projectionStr, modifier); idx != -1 {
+			if modifierIndex == -1 || idx < modifierIndex {
+				modifierIndex = idx
+			}
+		}
 	}
 
-	// Simple approach - split by comma and handle each field individually
+	// If we found a modifier, truncate the string to only include the projection
+	if modifierIndex != -1 {
+		// Make sure we only keep the actual projection part and remove the extra closing parenthesis
+		// Find the last opening brace before the modifier
+		openBraceIdx := strings.LastIndex(projectionStr[:modifierIndex], "{")
+		if openBraceIdx != -1 {
+			projectionStr = projectionStr[openBraceIdx:modifierIndex]
+			log.Printf("Extracted projection part before modifiers: %s", projectionStr)
+		} else {
+			// If we can't find an opening brace, just use up to the modifier
+			projectionStr = projectionStr[:modifierIndex]
+			log.Printf("Extracted projection part (no opening brace found): %s", projectionStr)
+		}
+	}
+
+	// Make sure we're working with a properly formed object
 	if !strings.HasPrefix(projectionStr, "{") || !strings.HasSuffix(projectionStr, "}") {
 		projectionStr = "{" + projectionStr + "}"
 	}
 
+	// Pre-process to handle dot notation fields in a special way
+	// First, replace any single-quoted fields with a placeholder to protect them during processing
+	// This is especially important for dot-notation fields like 'user.name'
+	var dotNotationFields = make(map[string]string) // map of placeholder -> original field
+	placeholderCounter := 0
+
+	// Match fields with dots that are either:
+	// 1. In single quotes: 'user.name'
+	// 2. In double quotes: "user.name"
+	// 3. Without quotes but containing dots: user.name
+	dotFieldPattern := regexp.MustCompile(`(?:'([^']+\.[^']+)'|"([^"]+\.[^"]+)"|([a-zA-Z0-9_]+\.[a-zA-Z0-9_.]+))(\s*:)`)
+
+	projectionStr = dotFieldPattern.ReplaceAllStringFunc(projectionStr, func(match string) string {
+		// Don't process if it's already been processed
+		if strings.Contains(match, "__DOT_FIELD_") {
+			return match
+		}
+
+		// Create a placeholder for this dotted field
+		placeholder := fmt.Sprintf("__DOT_FIELD_%d__", placeholderCounter)
+		placeholderCounter++
+
+		// Store the original (without the colon)
+		matches := dotFieldPattern.FindStringSubmatch(match)
+		var originalField string
+		if matches[1] != "" {
+			// Single quoted
+			originalField = matches[1]
+		} else if matches[2] != "" {
+			// Double quoted
+			originalField = matches[2]
+		} else {
+			// No quotes
+			originalField = matches[3]
+		}
+
+		// Store in our map
+		dotNotationFields[placeholder] = originalField
+
+		// Return the placeholder with colon
+		return placeholder + matches[4]
+	})
+
+	// General approach to properly quote all field names in the projection
+	// This uses regex to find field names instead of hard-coding specific fields
+	fieldNamePattern := regexp.MustCompile(`(^|[{,]\s*)([a-zA-Z0-9_$.]+)(\s*:)`)
+	projectionStr = fieldNamePattern.ReplaceAllString(projectionStr, `$1"$2"$3`)
+
+	// Handle field names that are quoted with single quotes
+	singleQuotePattern := regexp.MustCompile(`'([^']+)'(\s*:)`)
+	projectionStr = singleQuotePattern.ReplaceAllString(projectionStr, `"$1"$2`)
+
+	// Process the projection object more carefully
 	// Remove braces for processing
 	content := projectionStr[1 : len(projectionStr)-1]
 
@@ -673,17 +882,54 @@ func processProjectionParams(projectionStr string) (string, error) {
 			continue
 		}
 
-		// Quote the field name if not already quoted
 		fieldName := strings.TrimSpace(parts[0])
-		if !strings.HasPrefix(fieldName, "\"") && !strings.HasPrefix(fieldName, "'") {
+		value := strings.TrimSpace(parts[1])
+
+		// Check if this is a placeholder field
+		isPlaceholder := false
+		for placeholder, originalField := range dotNotationFields {
+			if strings.Contains(fieldName, placeholder) {
+				// For dot notation fields in aggregation stages (after $lookup and $unwind),
+				// we need to use "$user.email" format instead of just "user.email"
+				// But only if this field has a parent object prefix (like "user." in "user.email")
+				// Check if this looks like a reference to a joined document field
+				if strings.Contains(originalField, ".") {
+					parts := strings.SplitN(originalField, ".", 2)
+					if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+						// This is a potential reference to a field in a joined document
+						// We should use the appropriate format for MongoDB aggregation
+						if value == "1" || value == "true" {
+							// For inclusion, use the $ prefix format
+							// Convert 'user.email': 1 to 'user.email': "$user.email"
+							log.Printf("Converting dot notation field for aggregation: %s", originalField)
+							// Fix: Ensure proper quoting without double quotes by directly formatting the field name
+							cleanedField := strings.Replace(placeholder, "__DOT_FIELD_", "", 1)
+							cleanedField = strings.Replace(cleanedField, "__", "", 1)
+							// Create a properly formatted field reference with a single set of quotes
+							processedFields = append(processedFields, fmt.Sprintf(`"%s": "$%s"`, originalField, originalField))
+							isPlaceholder = true
+							break
+						}
+					}
+				}
+
+				// Regular format for non-special cases
+				// Fix: Ensure we replace the placeholder with a properly quoted field name without double quotes
+				fieldName = fmt.Sprintf(`"%s"`, originalField)
+				isPlaceholder = true
+				break
+			}
+		}
+
+		// Quote the field name if not already quoted and not a placeholder
+		if !isPlaceholder && !strings.HasPrefix(fieldName, "\"") && !strings.HasPrefix(fieldName, "'") {
 			fieldName = "\"" + fieldName + "\""
 		}
 
-		// Keep the value as is
-		value := strings.TrimSpace(parts[1])
-
-		// Add the processed field
-		processedFields = append(processedFields, fieldName+": "+value)
+		// Add the processed field if not already added (for dot notation special case)
+		if !isPlaceholder || value != "1" {
+			processedFields = append(processedFields, fieldName+": "+value)
+		}
 	}
 
 	// Combine back into a JSON object
@@ -691,4 +937,286 @@ func processProjectionParams(projectionStr string) (string, error) {
 	log.Printf("Processed MongoDB projection params: %s", result)
 
 	return result, nil
+}
+
+// ProcessMongoDBQueryParams is the exported version of processMongoDBQueryParams
+// for testing purposes
+func ProcessMongoDBQueryParams(paramsStr string) (string, error) {
+	return processMongoDBQueryParams(paramsStr)
+}
+
+// NewStageRegex returns the regex pattern used to match stages in MongoDB aggregation pipelines
+func NewStageRegex() *regexp.Regexp {
+	return regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
+}
+
+// FormatQueryResult formats MongoDB result for consistent JSON response
+func FormatQueryResult(result interface{}) (string, error) {
+	// Handle nil results
+	if result == nil {
+		return "{\"results\":[]}", nil
+	}
+
+	// Determine the type of result and format accordingly
+	var resultMap map[string]interface{}
+	var err error
+
+	switch typedResult := result.(type) {
+	case map[string]interface{}:
+		// Already a map, use it directly
+		resultMap = typedResult
+	case []interface{}:
+		// Array result, wrap in a map with "results" key
+		resultMap = map[string]interface{}{
+			"results": typedResult,
+		}
+	case primitive.D:
+		// Convert primitive.D to map
+		resultMap = typedResult.Map()
+	case []primitive.D:
+		// Convert []primitive.D to []map[string]interface{}
+		results := make([]map[string]interface{}, len(typedResult))
+		for i, d := range typedResult {
+			results[i] = d.Map()
+		}
+		resultMap = map[string]interface{}{
+			"results": results,
+		}
+	case []bson.M:
+		// Already a []bson.M, wrap in results
+		resultMap = map[string]interface{}{
+			"results": typedResult,
+		}
+	case bson.M:
+		// Already a bson.M, use directly
+		resultMap = typedResult
+	default:
+		// For any other type, convert to JSON and then back to map
+		jsonBytes, err := json.Marshal(result)
+		if err != nil {
+			log.Printf("Error marshaling result to JSON: %v", err)
+			return "{\"results\":[]}", fmt.Errorf("error formatting result: %v", err)
+		}
+
+		// Try to unmarshal into map
+		err = json.Unmarshal(jsonBytes, &resultMap)
+		if err != nil {
+			// If we can't unmarshal to map, wrap in results key
+			return fmt.Sprintf("{\"results\":%s}", string(jsonBytes)), nil
+		}
+	}
+
+	// Marshal the map to JSON string
+	jsonBytes, err := json.Marshal(resultMap)
+	if err != nil {
+		log.Printf("Error marshaling final result to JSON: %v", err)
+		return "{\"results\":[]}", fmt.Errorf("error formatting final result: %v", err)
+	}
+
+	return string(jsonBytes), nil
+}
+
+// Helper function to check if a value is numeric with value 1
+func isNumericOne(v interface{}) bool {
+	switch val := v.(type) {
+	case int:
+		return val == 1
+	case int32:
+		return val == 1
+	case int64:
+		return val == 1
+	case float64:
+		return val == 1
+	default:
+		return false
+	}
+}
+
+// Handle dot notation fields in aggregation pipelines after $lookup and $unwind
+func processDotNotationInAggregation(pipeline []bson.M) error {
+	log.Printf("Processing dot notation fields in aggregation pipeline with %d stages", len(pipeline))
+
+	// Check if this pipeline has a $lookup followed by $unwind and $project
+	hasLookup := false
+	hasUnwind := false
+	var projectStages []int // Store indices of project stages
+	var lookupAsFields []string
+
+	// First pass: detect the pipeline structure and collect all $lookup stages to get 'as' fields
+	for i, stage := range pipeline {
+		// Check for $lookup
+		if lookupObj, ok := stage["$lookup"]; ok {
+			hasLookup = true
+			log.Printf("Found $lookup stage at position %d", i)
+
+			// Get the 'as' field value which will be the prefix for dot notation
+			// Handle both bson.M and map[string]interface{} types
+			var asField string
+			var asFieldFound bool
+
+			if lookupBson, ok := lookupObj.(bson.M); ok {
+				if asFieldVal, ok := lookupBson["as"]; ok {
+					if asFieldStr, ok := asFieldVal.(string); ok && asFieldStr != "" {
+						asField = asFieldStr
+						asFieldFound = true
+					}
+				}
+			} else if lookupMap, ok := lookupObj.(map[string]interface{}); ok {
+				if asFieldVal, ok := lookupMap["as"]; ok {
+					if asFieldStr, ok := asFieldVal.(string); ok && asFieldStr != "" {
+						asField = asFieldStr
+						asFieldFound = true
+					}
+				}
+			}
+
+			if asFieldFound && asField != "" {
+				lookupAsFields = append(lookupAsFields, asField)
+				log.Printf("Found $lookup 'as' field: %s", asField)
+			}
+		}
+
+		// Check for $unwind
+		if _, ok := stage["$unwind"]; ok {
+			hasUnwind = true
+			log.Printf("Found $unwind stage at position %d", i)
+		}
+
+		// Store the position of any $project stages found
+		if _, ok := stage["$project"]; ok {
+			projectStages = append(projectStages, i)
+			log.Printf("Found $project stage at position %d", i)
+		}
+	}
+
+	// Process all project stages if we have a pipeline with lookup+unwind
+	if hasLookup && hasUnwind && len(projectStages) > 0 && len(lookupAsFields) > 0 {
+		log.Printf("Processing %d $project stages after $lookup and $unwind", len(projectStages))
+		for _, projectIndex := range projectStages {
+			projectStage := pipeline[projectIndex]
+			projectObj := projectStage["$project"]
+
+			// Handle both bson.M and map[string]interface{} types for project
+			var projectFields bson.M
+			if projBson, ok := projectObj.(bson.M); ok {
+				projectFields = projBson
+			} else if projMap, ok := projectObj.(map[string]interface{}); ok {
+				projectFields = bson.M{}
+				for k, v := range projMap {
+					projectFields[k] = v
+				}
+				// Update the original project stage with our bson.M version
+				projectStage["$project"] = projectFields
+			} else {
+				log.Printf("Warning: $project stage at index %d doesn't contain a valid map, got %T", projectIndex, projectObj)
+				continue
+			}
+
+			// Identify and process dot notation fields
+			dotFieldCount := 0
+			processedFields := make(map[string]bool)
+
+			// First, find all dot notation fields that match our lookupAsFields
+			for field, value := range projectFields {
+				// Check if this is a dot notation field (user.email, user._id, etc.)
+				if strings.Contains(field, ".") {
+					fieldParts := strings.SplitN(field, ".", 2)
+					if len(fieldParts) == 2 {
+						prefix := fieldParts[0]
+
+						// Check if this field uses one of our lookup 'as' fields as prefix
+						for _, asField := range lookupAsFields {
+							if prefix == asField {
+								// This is a dot notation field from a $lookup, we need to handle it specially
+								originalValue := value
+
+								switch v := value.(type) {
+								case float64, int, int64, int32:
+									// Special case for inclusion (1): convert to field reference
+									if isNumericOne(v) {
+										projectFields[field] = "$" + field
+										dotFieldCount++
+										processedFields[field] = true
+										log.Printf("Processed lookup dot notation field (numeric): %s -> $%s", field, field)
+									}
+								case bool:
+									if v == true {
+										// Special case for inclusion (true): convert to field reference
+										projectFields[field] = "$" + field
+										dotFieldCount++
+										processedFields[field] = true
+										log.Printf("Processed lookup dot notation field (boolean): %s -> $%s", field, field)
+									}
+								case string:
+									// If already starts with $, leave it alone
+									if !strings.HasPrefix(v, "$") {
+										projectFields[field] = "$" + field
+										dotFieldCount++
+										processedFields[field] = true
+										log.Printf("Processed lookup dot notation field (string): %s -> $%s", field, field)
+									} else {
+										// Already in the right format
+										processedFields[field] = true
+									}
+								default:
+									log.Printf("Skipping lookup dot notation field with unsupported value type %T: %s = %v", value, field, value)
+								}
+
+								if originalValue != projectFields[field] {
+									log.Printf("Modified lookup dot notation field %s: %v -> %v", field, originalValue, projectFields[field])
+								}
+
+								break // No need to check other asFields
+							}
+						}
+					}
+				}
+			}
+
+			// Now add the parent fields if needed
+			for _, asField := range lookupAsFields {
+				// Check if we have any dot notation children for this asField
+				hasAnyDotNotationChildren := false
+				for field := range processedFields {
+					if strings.HasPrefix(field, asField+".") {
+						hasAnyDotNotationChildren = true
+						break
+					}
+				}
+
+				// Check if parent field exists in the projection
+				_, hasParentField := projectFields[asField]
+
+				// If we have dot notation children and the parent field also exists,
+				// we have a path collision risk
+				if hasAnyDotNotationChildren && hasParentField {
+					// If both parent and dot notation children exist, we need to remove one of them
+					// to avoid path collisions. Prefer keeping the dot notation fields.
+					log.Printf("Found path collision risk: both %s and %s.* fields exist in projection", asField, asField)
+					log.Printf("Removing parent field %s to avoid path collision with its dot notation children", asField)
+					delete(projectFields, asField)
+				}
+
+				// We no longer automatically add the parent field when dot notation children exist,
+				// as this causes path collisions in MongoDB
+			}
+
+			log.Printf("Processed %d dot notation fields in $project stage %d", dotFieldCount, projectIndex)
+		}
+	} else {
+		if !hasLookup {
+			log.Printf("No $lookup stage found in pipeline, skipping dot notation processing")
+		}
+		if !hasUnwind {
+			log.Printf("No $unwind stage found in pipeline, skipping dot notation processing")
+		}
+		if len(projectStages) == 0 {
+			log.Printf("No $project stages found in pipeline, skipping dot notation processing")
+		}
+		if len(lookupAsFields) == 0 {
+			log.Printf("No 'as' fields found in $lookup stages, skipping dot notation processing")
+		}
+	}
+
+	return nil
 }
