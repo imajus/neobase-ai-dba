@@ -1063,7 +1063,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		if msg.Queries != nil {
 			for i := range *msg.Queries {
 				if (*msg.Queries)[i].ID == query.ID {
-					log.Printf("ChatService -> ExecuteQuery -> updating query: %v", (*msg.Queries)[i])
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
@@ -1244,8 +1243,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusBadRequest, fmt.Errorf("query already rolled back")
 	}
 
+	if !query.CanRollback {
+		return nil, http.StatusBadRequest, fmt.Errorf("query cannot be rolled back")
+	}
 	// Check if we need to generate rollback query
-	if query.RollbackQuery == nil && query.CanRollback {
+	if query.RollbackQuery == nil || *query.RollbackQuery == "" {
 		// First execute the dependent query to get context
 		if query.RollbackDependentQuery == nil {
 			return nil, http.StatusBadRequest, fmt.Errorf("rollback dependent query is required but not provided")
@@ -1526,7 +1528,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	}
 
 	// Now execute the rollback query
-	if query.RollbackQuery == nil {
+	if query.RollbackQuery == nil || *query.RollbackQuery == "" {
 		// Send event about rollback query failure
 		s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
 			Event: "rollback-query-failed",
