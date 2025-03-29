@@ -5,6 +5,7 @@ import SupportedTechnologiesSection from './components/SupportedTechnologiesSect
 import Footer from './components/Footer'
 import CompactFeaturesSection from './components/CompactFeaturesSection'
 import HowItWorksSection from './components/HowItWorksSection'
+import FAQSection from './components/FAQSection'
 import Clarity from '@microsoft/clarity';
 import { initializeApp } from "firebase/app";
 import { getAnalytics, logEvent } from "firebase/analytics";
@@ -56,6 +57,7 @@ function fetchStats() {
         <SupportedTechnologiesSection />
         <CompactFeaturesSection stars={stars}/>
         <HowItWorksSection />
+        <FAQSection />
       </main>
       <Footer />
     </div>
@@ -104,7 +106,8 @@ function trackSectionViews(analytics: any) {
     { id: 'video', name: 'video_section_view' },
     { id: 'technologies', name: 'technologies_section_view' },
     { id: 'features', name: 'features_section_view' },
-    { id: 'how-it-works', name: 'how_it_works_section_view' }
+    { id: 'how-it-works', name: 'how_it_works_section_view' },
+    { id: 'faq', name: 'faq_section_view' }
   ];
 
   sections.forEach(section => {
