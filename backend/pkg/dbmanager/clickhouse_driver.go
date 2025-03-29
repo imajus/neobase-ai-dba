@@ -62,17 +62,6 @@ type ClickHouseDictionary struct {
 	Definition string
 }
 
-// Convert ClickHouseColumn to generic ColumnInfo
-func (cc ClickHouseColumn) toColumnInfo() ColumnInfo {
-	return ColumnInfo{
-		Name:         cc.Name,
-		Type:         cc.Type,
-		IsNullable:   cc.IsNullable,
-		DefaultValue: cc.DefaultValue,
-		Comment:      cc.Comment,
-	}
-}
-
 // Connect establishes a connection to a ClickHouse database
 func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	var dsn string
