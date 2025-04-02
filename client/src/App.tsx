@@ -189,6 +189,7 @@ function AppContent() {
       setShowConnectionModal(false);
       
       // Set the newly created chat and show the select tables modal
+      setSelectedConnection(newChat);
       setNewlyCreatedChat(newChat);
       setShowSelectTablesModal(true);
       
