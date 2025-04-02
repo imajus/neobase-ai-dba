@@ -210,6 +210,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		"port":     config.Port,
 		"username": config.Username,
 		"password": config.Password,
+		"database": config.Database, // Add database to the key to differentiate connections to different databases
 	})
 	log.Printf("DBManager -> Connect -> Generated config key: %s", configKey)
 
@@ -244,7 +245,18 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		pool.Mutex.Unlock()
 
 		log.Printf("DBManager -> Connect -> Reusing existing connection from pool, refCount: %d", pool.RefCount)
+		log.Printf("DBManager -> Connect -> Pool config: Type=%s, Host=%s, Database=%s",
+			pool.Config.Type, pool.Config.Host, pool.Config.Database)
+		log.Printf("DBManager -> Connect -> New connection config: Type=%s, Host=%s, Database=%s",
+			config.Type, config.Host, config.Database)
 
+		// Validate that we're connecting to the same database
+		if pool.Config.Database != config.Database {
+			log.Printf("DBManager -> Connect -> WARNING: Pool database (%s) doesn't match requested database (%s)",
+				pool.Config.Database, config.Database)
+		}
+
+		log.Printf("DBManager -> Connect -> Connection config: %+v", config)
 		// Create a new connection using the shared pool
 		conn = &Connection{
 			DB:          pool.GORMDB,
@@ -275,8 +287,8 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 			return err
 		}
 
+		log.Printf("DBManager -> Connect -> Connection Host, Name, Type: %+v, %+v, %+v", config.Host, config.Database, config.Type)
 		log.Printf("DBManager -> Connect -> Driver connection successful, creating new pool")
-
 		// Create and store the new pool
 		newPool := &DatabasePool{
 			DB:       nil, // The driver doesn't expose sql.DB directly
@@ -443,10 +455,21 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 		if pool, exists := m.dbPools[conn.ConfigKey]; exists {
 			pool.Mutex.Lock()
 			pool.LastUsed = time.Now()
+
+			// Verify database consistency
+			if pool.Config.Database != conn.Config.Database {
+				log.Printf("DBManager -> GetConnection -> WARNING: Pool database (%s) doesn't match connection database (%s)",
+					pool.Config.Database, conn.Config.Database)
+			}
+
 			pool.Mutex.Unlock()
 		}
 		m.dbPoolsMu.RUnlock()
 	}
+
+	// Log connection details for debugging
+	log.Printf("DBManager -> GetConnection -> Returning connection for chatID: %s, database: %s",
+		chatID, conn.Config.Database)
 
 	// Create appropriate wrapper based on database type
 	switch conn.Config.Type {

@@ -1223,6 +1223,7 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		// Get schema manager
 		schemaManager := s.dbManager.GetSchemaManager()
 
+		log.Printf("ChatService -> GetAllTables -> Getting schema for chatID -> Database Host, Name, Type: %+v, %+v, %+v", connInfo.Config.Host, connInfo.Config.Database, connInfo.Config.Type)
 		// Get schema from database - pass empty slice to get ALL tables
 		schema, err := schemaManager.GetSchema(ctx, chatID, dbConn, connInfo.Config.Type, []string{})
 		if err != nil {
