@@ -1,6 +1,5 @@
 import { initializeApp } from 'firebase/app';
 import { Analytics, getAnalytics, logEvent, setUserId, setUserProperties } from 'firebase/analytics';
-import clarity from 'react-microsoft-clarity';
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -16,9 +15,6 @@ const firebaseConfig = {
 // Microsoft Clarity configuration
 const clarityConfig = {
   projectId: import.meta.env.VITE_CLARITY_PROJECT_ID,
-  track: true,
-  content: true,
-  debug: false,
 };
 
 // Initialize Firebase
@@ -32,10 +28,21 @@ export const initAnalytics = () => {
     firebaseApp = initializeApp(firebaseConfig);
     analytics = getAnalytics(firebaseApp);
     
-    // Initialize Microsoft Clarity
+    // Initialize Microsoft Clarity - using the correct method
     if (typeof window !== 'undefined' && clarityConfig.projectId) {
-      // @ts-ignore - Clarity types are not properly defined
-      clarity.init(clarityConfig.projectId);
+      // Load Clarity script programmatically
+      const script = document.createElement('script');
+      script.type = 'text/javascript';
+      script.async = true;
+      script.src = `https://www.clarity.ms/tag/${clarityConfig.projectId}`;
+      
+      // Add the script to the document
+      const firstScript = document.getElementsByTagName('script')[0];
+      if (firstScript && firstScript.parentNode) {
+        firstScript.parentNode.insertBefore(script, firstScript);
+      } else {
+        document.head.appendChild(script);
+      }
     }
     
     console.log('Analytics services initialized successfully');
@@ -58,12 +65,13 @@ export const identifyUser = (userId: string, username: string, createdAt: string
       created_at: createdAt,
     });
     
-    // Set user in Microsoft Clarity
-    // @ts-ignore - Clarity types are not properly defined
-    clarity.identify(userId, {
-      username,
-      created_at: createdAt,
-    });
+    // Set user in Microsoft Clarity using the window object
+    if (typeof window !== 'undefined' && window.clarity) {
+      window.clarity('identify', userId, {
+        username,
+        created_at: createdAt,
+      });
+    }
     
     // Log user login event
     logEvent(analytics, 'user_identified', {
@@ -75,6 +83,13 @@ export const identifyUser = (userId: string, username: string, createdAt: string
   }
 };
 
+// Add a TypeScript interface for the global Window object to include clarity
+declare global {
+  interface Window {
+    clarity: (command: string, ...args: any[]) => void;
+  }
+}
+
 // Log events to Firebase Analytics
 export const trackEvent = (eventName: string, eventParams = {}) => {
   try {
@@ -82,6 +97,11 @@ export const trackEvent = (eventName: string, eventParams = {}) => {
     
     // Log event to Firebase Analytics
     logEvent(analytics, eventName, eventParams);
+    
+    // Also track event in Clarity if available
+    if (typeof window !== 'undefined' && window.clarity) {
+      window.clarity('event', eventName, eventParams);
+    }
   } catch (error) {
     console.error(`Error tracking event ${eventName}:`, error);
   }
