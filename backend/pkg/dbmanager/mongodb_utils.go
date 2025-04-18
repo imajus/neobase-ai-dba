@@ -364,8 +364,8 @@ func processObjectIds(filter map[string]interface{}) error {
 				filter[key] = oid
 				log.Printf("Converted ObjectId %s to %v", oidStr, oid)
 			} else if dateStr, ok := v["$date"].(string); ok && len(v) == 1 {
-				// Parse the date to validate it, but preserve the exact format for MongoDB
-				_, err := time.Parse(time.RFC3339, dateStr)
+				// Parse the date to validate it and convert to a MongoDB primitive.DateTime
+				parsedTime, err := time.Parse(time.RFC3339, dateStr)
 				if err != nil {
 					// Try other common date formats
 					formats := []string{
@@ -387,7 +387,7 @@ func processObjectIds(filter map[string]interface{}) error {
 
 					parsed := false
 					for _, format := range formats {
-						if _, parseErr := time.Parse(format, dateStr); parseErr == nil {
+						if parsedTime, err = time.Parse(format, dateStr); err == nil {
 							parsed = true
 							break
 						}
@@ -398,9 +398,10 @@ func processObjectIds(filter map[string]interface{}) error {
 					}
 				}
 
-				// Use the original date string format for MongoDB
-				filter[key] = dateStr
-				log.Printf("Converted date %s to %s", dateStr, dateStr)
+				// Convert the time to a MongoDB primitive.DateTime
+				mongoDate := primitive.NewDateTimeFromTime(parsedTime)
+				filter[key] = mongoDate
+				log.Printf("Converted date %s to MongoDB DateTime: %v", dateStr, mongoDate)
 			} else {
 				// Recursively process nested objects
 				if err := processObjectIds(v); err != nil {
@@ -603,33 +604,6 @@ func processSortExpression(sortExpr string) (string, error) {
 		sortExpr = fmt.Sprintf(`{"%s": 1}`, field)
 		log.Printf("Converted simple sort field to object: %s", sortExpr)
 		return sortExpr, nil
-	}
-}
-
-// Add this function to recursively replace date placeholders in complex objects
-func replaceDatePlaceholders(obj interface{}) interface{} {
-	// Handle different types
-	switch v := obj.(type) {
-	case map[string]interface{}:
-		// Process map
-		for k, val := range v {
-			v[k] = replaceDatePlaceholders(val)
-		}
-		return v
-	case []interface{}:
-		// Process array
-		for i, val := range v {
-			v[i] = replaceDatePlaceholders(val)
-		}
-		return v
-	case string:
-		// Check if it's a date placeholder
-		if v == "__DATE_PLACEHOLDER__" {
-			return primitive.NewDateTimeFromTime(time.Now())
-		}
-		return v
-	default:
-		return v
 	}
 }
 

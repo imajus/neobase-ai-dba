@@ -1,6 +1,7 @@
 import { Eraser, ListRestart, Loader, Pencil, PlugZap, RefreshCw } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Chat } from '../../types/chat';
+import analyticsService from '../../services/analyticsService';
 import DatabaseLogo from '../icons/DatabaseLogos';
 
 interface ChatHeaderProps {
@@ -44,6 +45,57 @@ export default function ChatHeader({
         );
     }, [isConnecting, isConnected]);
 
+    // Wrap handlers with analytics events
+    const handleClearChat = useCallback(() => {
+        // Track clear chat click event
+        analyticsService.trackEvent('clear_chat_clicked', { 
+            chatId: chat.id,
+            connectionName: chat.connection.database
+        });
+        
+        onClearChat();
+    }, [chat.id, chat.connection.database, onClearChat]);
+
+    const handleEditConnection = useCallback(() => {
+        // Track edit connection click event
+        analyticsService.trackEvent('edit_connection_clicked', { 
+            chatId: chat.id,
+            connectionName: chat.connection.database
+        });
+        
+        onEditConnection();
+    }, [chat.id, chat.connection.database, onEditConnection]);
+
+    const handleShowCloseConfirm = useCallback(() => {
+        // Track disconnect click event
+        analyticsService.trackEvent('disconnect_clicked', { 
+            chatId: chat.id,
+            connectionName: chat.connection.database
+        });
+        
+        onShowCloseConfirm();
+    }, [chat.id, chat.connection.database, onShowCloseConfirm]);
+
+    const handleReconnect = useCallback(() => {
+        // Track reconnect click event
+        analyticsService.trackEvent('reconnect_clicked', { 
+            chatId: chat.id,
+            connectionName: chat.connection.database
+        });
+        
+        onReconnect();
+    }, [chat.id, chat.connection.database, onReconnect]);
+
+    const handleShowRefreshSchema = useCallback(() => {
+        // Track refresh schema click event
+        analyticsService.trackEvent('refresh_schema_clicked', { 
+            chatId: chat.id,
+            connectionName: chat.connection.database
+        });
+        
+        setShowRefreshSchema(true);
+    }, [chat.id, chat.connection.database, setShowRefreshSchema]);
+
     return (
         <div className="fixed top-0 left-0 right-0 md:relative md:left-auto md:right-auto bg-white border-b-4 border-black h-16 px-4 flex justify-between items-center mt-16 md:mt-0 z-20">
             <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
@@ -55,7 +107,7 @@ export default function ChatHeader({
                 {/* Desktop buttons with borders */}
                 <div className="relative group hidden md:block">
                     <button
-                        onClick={() => setShowRefreshSchema(true)}
+                        onClick={handleShowRefreshSchema}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
                         aria-label="Refresh Knowledge Base"
                     >
@@ -68,7 +120,7 @@ export default function ChatHeader({
 
                 <div className="relative group hidden md:block">
                     <button
-                        onClick={onClearChat}
+                        onClick={handleClearChat}
                         className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors neo-border"
                         aria-label="Clear chat"
                     >
@@ -81,7 +133,7 @@ export default function ChatHeader({
 
                 <div className="relative group hidden md:block">
                     <button
-                        onClick={onEditConnection}
+                        onClick={handleEditConnection}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
                         aria-label="Edit connection"
                     >
@@ -95,7 +147,7 @@ export default function ChatHeader({
                 {isConnected ? (
                     <div className="relative group hidden md:block">
                         <button
-                            onClick={onShowCloseConfirm}
+                            onClick={handleShowCloseConfirm}
                             className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
                             aria-label="Disconnect"
                         >
@@ -108,7 +160,7 @@ export default function ChatHeader({
                 ) : (
                     <div className="relative group hidden md:block">
                         <button
-                            onClick={onReconnect}
+                            onClick={handleReconnect}
                             className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border"
                             aria-label="Reconnect"
                         >
@@ -123,7 +175,7 @@ export default function ChatHeader({
                 {/* Mobile buttons without borders */}
                 <div className="relative group md:hidden">
                     <button
-                        onClick={() => setShowRefreshSchema(true)}
+                        onClick={handleShowRefreshSchema}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
                         aria-label="Refresh Knowledge Base"
                     >
@@ -136,7 +188,7 @@ export default function ChatHeader({
 
                 <div className="relative group md:hidden">
                     <button
-                        onClick={onClearChat}
+                        onClick={handleClearChat}
                         className="p-2 text-neo-error hover:bg-neo-error/10 rounded-lg transition-colors"
                         aria-label="Clear chat"
                     >
@@ -149,7 +201,7 @@ export default function ChatHeader({
 
                 <div className="relative group md:hidden">
                     <button
-                        onClick={onEditConnection}
+                        onClick={handleEditConnection}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
                         aria-label="Edit connection"
                     >
@@ -163,7 +215,7 @@ export default function ChatHeader({
                 {isConnected ? (
                     <div className="relative group md:hidden">
                         <button
-                            onClick={onShowCloseConfirm}
+                            onClick={handleShowCloseConfirm}
                             className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
                             aria-label="Disconnect connection"
                         >
@@ -176,7 +228,7 @@ export default function ChatHeader({
                 ) : (
                     <div className="relative group md:hidden">
                         <button
-                            onClick={onReconnect}
+                            onClick={handleReconnect}
                             className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
                             aria-label="Reconnect"
                         >

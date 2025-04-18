@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
 import axios from '../../services/axiosConfig';
 import chatService from '../../services/chatService';
+import analyticsService from '../../services/analyticsService';
 import { Chat, Connection } from '../../types/chat';
 import { transformBackendMessage } from '../../types/messages';
 import ConfirmationModal from '../modals/ConfirmationModal';
@@ -374,6 +375,19 @@ export default function ChatWindow({
     }
   };
 
+  const handleSendMessage = useCallback(async (content: string) => {
+    try {
+      // Track message sent event
+      if (chat?.id) {
+        analyticsService.trackMessageSent(chat.id, content.length);
+      }
+      
+      await onSendMessage(content);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
+  }, [chat?.id, onSendMessage]);
+
   const handleSaveEdit = useCallback((id: string, content: string) => {
     if (content.trim()) {
       // Find the message and its index
@@ -383,6 +397,12 @@ export default function ChatWindow({
       // Get the edited message and the next message (AI response)
       const editedMessage = messages[messageIndex];
       const aiResponse = messages[messageIndex + 1];
+      
+      // Track message edit event
+      if (chat?.id) {
+        analyticsService.trackMessageEdited(chat.id, id);
+      }
+      
       onEditMessage(id, content);
       setMessages(prev => {
         const updated = [...prev];
@@ -397,7 +417,7 @@ export default function ChatWindow({
     }
     setEditingMessageId(null);
     setEditInput('');
-  }, [messages, setMessages]);
+  }, [messages, setMessages, chat?.id, onEditMessage]);
 
   const fetchMessages = useCallback(async (page: number) => {
     if (!chat?.id || isLoadingMessages) return;
@@ -505,7 +525,7 @@ export default function ChatWindow({
   const handleMessageSubmit = async (content: string) => {
     try {
       messageUpdateSource.current = 'new';
-      await onSendMessage(content);
+      await handleSendMessage(content);
     } finally {
       messageUpdateSource.current = null;
     }
@@ -673,8 +693,57 @@ export default function ChatWindow({
     onEditMessage(userMessageId, fixRollbackErrorContent);
   }
 
+  const handleConfirmClearChat = useCallback(async () => {
+    // Track chat cleared event
+    if (chat?.id) {
+      analyticsService.trackChatCleared(chat.id);
+    }
+    
+    await onClearChat();
+    setShowClearConfirm(false);
+  }, [chat?.id, onClearChat]);
+
+  const handleCancelStreamClick = useCallback(() => {
+    // Track query cancelled event
+    if (chat?.id) {
+      analyticsService.trackQueryCancelled(chat.id);
+    }
+    
+    onCancelStream();
+  }, [chat?.id, onCancelStream]);
+
+  const handleConfirmRefreshSchema = useCallback(async () => {
+    // Track schema refreshed event
+    if (chat?.id) {
+      analyticsService.trackSchemaRefreshed(chat.id, chat.connection.database);
+    }
+    
+    await onRefreshSchema();
+    setShowRefreshSchema(false);
+  }, [chat?.id, chat?.connection.database, onRefreshSchema]);
+
+  const handleCancelRefreshSchema = useCallback(async () => {
+    // Track schema refresh cancelled event
+    if (chat?.id) {
+      analyticsService.trackSchemaCancelled(chat.id, chat.connection.database);
+    }
+    
+    await onCancelRefreshSchema();
+    setShowRefreshSchema(false);
+  }, [chat?.id, chat?.connection.database, onCancelRefreshSchema]);
+
   return (
-    <div className={`flex-1 flex flex-col h-screen transition-all duration-300 relative ${isExpanded ? 'md:ml-80' : 'md:ml-20'}`}>
+    <div className={`
+      flex-1 
+      flex 
+      flex-col 
+      h-screen 
+      max-h-screen
+      overflow-hidden
+      transition-all 
+      duration-300 
+      ${isExpanded ? 'md:ml-80' : 'md:ml-20'}
+    `}>
       <ChatHeader
         chat={chat}
         isConnecting={isConnecting}
@@ -705,6 +774,7 @@ export default function ChatWindow({
           md:pb-32 
           mt-16
           md:mt-0
+          flex-shrink
         "
       >
         <div
@@ -861,7 +931,7 @@ export default function ChatWindow({
             z-50
           ">
             <button
-              onClick={onCancelStream}
+              onClick={handleCancelStreamClick}
               className="
                 neo-border
                 px-3
@@ -908,14 +978,8 @@ export default function ChatWindow({
           title="Refresh Knowledge Base"
           buttonText="Refresh"
           message="This action will refetch the schema from the database and update the knowledge base. This may take a few minutes depending on the size of the database."
-          onConfirm={async () => {
-            await onRefreshSchema();
-            setShowRefreshSchema(false);
-          }}
-          onCancel={async () => {
-            await onCancelRefreshSchema();
-            setShowRefreshSchema(false);
-          }}
+          onConfirm={handleConfirmRefreshSchema}
+          onCancel={handleCancelRefreshSchema}
         />
       )}
 
@@ -923,10 +987,7 @@ export default function ChatWindow({
         <ConfirmationModal
           title="Clear Chat"
           message="Are you sure you want to clear all chat messages? This action cannot be undone."
-          onConfirm={async () => {
-            await onClearChat();
-            setShowClearConfirm(false);
-          }}
+          onConfirm={handleConfirmClearChat}
           onCancel={() => setShowClearConfirm(false)}
         />
       )}
