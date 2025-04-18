@@ -100,7 +100,6 @@ function AppContent() {
       setAuthError(error.message);
       toast.error(error.message, errorToast);
     } finally {
-      await new Promise(resolve => setTimeout(resolve, 1000));
       setIsLoading(false);
     }
   };
