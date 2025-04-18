@@ -674,7 +674,17 @@ export default function ChatWindow({
   }
 
   return (
-    <div className={`flex-1 flex flex-col h-screen transition-all duration-300 relative ${isExpanded ? 'md:ml-80' : 'md:ml-20'}`}>
+    <div className={`
+      flex-1 
+      flex 
+      flex-col 
+      h-screen 
+      max-h-screen
+      overflow-hidden
+      transition-all 
+      duration-300 
+      ${isExpanded ? 'md:ml-80' : 'md:ml-20'}
+    `}>
       <ChatHeader
         chat={chat}
         isConnecting={isConnecting}
@@ -705,6 +715,7 @@ export default function ChatWindow({
           md:pb-32 
           mt-16
           md:mt-0
+          flex-shrink
         "
       >
         <div

@@ -8,7 +8,7 @@ const (
 
 // Database-specific system prompts for LLM
 const (
-	OpenAIPostgreSQLPrompt = `You are NeoBase AI, a senior PostgreSQL database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
+	OpenAIPostgreSQLPrompt = `You are NeoBase AI, a PostgreSQL database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
 
 ---
 
@@ -165,7 +165,7 @@ json
   ]
 }
    `
-	OpenAIClickhousePrompt = `You are NeoBase AI, a senior ClickHouse database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
+	OpenAIClickhousePrompt = `You are NeoBase AI, a ClickHouse database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
 
 ---
 
@@ -247,7 +247,7 @@ json
   ]
 }
    `
-	OpenAIYugabyteDBPrompt = `You are NeoBase AI, a senior YugabyteDB database administrator. Your task is to generate safe, efficient, and schema-aware SQL queries based on user requests. Follow these rules meticulously:
+	OpenAIYugabyteDBPrompt = `You are NeoBase AI, a YugabyteDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
 
 ---
 
@@ -326,7 +326,7 @@ json
   ]
 }
 `
-	OpenAIMongoDBPrompt = `You are an AI assistant specialized in MongoDB databases. Your role is to help users with MongoDB queries, schema design, and database management.
+	OpenAIMongoDBPrompt = `You are NeoBase AI, a MongoDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
 
 When a user asks a question, analyze their request and respond with:
 1. A friendly, helpful explanation
