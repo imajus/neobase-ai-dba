@@ -1,6 +1,7 @@
 import { AlertCircle, Boxes, KeyRound, Loader, Lock, UserRound } from 'lucide-react';
 import React, { useState } from 'react';
 import { LoginFormData, SignupFormData } from '../../types/auth';
+import analyticsService from '../../services/analyticsService';
 
 interface AuthFormProps {
   onLogin: (data: LoginFormData) => Promise<void>;
@@ -79,11 +80,25 @@ export default function AuthForm({ onLogin, onSignup }: AuthFormProps) {
       if (isLogin) {
         const { userName, password } = formData;
         await onLogin({ userName, password });
+        
+        // Note: User ID will be set in the App.tsx login handler
+        // This is just a fallback event to track login attempt
+        analyticsService.trackEvent('login_attempt', { username: userName });
       } else {
         await onSignup(formData);
+        
+        // Note: User ID will be set in the App.tsx signup handler
+        // This is just a fallback event to track signup attempt
+        analyticsService.trackEvent('signup_attempt', { username: formData.userName });
       }
     } catch (error: any) {
       setFormError(error.message);
+      
+      // Track failed login/signup
+      analyticsService.trackEvent(
+        isLogin ? 'login_error' : 'signup_error', 
+        { error: error.message }
+      );
     } finally {
       setIsLoading(false);
     }

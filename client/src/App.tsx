@@ -20,6 +20,7 @@ import { LoginFormData, SignupFormData } from './types/auth';
 import { Chat, ChatsResponse, Connection } from './types/chat';
 import { SendMessageResponse } from './types/messages';
 import { StreamResponse } from './types/stream';
+import analyticsService from './services/analyticsService';
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1321,7 +1322,6 @@ function AppContent() {
         onDeleteConnection={handleDeleteConnection}
         onEditConnection={handleEditConnectionFromChatWindow}
         onConnectionStatusChange={handleConnectionStatusChange}
-        setupSSEConnection={setupSSEConnection}
         eventSource={eventSource}
       />
 
@@ -1567,6 +1567,11 @@ function AppContent() {
 }
 
 function App() {
+  // Initialize analytics service
+  useEffect(() => {
+    analyticsService.initAnalytics();
+  }, []);
+  
   return (
     <UserProvider>
       <StreamProvider>

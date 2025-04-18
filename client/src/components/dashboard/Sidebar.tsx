@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { useUser } from '../../contexts/UserContext';
 import chatService from '../../services/chatService';
+import analyticsService from '../../services/analyticsService';
 import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
@@ -41,14 +42,9 @@ interface SidebarProps {
   selectedConnection?: Chat;
   isLoadingConnections: boolean;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
-  setupSSEConnection: (chatId: string) => Promise<string>;
   eventSource: EventSourcePolyfill | null;
 }
 
-interface SSEEvent {
-  event: 'db-connected' | 'db-disconnected';
-  data: string;
-}
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
@@ -71,7 +67,6 @@ export default function Sidebar({
   selectedConnection,
   isLoadingConnections,
   onConnectionStatusChange,
-  setupSSEConnection,
 }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [connectionToDelete, setConnectionToDelete] = useState<Chat | null>(null);
@@ -114,17 +109,36 @@ export default function Sidebar({
     setIsTutorialClosed(tutorialClosed);
   }, []);
 
+  const handleToggleExpand = useCallback(() => {
+    // Track sidebar toggled event
+    analyticsService.trackSidebarToggled(!isExpanded);
+    
+    onToggleExpand();
+  }, [isExpanded, onToggleExpand]);
+
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
   };
 
   const handleLogoutConfirm = () => {
+    // If user exists, track logout event
+    if (user) {
+      analyticsService.trackLogout(user.id, user.username);
+    }
+    
     onLogout();
     setShowLogoutConfirm(false);
   };
 
   const handleEditConnection = (connection: Chat) => {
     setOpenConnectionMenu(null);
+    
+    // Track connection edit event
+    analyticsService.trackConnectionEdited(
+      connection.id,
+      connection.connection.type,
+      connection.connection.database
+    );
     
     handleSelectConnection(connection.id);
     
@@ -140,6 +154,17 @@ export default function Sidebar({
 
   const handleDeleteConfirm = async (chatId: string) => {
     try {
+      const connectionToDelete = connections.find(chat => chat.id === chatId);
+      
+      if (connectionToDelete) {
+        // Track connection deleted event
+        analyticsService.trackConnectionDeleted(
+          chatId,
+          connectionToDelete.connection.type,
+          connectionToDelete.connection.database
+        );
+      }
+      
       await chatService.deleteChat(chatId);
       if (onDeleteConnection) {
         onDeleteConnection(chatId);
@@ -167,6 +192,16 @@ export default function Sidebar({
         return;
       }
 
+      // Track connection selected event
+      const connection = connections.find(chat => chat.id === id);
+      if (connection) {
+        analyticsService.trackConnectionSelected(
+          id,
+          connection.connection.type,
+          connection.connection.database
+        );
+      }
+      
       setCurrentConnectedChatId(id);
       onSelectConnection(id);
       onConnectionStatusChange?.(id, false, 'sidebar-connecting');
@@ -176,7 +211,7 @@ export default function Sidebar({
       onConnectionStatusChange?.(id, false, 'sidebar-select-connection');
       toast.error('Failed to connect to database');
     }
-  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, setupSSEConnection]);
+  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections]);
 
   const handleOpenMenu = (e: React.MouseEvent, connectionId: string) => {
     e.preventDefault();
@@ -372,7 +407,7 @@ export default function Sidebar({
         </div>
 
         <button
-          onClick={onToggleExpand}
+          onClick={handleToggleExpand}
           className="absolute top-1/2 -translate-y-1/2 -right-4 p-2 bg-white hover:bg-neo-gray rounded-lg transition-colors border-2 border-black"
           title={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
         >
