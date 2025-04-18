@@ -16,11 +16,11 @@ import { UserProvider, useUser } from './contexts/UserContext';
 import authService from './services/authService';
 import './services/axiosConfig';
 import chatService from './services/chatService';
+import analyticsService from './services/analyticsService';
 import { LoginFormData, SignupFormData } from './types/auth';
 import { Chat, ChatsResponse, Connection } from './types/chat';
 import { SendMessageResponse } from './types/messages';
 import { StreamResponse } from './types/stream';
-import analyticsService from './services/analyticsService';
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -89,11 +89,29 @@ function AppContent() {
       const response = await authService.getUser();
       console.log("Auth check result:", response);
       setIsAuthenticated(response.success);
-      setUser({
-        id: response.data.id,
-        username: response.data.username,
-        created_at: response.data.created_at,
-      });
+      
+      if (response.success && response.data) {
+        const userData = {
+          id: response.data.id,
+          username: response.data.username,
+          created_at: response.data.created_at,
+        };
+        
+        setUser(userData);
+        
+        // Set user identity in analytics
+        try {
+          analyticsService.identifyUser(
+            userData.id,
+            userData.username,
+            userData.created_at
+          );
+          console.log('User identified in analytics');
+        } catch (error) {
+          console.error('Failed to identify user in analytics:', error);
+        }
+      }
+      
       setAuthError(null);
     } catch (error: any) {
       console.error('Auth check failed:', error);
@@ -151,13 +169,28 @@ function AppContent() {
     try {
       const response = await authService.login(data);
       if (response.success) {
-        setUser({
+        const userData = {
           id: response.data.user.id,
           username: response.data.user.username,
           created_at: response.data.user.created_at
-        });
+        };
+        
+        setUser(userData);
         setIsAuthenticated(true);
-        setSuccessMessage(`Welcome back, ${response.data.user.username}!`);
+        setSuccessMessage(`Welcome back, ${userData.username}!`);
+        
+        // Track login in analytics
+        try {
+          analyticsService.trackLogin(userData.id, userData.username);
+          analyticsService.identifyUser(
+            userData.id,
+            userData.username,
+            userData.created_at
+          );
+          console.log('Login tracked in analytics');
+        } catch (error) {
+          console.error('Failed to track login in analytics:', error);
+        }
       }
     } catch (error: any) {
       console.error("Login error:", error);
@@ -169,13 +202,29 @@ function AppContent() {
     try {
       const response = await authService.signup(data);
       console.log("handleSignup response", response);
-      setIsAuthenticated(true);
-      setUser({
+      
+      const userData = {
         id: response.data.user.id,
         username: response.data.user.username,
         created_at: response.data.user.created_at
-      });
-      setSuccessMessage(`Welcome to NeoBase, ${response.data.user.username}!`);
+      };
+      
+      setIsAuthenticated(true);
+      setUser(userData);
+      setSuccessMessage(`Welcome to NeoBase, ${userData.username}!`);
+      
+      // Track signup in analytics
+      try {
+        analyticsService.trackSignup(userData.id, userData.username);
+        analyticsService.identifyUser(
+          userData.id,
+          userData.username,
+          userData.created_at
+        );
+        console.log('Signup tracked in analytics');
+      } catch (error) {
+        console.error('Failed to track signup in analytics:', error);
+      }
     } catch (error: any) {
       console.error("Signup error:", error);
       throw error;
@@ -1569,7 +1618,13 @@ function AppContent() {
 function App() {
   // Initialize analytics service
   useEffect(() => {
-    analyticsService.initAnalytics();
+    try {
+      // Initialize analytics with error handling
+      analyticsService.initAnalytics();
+      console.log('Analytics initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize analytics:', error);
+    }
   }, []);
   
   return (
