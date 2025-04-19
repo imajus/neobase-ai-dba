@@ -7,6 +7,7 @@ type ConnectionStatusResponse struct {
 	Port        *int   `json:"port"`
 	Database    string `json:"database"`
 	Username    string `json:"username"`
+	IsExampleDB bool   `json:"is_example_db"`
 }
 
 type ConnectDBRequest struct {

@@ -246,6 +246,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Username:       &req.Connection.Username,
 		Password:       req.Connection.Password,
 		Database:       req.Connection.Database,
+		IsExampleDB:    true, // default is true, if false, then the database is a user's own database
 		UseSSL:         req.Connection.UseSSL,
 		SSLCertURL:     req.Connection.SSLCertURL,
 		SSLKeyURL:      req.Connection.SSLKeyURL,
@@ -1018,6 +1019,7 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			Port:           connectionCopy.Port,
 			Username:       *connectionCopy.Username,
 			Database:       connectionCopy.Database,
+			IsExampleDB:    connectionCopy.IsExampleDB,
 			UseSSL:         connectionCopy.UseSSL,
 			SSLCertURL:     connectionCopy.SSLCertURL,
 			SSLKeyURL:      connectionCopy.SSLKeyURL,

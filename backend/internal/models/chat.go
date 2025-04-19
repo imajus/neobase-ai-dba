@@ -5,12 +5,13 @@ import (
 )
 
 type Connection struct {
-	Type     string  `bson:"type" json:"type"`
-	Host     string  `bson:"host" json:"host"`
-	Port     *string `bson:"port" json:"port"`
-	Username *string `bson:"username" json:"username"`
-	Password *string `bson:"password" json:"-"` // Hide in JSON
-	Database string  `bson:"database" json:"database"`
+	Type        string  `bson:"type" json:"type"`
+	Host        string  `bson:"host" json:"host"`
+	Port        *string `bson:"port" json:"port"`
+	Username    *string `bson:"username" json:"username"`
+	Password    *string `bson:"password" json:"-"` // Hide in JSON
+	Database    string  `bson:"database" json:"database"`
+	IsExampleDB bool    `bson:"is_example_db" json:"is_example_db"` // default is false, if true, then the database is an example database configs setup from environment variables
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `bson:"use_ssl" json:"use_ssl"`
