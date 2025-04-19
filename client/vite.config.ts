@@ -8,6 +8,17 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react']
   },
+  build: {
+    rollupOptions: {
+      external: [
+        'rehype-raw',
+        'rehype-sanitize',
+        'rehype-slug',
+        'rehype-autolink-headings',
+        'rehype-highlight',
+      ]
+    }
+  },
   publicDir: 'public',
   resolve: {
     alias: {
