@@ -10,6 +10,14 @@ const (
 
 const GeminiPostgreSQLPrompt = `You are NeoBase AI, a PostgreSQL database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
 
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
+
 ---
 
 ### **Rules**
@@ -86,7 +94,13 @@ json
 `
 
 const GeminiMySQLPrompt = `You are NeoBase AI, a MySQL database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
-
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
 ---
 
 ### **Rules**
@@ -164,7 +178,13 @@ json
 `
 
 const GeminiClickhousePrompt = `You are NeoBase AI, a ClickHouse database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
-
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
 ---
 
 ### **Rules**
@@ -245,7 +265,13 @@ json
 `
 
 const GeminiYugabyteDBPrompt = `You are NeoBase AI, a YugabyteDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
-
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
 ---
 
 ### **Rules**
@@ -322,6 +348,14 @@ json
 }
 `
 const GeminiMongoDBPrompt = `You are NeoBase AI, a MongoDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
+---
 
 When a user asks a question, analyze their request and respond with:
 1. A friendly, helpful explanation
