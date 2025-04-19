@@ -459,14 +459,15 @@ func (e *MongoDBExecutor) ParseMongoDBQuery(query string) (string, string, strin
 
 	// Split the operation and parameters
 	openParenIndex := strings.Index(operationWithParams, "(")
-	closeParenIndex := strings.LastIndex(operationWithParams, ")")
-
-	if openParenIndex == -1 || closeParenIndex == -1 || closeParenIndex <= openParenIndex {
+	if openParenIndex == -1 {
 		return "", "", "", fmt.Errorf("invalid MongoDB query format. Expected: operation({...})")
 	}
 
 	operation := operationWithParams[:openParenIndex]
-	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
+	paramsStr, _, err := extractParenthesisContent(operationWithParams, openParenIndex)
+	if err != nil {
+		return "", "", "", fmt.Errorf("invalid MongoDB query format: %v", err)
+	}
 
 	return collectionName, operation, paramsStr, nil
 }

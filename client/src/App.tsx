@@ -21,6 +21,8 @@ import { LoginFormData, SignupFormData } from './types/auth';
 import { Chat, ChatsResponse, Connection } from './types/chat';
 import { SendMessageResponse } from './types/messages';
 import { StreamResponse } from './types/stream';
+import WelcomeSection from './components/app/WelcomeSection';
+import LoadingComponent from './components/app/Loading';
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1268,61 +1270,6 @@ function AppContent() {
     setShowConnectionModal(true);
   };
 
-  // Use case examples for the loading screen
-  const useCaseExamples = [
-    "Analyze sales performance with 'Show me top-selling products this quarter'",
-    "Create executive reports with 'Generate a summary of monthly revenue by region'",
-    "Identify trends with 'How has customer acquisition changed over the past year?'",
-    "Monitor KPIs by asking 'What's our current customer retention rate?'",
-    "Track inventory with 'Show me products with less than 10 units in stock'",
-    "Analyze HR data with 'What's our employee turnover rate by department?'",
-    "Get financial insights with 'Compare Q1 expenses to our annual budget'"
-  ];
-
-  // Loading component with enhanced visual appeal
-  const LoadingComponent = () => {
-    const [useCaseIndex, setUseCaseIndex] = useState(Math.floor(Math.random() * useCaseExamples.length));
-    
-    useEffect(() => {
-      // Rotate through use cases every 5 seconds
-      const interval = setInterval(() => {
-        setUseCaseIndex(prev => (prev + 1) % useCaseExamples.length);
-      }, 5000);
-      
-      return () => clearInterval(interval);
-    }, []);
-    
-    return (
-      <div className="h-screen max-h-screen overflow-hidden flex flex-col items-center justify-center bg-gradient-to-b from-white to-gray-50 p-4">
-        <div className="flex flex-col items-center justify-center max-w-md w-full text-center">
-          {/* Simple circular loader with yellow theme */}
-          <div className="w-16 h-16 mb-6 flex items-center justify-center">
-            <Loader2 className="w-16 h-16 text-[#FFDB58] animate-spin" />
-          </div>
-          
-          <h2 className="text-2xl font-bold mb-2 flex items-center">
-            Loading NeoBase <Sparkles className="w-5 h-5 ml-2 text-[#FFDB58]" />
-          </h2>
-          
-          <p className="text-gray-600 mb-8">Your AI-powered database copilot is preparing...</p>
-          
-          {/* Random use case card */}
-          <div className="neo-border bg-white p-4 rounded-lg mb-6 transition-all duration-500 ease-in-out">
-            <div className="flex items-start">
-              <div className="bg-[#FFDB58]/20 p-2 rounded-lg mr-3">
-                <Sparkles className="w-4 h-4 text-gray-800" />
-              </div>
-              <div className="text-left">
-                <h3 className="font-medium text-sm mb-1">What can Neobase do?</h3>
-                <p className="text-sm text-gray-600">{useCaseExamples[useCaseIndex]}</p>
-              </div>
-            </div>
-          </div>
-          
-        </div>
-      </div>
-    );
-  };
 
   if (isLoading) {
     return <LoadingComponent />;
@@ -1395,137 +1342,7 @@ function AppContent() {
           onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
         />
       ) : (
-        <div className={`
-                flex-1 
-                flex 
-                flex-col 
-                items-center 
-                justify-center
-                p-8 
-                mt-24
-                md:mt-12
-                min-h-[calc(100vh-4rem)] 
-                transition-all 
-                duration-300 
-                ${isSidebarExpanded ? 'md:ml-80' : 'md:ml-20'}
-            `}>
-          {/* Welcome Section */}
-          <div className="w-full max-w-4xl mx-auto text-center mb-12">
-            <h1 className="text-5xl font-bold mb-4">
-              Welcome to NeoBase
-            </h1>
-            <p className="text-xl text-gray-600 mb-2 max-w-2xl mx-auto">
-              Open-source AI-powered engine for seamless database interactions.
-              <br />
-              From SQL to NoSQL, explore and analyze your data through natural conversations.
-            </p>
-          </div>
-
-          {/* Features Cards */}
-          <div className="w-full max-w-4xl mx-auto grid md:grid-cols-3 gap-6 mb-12">
-            <button
-              onClick={() => {
-                toast.success('Talk to your database in plain English. NeoBase translates your questions into database queries automatically.', toastStyle);
-              }}
-              className="
-                            neo-border 
-                            bg-white 
-                            p-6 
-                            rounded-lg
-                            text-left
-                            transition-all
-                            duration-300
-                            hover:-translate-y-1
-                            hover:shadow-lg
-                            hover:bg-[#FFDB58]/5
-                            active:translate-y-0
-                            disabled:opacity-50
-                            disabled:cursor-not-allowed
-                        "
-            >
-              <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
-                <MessageSquare className="w-6 h-6 text-black" />
-              </div>
-              <h3 className="text-lg font-bold mb-2">
-                Natural Language Queries
-              </h3>
-              <p className="text-gray-600">
-                Talk to your database in plain English. NeoBase translates your questions into database queries automatically.
-              </p>
-            </button>
-
-            <button
-              onClick={() => setShowConnectionModal(true)}
-              className="
-                            neo-border 
-                            bg-white 
-                            p-6 
-                            rounded-lg
-                            text-left
-                            transition-all
-                            duration-300
-                            hover:-translate-y-1
-                            hover:shadow-lg
-                            hover:bg-[#FFDB58]/5
-                            active:translate-y-0
-                        "
-            >
-              <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
-                <Database className="w-6 h-6 text-black" />
-              </div>
-              <h3 className="text-lg font-bold mb-2">
-                Multi-Database Support
-              </h3>
-              <p className="text-gray-600">
-                Connect to PostgreSQL, MySQL, MongoDB, Redis, and more. One interface for all your databases.
-              </p>
-            </button>
-
-            <button
-              onClick={() => {
-                toast.success('Your data is visualized in tables or JSON format. Execute queries and see results in real-time.', toastStyle);
-              }}
-              className="
-                            neo-border 
-                            bg-white 
-                            p-6 
-                            rounded-lg
-                            text-left
-                            transition-all
-                            duration-300
-                            hover:-translate-y-1
-                            hover:shadow-lg
-                            hover:bg-[#FFDB58]/5
-                            active:translate-y-0
-                            disabled:opacity-50
-                            disabled:cursor-not-allowed
-                        "
-            >
-              <div className="w-12 h-12 bg-[#FFDB58]/20 rounded-lg flex items-center justify-center mb-4">
-                <LineChart className="w-6 h-6 text-black" />
-              </div>
-              <h3 className="text-lg font-bold mb-2">
-                Visualize Results
-              </h3>
-              <p className="text-gray-600">
-                View your data in tables or JSON format. Execute queries and see results in real-time.
-              </p>
-            </button>
-          </div>
-
-          {/* CTA Section */}
-          <div className="text-center">
-            <button
-              onClick={() => setShowConnectionModal(true)}
-              className="neo-button text-lg px-8 py-4 mb-4"
-            >
-              Create New Connection
-            </button>
-            <p className="text-gray-600">
-              or select an existing one from the sidebar to begin
-            </p>
-          </div>
-        </div>
+        <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />
       )}
 
       {showConnectionModal && (

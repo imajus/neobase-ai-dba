@@ -1194,3 +1194,39 @@ func processDotNotationInAggregation(pipeline []bson.M) error {
 
 	return nil
 }
+
+// extractParenthesisContent extracts the content between matching parentheses,
+// correctly handling nested parentheses
+func extractParenthesisContent(str string, startIndex int) (string, int, error) {
+	// startIndex should point to the opening parenthesis
+	if startIndex >= len(str) || str[startIndex] != '(' {
+		return "", -1, fmt.Errorf("invalid start index: opening parenthesis not found at position %d", startIndex)
+	}
+
+	// Initialize counters and result
+	openCount := 1
+	closeIndex := -1
+
+	// Find the matching closing parenthesis by counting opened and closed parentheses
+	for i := startIndex + 1; i < len(str); i++ {
+		if str[i] == '(' {
+			openCount++
+		} else if str[i] == ')' {
+			openCount--
+			if openCount == 0 {
+				closeIndex = i
+				break
+			}
+		}
+	}
+
+	// If we didn't find a matching parenthesis
+	if closeIndex == -1 {
+		return "", -1, fmt.Errorf("no matching closing parenthesis found")
+	}
+
+	// Extract the content between the parentheses (exclusive of the parentheses themselves)
+	content := str[startIndex+1 : closeIndex]
+
+	return content, closeIndex, nil
+}

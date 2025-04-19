@@ -404,9 +404,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 	// Split the operation and parameters
 	// Example: find({name: "John"}) -> operation = find, params = {name: "John"}
 	openParenIndex := strings.Index(operationWithParams, "(")
-	closeParenIndex := strings.LastIndex(operationWithParams, ")")
-
-	if openParenIndex == -1 || closeParenIndex == -1 || closeParenIndex <= openParenIndex {
+	if openParenIndex == -1 {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "Invalid MongoDB query format. Expected: operation({...})",
@@ -415,9 +413,17 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 	}
 
-	// Extract the operation and parameters
+	// Extract the operation and parameters using the helper function that handles nested parentheses
 	operation := operationWithParams[:openParenIndex]
-	paramsStr := operationWithParams[openParenIndex+1 : closeParenIndex]
+	paramsStr, closeParenIndex, extractErr := extractParenthesisContent(operationWithParams, openParenIndex)
+	if extractErr != nil {
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Message: fmt.Sprintf("Invalid MongoDB query format: %v", extractErr),
+				Code:    "INVALID_QUERY",
+			},
+		}
+	}
 
 	log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted operation: %s, params: %s", operation, paramsStr)
 
@@ -960,23 +966,37 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 
 	case "updateOne":
-		// Parse the parameters as filter and update
-		// Expected format: ({filter}, {update})
-		params := strings.SplitN(paramsStr, ",", 2)
-		if len(params) != 2 {
+		// Parse the parameters as a BSON filter and update
+		// The parameters should be in the format {filter}, {update}
+
+		// Split the parameters into filter and update
+		splitParams := strings.Split(paramsStr, "}, {")
+		if len(splitParams) < 2 {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: "Invalid parameters for updateOne. Expected: ({filter}, {update})",
+					Message: "Invalid parameters for updateOne. Expected format: {filter}, {update}",
 					Code:    "INVALID_PARAMETERS",
 				},
 			}
 		}
 
-		// Process filter with MongoDB syntax
-		filterStr := params[0]
-		updateStr := params[1]
+		// Reconstruct the filter and update objects
+		filterStr := splitParams[0]
+		if !strings.HasPrefix(filterStr, "{") {
+			filterStr = "{" + filterStr
+		}
+		if !strings.HasSuffix(filterStr, "}") {
+			filterStr = filterStr + "}"
+		}
 
-		// Process the filter to handle MongoDB syntax
+		updateStr := "{" + splitParams[1]
+		if !strings.HasSuffix(updateStr, "}") {
+			updateStr = updateStr + "}"
+		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Split parameters into filter: %s and update: %s", filterStr, updateStr)
+
+		// Parse the filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
@@ -998,7 +1018,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Message: fmt.Sprintf("Failed to parse filter parameters after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
 				}
@@ -1016,7 +1036,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after conversion: %s", string(filterJSON))
 		}
 
 		// Process update with MongoDB syntax
@@ -1071,23 +1091,37 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 
 	case "updateMany":
-		// Parse the parameters as filter and update
-		// Expected format: ({filter}, {update})
-		params := strings.SplitN(paramsStr, ",", 2)
-		if len(params) != 2 {
+		// Parse the parameters as a BSON filter and update
+		// The parameters should be in the format {filter}, {update}
+
+		// Split the parameters into filter and update
+		splitParams := strings.Split(paramsStr, "}, {")
+		if len(splitParams) < 2 {
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: "Invalid parameters for updateMany. Expected: ({filter}, {update})",
+					Message: "Invalid parameters for updateMany. Expected format: {filter}, {update}",
 					Code:    "INVALID_PARAMETERS",
 				},
 			}
 		}
 
-		// Process filter with MongoDB syntax
-		filterStr := params[0]
-		updateStr := params[1]
+		// Reconstruct the filter and update objects
+		filterStr := splitParams[0]
+		if !strings.HasPrefix(filterStr, "{") {
+			filterStr = "{" + filterStr
+		}
+		if !strings.HasSuffix(filterStr, "}") {
+			filterStr = filterStr + "}"
+		}
 
-		// Process the filter to handle MongoDB syntax
+		updateStr := "{" + splitParams[1]
+		if !strings.HasSuffix(updateStr, "}") {
+			updateStr = updateStr + "}"
+		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Split parameters into filter: %s and update: %s", filterStr, updateStr)
+
+		// Parse the filter
 		var filter bson.M
 		if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
@@ -1109,7 +1143,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{
-						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
+						Message: fmt.Sprintf("Failed to parse filter parameters after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
 				}
@@ -1127,7 +1161,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 			// Log the final filter for debugging
 			filterJSON, _ := json.Marshal(filter)
-			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after ObjectId conversion: %s", string(filterJSON))
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final filter after conversion: %s", string(filterJSON))
 		}
 
 		// Process update with MongoDB syntax
@@ -1301,6 +1335,24 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		}
 
 	case "aggregate":
+		// Extract the aggregation pipeline if necessary
+		// Find the opening parenthesis
+		pipelineStart := strings.Index(query, ".aggregate(")
+		if pipelineStart == -1 {
+			pipelineStart = strings.Index(query, "aggregate(")
+		}
+
+		if pipelineStart != -1 {
+			// Extract the parenthesis content using the helper function
+			openParenIndex := pipelineStart + strings.Index(query[pipelineStart:], "(")
+			pipelineStr, _, pipelineErr := extractParenthesisContent(query, openParenIndex)
+			if pipelineErr == nil {
+				// If the extraction was successful, use the extracted pipeline
+				paramsStr = pipelineStr
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted aggregation pipeline: %s", paramsStr)
+			}
+		}
+
 		var pipeline []bson.M
 
 		// Try to parse the pipeline directly as a JSON array
