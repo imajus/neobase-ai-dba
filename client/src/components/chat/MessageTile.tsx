@@ -8,6 +8,7 @@ import ConfirmationModal from '../modals/ConfirmationModal';
 import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
 import LoadingSteps from './LoadingSteps';
 import { Message, QueryResult } from './types';
+import MarkdownRenderer from './MarkdownRenderer';
 
 interface QueryState {
     isExecuting: boolean;
@@ -1648,17 +1649,24 @@ export default function MessageTile({
                                         </button>
                                     </div>
                                 </div>
-                            ) : (
+                            ) :
+                            // Message content
+                             (
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
-                                    <p className="text-lg whitespace-pre-wrap break-words">
-                                        {removeDuplicateContent(message.content)}
-                                        {message.is_edited && message.type === 'user' && (
-                                            <span className="ml-2 text-xs text-gray-600 italic">
-                                                (edited)
-                                            </span>
-                                        )}
-                                    </p>
-                                    
+                                 <div className='flex flex-col gap-1'>
+                                    {message.type === 'user' ? (
+                                        <p className='text-lg whitespace-pre-wrap break-words'>{removeDuplicateContent(message.content)}</p>) :
+                                    (   <MarkdownRenderer 
+                                            markdown={removeDuplicateContent(message.content)}
+                                        />
+                                    )
+                                    }
+                                    {message.is_edited && message.type === 'user' && (
+                                        <span className="text-xs text-gray-600 italic">
+                                            (edited)
+                                        </span>
+                                    )}
+                                    </div>
                                     {message.queries && message.queries.length > 0 && (
                                         <div className="min-w-full">
                                             {message.queries.map((query: QueryResult, index: number) => {

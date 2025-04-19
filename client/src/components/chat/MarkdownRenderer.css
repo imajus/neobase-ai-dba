@@ -1,0 +1,251 @@
+/* Markdown Renderer Styles */
+.markdown-renderer {
+  font-size: 18px;
+  line-height: 1.6;
+  color: #000000; /* Black text color to match the neo design */
+  font-family: '', sans-serif;
+}
+
+.markdown-renderer h1,
+.markdown-renderer h2,
+.markdown-renderer h3,
+.markdown-renderer h4,
+.markdown-renderer h5,
+.markdown-renderer h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #000000; /* Black headers */
+}
+
+.markdown-renderer h1 {
+  font-size: 2em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-renderer h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-renderer h3 {
+  font-size: 1.25em;
+}
+
+.markdown-renderer h4 {
+  font-size: 1em;
+}
+
+.markdown-renderer p {
+  margin-top: 0;
+  margin-bottom: 2px;
+  color: #000000; /* Black text */
+}
+
+.markdown-renderer p + p {
+  margin-top: 2px;
+}
+
+.markdown-renderer a {
+  color: #000000;
+  text-decoration: none;
+}
+
+.markdown-renderer a:hover{
+  color: #000000;
+  cursor: not-allowed;
+}
+.markdown-renderer code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: rgba(27, 35, 28, 0.1);
+  border-radius: 3px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  color: #000000;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+}
+
+.markdown-renderer pre {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #f6f8fa;
+  border-radius: 3px;
+  margin-top: 0;
+  margin-bottom: 16px;
+  border: 4px solid #000;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+}
+
+.markdown-renderer pre code {
+  padding: 0;
+  margin: 0;
+  background-color: transparent;
+  border: 0;
+  word-break: normal;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.markdown-renderer blockquote {
+  padding: 0 1em;
+  color: #000000; /* Black text */
+  border-left: 4px solid #000;
+  margin: 0 0 16px 0;
+  background-color: rgba(57, 255, 20, 0.2);
+  border: 4px solid #000;
+  border-radius: 11px;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  padding: 16px;
+}
+
+.markdown-renderer ul,
+.markdown-renderer ol {
+  padding-left: 1em;
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: #000000; /* Black text */
+}
+
+.markdown-renderer ul li,
+.markdown-renderer ol li {
+  margin-bottom: 4px;
+  color: #000000; /* Explicitly black text for list items */
+}
+
+.markdown-renderer table {
+  display: block;
+  width: 100%;
+  overflow: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+  border: 4px solid #000;
+  border-radius: 11px;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  color: #000000; /* Black text */
+}
+
+.markdown-renderer table th {
+  font-weight: 600;
+  color: #000000;
+}
+
+.markdown-renderer table th,
+.markdown-renderer table td {
+  padding: 6px 13px;
+  border: 1px solid #dfe2e5;
+}
+
+.markdown-renderer table tr {
+  background-color: #fff;
+  border-top: 1px solid #c6cbd1;
+}
+
+.markdown-renderer table tr:nth-child(2n) {
+  background-color: #f0f0f0;
+}
+
+.markdown-renderer img {
+  max-width: 100%;
+  box-sizing: content-box;
+  background-color: #fff;
+  border: 4px solid #000;
+  border-radius: 11px;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+}
+
+.markdown-renderer hr {
+  height: 4px;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #000;
+  border: 0;
+}
+
+.code-block-wrapper {
+  position: relative;
+  background: #f6f8fa;
+  border-radius: 7px;
+  margin-bottom: 16px;
+}
+
+.code-language-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: #000;
+  font-weight: 500;
+  font-size: 12px;
+  padding: 4px 8px;
+  background: #FFDB58;
+  border-top-right-radius: 3px;
+  border-bottom-left-radius: 3px;
+  border-left: 1px solid #000;
+  border-bottom: 1px solid #000;
+}
+
+/* Custom components for neo design */
+.markdown-renderer .task-list-item {
+  list-style-type: none;
+}
+
+.markdown-renderer .task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+/* Add neo-button styles for inline buttons that might be in the markdown */
+.markdown-renderer button {
+  border: 4px solid #000;
+  border-radius: 11px;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  padding: 8px 16px;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.markdown-renderer button:hover {
+  transform: translateY(-2px);
+  box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 1);
+}
+
+.markdown-renderer button:active {
+  transform: translateY(0px);
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+}
+
+/* Syntax highlighting */
+.markdown-renderer .hljs {
+  border-radius: 7px;
+  padding: 16px;
+  background-color: #f6f8fa;
+  color: #000000; /* Black text */
+}
+
+.markdown-renderer .hljs-keyword,
+.markdown-renderer .hljs-selector-tag {
+  color: #d73a49;
+}
+
+.markdown-renderer .hljs-string,
+.markdown-renderer .hljs-attr {
+  color: #032f62;
+}
+
+.markdown-renderer .hljs-comment {
+  color: #6a737d;
+}
+
+.markdown-renderer .hljs-literal,
+.markdown-renderer .hljs-number {
+  color: #005cc5;
+}
+
+.markdown-renderer .hljs-tag {
+  color: #22863a;
+} 
