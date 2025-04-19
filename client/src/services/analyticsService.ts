@@ -177,6 +177,21 @@ export const trackSidebarToggled = (isExpanded: boolean) => {
   trackEvent('sidebar_toggled', { isExpanded });
 };
 
+// Add this function with the other tracking functions
+export const trackConnectionDuplicated = (connectionId: string, connectionType: string, databaseName: string, withMessages: boolean) => {
+  try {
+    trackEvent('connection_duplicated', {
+      connectionId,
+      connectionType,
+      databaseName,
+      withMessages
+    });
+    console.log('[Analytics] Tracked Connection Duplicated event');
+  } catch (error) {
+    console.error('[Analytics] Failed to track Connection Duplicated event:', error);
+  }
+};
+
 // Export default service
 const analyticsService = {
   initAnalytics,
@@ -197,7 +212,8 @@ const analyticsService = {
   trackSchemaCancelled,
   trackQueryExecuted,
   trackQueryCancelled,
-  trackSidebarToggled
+  trackSidebarToggled,
+  trackConnectionDuplicated
 };
 
 export default analyticsService; 

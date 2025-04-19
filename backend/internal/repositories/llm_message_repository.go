@@ -19,6 +19,7 @@ type LLMMessageRepository interface {
 	FindMessageByID(id primitive.ObjectID) (*models.LLMMessage, error)
 	FindMessageByChatMessageID(messageID primitive.ObjectID) (*models.LLMMessage, error)
 	FindMessagesByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, int64, error)
+	FindMessagesByChatIDWithPagination(chatID primitive.ObjectID, page int, pageSize int) ([]*models.LLMMessage, int64, error)
 	DeleteMessagesByChatID(chatID primitive.ObjectID, dontDeleteSystemMessages bool) error
 	DeleteMessagesByRole(chatID primitive.ObjectID, role string) error
 	GetByChatID(chatID primitive.ObjectID) ([]*models.LLMMessage, error)
@@ -71,6 +72,30 @@ func (r *llmMessageRepository) FindMessagesByChatID(chatID primitive.ObjectID) (
 
 	opts := options.Find().
 		SetSort(bson.D{{Key: "created_at", Value: -1}})
+
+	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &messages)
+	return messages, total, err
+}
+
+func (r *llmMessageRepository) FindMessagesByChatIDWithPagination(chatID primitive.ObjectID, page int, pageSize int) ([]*models.LLMMessage, int64, error) {
+	var messages []*models.LLMMessage
+	filter := bson.M{"chat_id": chatID}
+
+	total, err := r.messageCollection.CountDocuments(context.Background(), filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}}). // Sort by created_at in descending order
+		SetSkip(int64((page - 1) * pageSize)).
+		SetLimit(int64(pageSize))
 
 	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
 	if err != nil {

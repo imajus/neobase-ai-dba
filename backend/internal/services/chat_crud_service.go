@@ -41,6 +41,7 @@ type ChatService interface {
 	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error)
 	UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
+	Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error)
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
 	EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error)
 	GetDBConnectionStatus(ctx context.Context, userID, chatID string) (*dtos.ConnectionStatusResponse, uint32, error)
@@ -246,6 +247,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Username:       &req.Connection.Username,
 		Password:       req.Connection.Password,
 		Database:       req.Connection.Database,
+		IsExampleDB:    true, // default is true, if false, then the database is a user's own database
 		UseSSL:         req.Connection.UseSSL,
 		SSLCertURL:     req.Connection.SSLCertURL,
 		SSLKeyURL:      req.Connection.SSLKeyURL,
@@ -441,7 +443,13 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 	if err := s.chatRepo.Delete(chatObjID); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat: %v", err)
 	}
-	// We want to delete messages, except system messages
+
+	// Delete messages
+	if err := s.chatRepo.DeleteMessages(chatObjID); err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
+	}
+
+	// Delete LLM messages
 	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID, false); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
 	}
@@ -709,6 +717,245 @@ func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
 	}
 
 	return http.StatusOK, nil
+}
+
+// Duplicate a chat
+func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error) {
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	// Verify chat ownership
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+	if chat == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+	}
+	if chat.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Duplicate the chat
+	newChat := &models.Chat{
+		UserID:              userObjID,
+		Connection:          chat.Connection,
+		SelectedCollections: chat.SelectedCollections,
+		AutoExecuteQuery:    chat.AutoExecuteQuery,
+		Base:                models.NewBase(), // Create a new Base with new ID and timestamps
+	}
+
+	if err := s.chatRepo.Create(newChat); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create duplicate chat: %v", err)
+	}
+
+	// if duplicateMessages is true, then we duplicate both regular messages and LLM messages
+	if duplicateMessages {
+		// Create a mapping of old message IDs to new message IDs to maintain relationships
+		messageIDMap := make(map[primitive.ObjectID]primitive.ObjectID)
+		messageIDMapMutex := &sync.Mutex{}
+
+		// First, get all messages in the original chat in a single query to maintain their ordering
+		allMessages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 1000) // Large page size to get all
+		if err != nil {
+			log.Printf("Warning: failed to fetch messages: %v", err)
+			// Continue without messages, at least the chat was duplicated
+			return s.buildChatResponse(newChat), http.StatusOK, nil
+		}
+
+		if len(allMessages) > 0 {
+			// Sort messages by created_at to ensure proper ordering
+			sort.Slice(allMessages, func(i, j int) bool {
+				return allMessages[i].CreatedAt.Before(allMessages[j].CreatedAt)
+			})
+
+			log.Printf("Duplicating %d messages in order", len(allMessages))
+
+			// Process messages sequentially to ensure correct ordering
+			baseTime := time.Now()
+			for i, originalMsg := range allMessages {
+				// Create a new message with the same content but for the new chat
+				newMsg := &models.Message{
+					UserID:   userObjID,
+					ChatID:   newChat.ID,
+					Type:     originalMsg.Type,
+					Content:  originalMsg.Content,
+					IsEdited: originalMsg.IsEdited,
+					Base:     models.NewBase(), // Create a new Base with new ID and timestamps
+				}
+
+				// Set timestamps with precise sequential ordering
+				newMsg.CreatedAt = baseTime.Add(time.Duration(i*1000) * time.Millisecond) // 1 second increment
+				newMsg.UpdatedAt = newMsg.CreatedAt
+
+				if originalMsg.UserMessageId != nil {
+					messageIDMapMutex.Lock()
+					if newID, exists := messageIDMap[*originalMsg.UserMessageId]; exists {
+						newMsg.UserMessageId = &newID
+					}
+					messageIDMapMutex.Unlock()
+				}
+
+				// Copy queries if they exist
+				if originalMsg.Queries != nil {
+					queries := make([]models.Query, len(*originalMsg.Queries))
+					for i, q := range *originalMsg.Queries {
+						// Create a copy of the query with a new ID
+						queries[i] = models.Query{
+							ID:                     primitive.NewObjectID(),
+							Query:                  q.Query,
+							QueryType:              q.QueryType,
+							Tables:                 q.Tables,
+							Description:            q.Description,
+							RollbackDependentQuery: q.RollbackDependentQuery, // Will update in second pass
+							RollbackQuery:          q.RollbackQuery,
+							ExecutionTime:          q.ExecutionTime,
+							ExampleExecutionTime:   q.ExampleExecutionTime,
+							CanRollback:            q.CanRollback,
+							IsCritical:             q.IsCritical,
+							IsExecuted:             false, // Reset execution state in the duplicate
+							IsRolledBack:           false, // Reset rollback state
+							Error:                  q.Error,
+							ExampleResult:          q.ExampleResult,
+							ExecutionResult:        nil, // Clear execution results
+							IsEdited:               q.IsEdited,
+							Metadata:               q.Metadata,
+							ActionAt:               q.ActionAt,
+						}
+
+						// Copy pagination if it exists
+						if q.Pagination != nil {
+							queries[i].Pagination = &models.Pagination{
+								TotalRecordsCount: q.Pagination.TotalRecordsCount,
+								PaginatedQuery:    q.Pagination.PaginatedQuery,
+								CountQuery:        q.Pagination.CountQuery,
+							}
+						}
+					}
+					newMsg.Queries = &queries
+				}
+
+				// Copy action buttons if they exist
+				if originalMsg.ActionButtons != nil {
+					actionButtons := make([]models.ActionButton, len(*originalMsg.ActionButtons))
+					for i, btn := range *originalMsg.ActionButtons {
+						actionButtons[i] = models.ActionButton{
+							ID:        primitive.NewObjectID(),
+							Label:     btn.Label,
+							Action:    btn.Action,
+							IsPrimary: btn.IsPrimary,
+						}
+					}
+					newMsg.ActionButtons = &actionButtons
+				}
+
+				// Save the new message
+				if err := s.chatRepo.CreateMessage(newMsg); err != nil {
+					log.Printf("Error duplicating message: %v", err)
+					continue
+				}
+
+				// Store the ID mapping
+				messageIDMapMutex.Lock()
+				messageIDMap[originalMsg.ID] = newMsg.ID
+				messageIDMapMutex.Unlock()
+			}
+		}
+
+		// Now handle LLM messages
+		allLLMMessages, _, err := s.llmRepo.FindMessagesByChatID(chatObjID)
+		if err != nil {
+			log.Printf("Warning: failed to fetch LLM messages: %v", err)
+			// Continue without LLM messages
+			return s.buildChatResponse(newChat), http.StatusOK, nil
+		}
+
+		if len(allLLMMessages) > 0 {
+			// Sort LLM messages by created_at to ensure proper ordering
+			sort.Slice(allLLMMessages, func(i, j int) bool {
+				return allLLMMessages[i].CreatedAt.Before(allLLMMessages[j].CreatedAt)
+			})
+
+			log.Printf("Duplicating %d LLM messages in order", len(allLLMMessages))
+
+			// Process LLM messages sequentially
+			baseLLMTime := time.Now().Add(time.Hour) // Use a different time base to differentiate from regular messages
+			for i, llmMsg := range allLLMMessages {
+				// Create a new LLM message with the same content but for the new chat
+				newLLMMsg := &models.LLMMessage{
+					ChatID:   newChat.ID,
+					UserID:   userObjID,
+					Role:     llmMsg.Role,
+					Content:  llmMsg.Content, // Copy the content map
+					IsEdited: llmMsg.IsEdited,
+					Base:     models.NewBase(), // Create a new Base with new ID and timestamps
+				}
+
+				// Set unique timestamps
+				newLLMMsg.CreatedAt = baseLLMTime.Add(time.Duration(i*1000) * time.Millisecond) // 1 second increment
+				newLLMMsg.UpdatedAt = newLLMMsg.CreatedAt
+
+				// Map the original message ID to the new one
+				messageIDMapMutex.Lock()
+				newID, exists := messageIDMap[llmMsg.MessageID]
+				messageIDMapMutex.Unlock()
+
+				if exists {
+					newLLMMsg.MessageID = newID
+					log.Printf("Mapping LLM message: original message ID %s -> new message ID %s",
+						llmMsg.MessageID.Hex(), newID.Hex())
+				} else {
+					// If the message ID isn't mapped, create a new ID
+					newLLMMsg.MessageID = primitive.NewObjectID()
+					log.Printf("Warning: couldn't find mapping for message ID %s when duplicating LLM message",
+						llmMsg.MessageID.Hex())
+				}
+
+				// Save the new LLM message
+				if err := s.llmRepo.CreateMessage(newLLMMsg); err != nil {
+					log.Printf("Error duplicating LLM message: %v", err)
+					continue
+				}
+			}
+		}
+
+		// Second pass to update complex relationships if needed
+		newMessages, _, err := s.chatRepo.FindMessagesByChat(newChat.ID, 1, 1000)
+		if err == nil && len(newMessages) > 0 {
+			for _, message := range newMessages {
+				needsUpdate := false
+
+				// Update query relationships if needed
+				if message.Queries != nil {
+					for i := range *message.Queries {
+						// Update RollbackDependentQuery if it exists
+						if (*message.Queries)[i].RollbackDependentQuery != nil {
+							// For simplicity, set to nil
+							(*message.Queries)[i].RollbackDependentQuery = nil
+							needsUpdate = true
+						}
+					}
+				}
+
+				if needsUpdate {
+					if err := s.chatRepo.UpdateMessage(message.ID, message); err != nil {
+						log.Printf("Error updating duplicated message relationships: %v", err)
+					}
+				}
+			}
+		}
+
+		log.Printf("Chat duplication completed successfully with messages. New chat ID: %s", newChat.ID.Hex())
+	}
+
+	return s.buildChatResponse(newChat), http.StatusOK, nil
 }
 
 // List messages for a chat
@@ -1018,6 +1265,7 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			Port:           connectionCopy.Port,
 			Username:       *connectionCopy.Username,
 			Database:       connectionCopy.Database,
+			IsExampleDB:    connectionCopy.IsExampleDB,
 			UseSSL:         connectionCopy.UseSSL,
 			SSLCertURL:     connectionCopy.SSLCertURL,
 			SSLKeyURL:      connectionCopy.SSLKeyURL,

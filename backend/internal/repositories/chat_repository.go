@@ -130,9 +130,9 @@ func (r *chatRepository) FindMessagesByChat(chatID primitive.ObjectID, page, pag
 	// Setup pagination
 	skip := int64((page - 1) * pageSize)
 	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}}). // Descending order for messages, ex: latest message will be first
 		SetSkip(skip).
-		SetLimit(int64(pageSize)).
-		SetSort(bson.D{{Key: "created_at", Value: 1}}) // Ascending order for messages
+		SetLimit(int64(pageSize))
 
 	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
 	if err != nil {

@@ -16,12 +16,13 @@ type CreateConnectionRequest struct {
 }
 
 type ConnectionResponse struct {
-	ID       string  `json:"id" binding:"required"`
-	Type     string  `json:"type" binding:"required"`
-	Host     string  `json:"host" binding:"required"`
-	Port     *string `json:"port"`
-	Username string  `json:"username" binding:"required"`
-	Database string  `json:"database" binding:"required"`
+	ID          string  `json:"id" binding:"required"`
+	Type        string  `json:"type" binding:"required"`
+	Host        string  `json:"host" binding:"required"`
+	Port        *string `json:"port"`
+	Username    string  `json:"username" binding:"required"`
+	Database    string  `json:"database" binding:"required"`
+	IsExampleDB bool    `json:"is_example_db"`
 	// Password not exposed in response
 
 	// SSL/TLS Configuration

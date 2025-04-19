@@ -6,6 +6,7 @@ export interface Connection {
     username: string;
     password?: string;
     database: string;
+    is_example_db: boolean;
     use_ssl?: boolean;
     ssl_cert_url?: string;
     ssl_key_url?: string;
