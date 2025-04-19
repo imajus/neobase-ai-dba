@@ -2,6 +2,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   ArrowRight,
   Boxes,
+  Copy,
   HelpCircle,
   Loader2,
   MoreVertical,
@@ -22,6 +23,7 @@ import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import DeleteConnectionModal from '../modals/DeleteConnectionModal';
+import DuplicateChatModal from '../modals/DuplicateChatModal';
 import { DemoModal } from '../modals/DemoModal';
 
 export interface Connection {
@@ -39,6 +41,7 @@ interface SidebarProps {
   onLogout: () => void;
   onDeleteConnection?: (id: string) => void;
   onEditConnection?: () => void;
+  onDuplicateConnection?: (id: string) => void;
   selectedConnection?: Chat;
   isLoadingConnections: boolean;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
@@ -64,12 +67,14 @@ export default function Sidebar({
   onLogout,
   onDeleteConnection,
   onEditConnection,
+  onDuplicateConnection,
   selectedConnection,
   isLoadingConnections,
   onConnectionStatusChange,
 }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [connectionToDelete, setConnectionToDelete] = useState<Chat | null>(null);
+  const [connectionToDuplicate, setConnectionToDuplicate] = useState<Chat | null>(null);
   const [currentConnectedChatId, setCurrentConnectedChatId] = useState<string | null>(null);
   const previousConnectionRef = useRef<string | null>(null);
   const { user } = useUser();
@@ -235,6 +240,57 @@ export default function Sidebar({
     e.stopPropagation(); // Prevent triggering the parent button's onClick
     localStorage.setItem("isTutorialClosed", "true");
     setIsTutorialClosed(true);
+  };
+
+  const handleDuplicateConnection = (connection: Chat) => {
+    setOpenConnectionMenu(null);
+    setConnectionToDuplicate(connection);
+  };
+
+  const handleDuplicateConfirm = async (chatId: string, duplicateMessages: boolean) => {
+    try {
+      const connectionToDuplicate = connections.find(chat => chat.id === chatId);
+      
+      if (connectionToDuplicate) {
+        // Track connection duplicate event in analytics
+        analyticsService.trackConnectionDuplicated(
+          chatId,
+          connectionToDuplicate.connection.type,
+          connectionToDuplicate.connection.database,
+          duplicateMessages
+        );
+      }
+
+      // Call the duplicateChat service and get the duplicated chat
+      const duplicatedChat = await chatService.duplicateChat(chatId, duplicateMessages);
+      
+      // Call the onDuplicateConnection callback with the ID of the duplicated chat
+      if (onDuplicateConnection) {
+        onDuplicateConnection(duplicatedChat.id);
+      }
+      
+      toast.success('Chat duplicated successfully!', {
+        style: {
+          background: '#000',
+          color: '#fff',
+          border: '4px solid #000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+        },
+      });
+      
+      setConnectionToDuplicate(null);
+    } catch (error: any) {
+      toast.error(error.message, {
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+        },
+      });
+    }
   };
 
   return (
@@ -436,10 +492,21 @@ export default function Sidebar({
       {connectionToDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <DeleteConnectionModal
-            connectionName={connectionToDelete.connection.database}
+            connectionName={connectionToDelete.connection.is_example_db ? "Sample Database" : connectionToDelete.connection.database}
             chatId={connectionToDelete.id}
             onConfirm={handleDeleteConfirm}
             onCancel={() => setConnectionToDelete(null)}
+          />
+        </div>
+      )}
+
+      {connectionToDuplicate && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <DuplicateChatModal
+            chatName={connectionToDuplicate.connection.database}
+            chatId={connectionToDuplicate.id}
+            onConfirm={handleDuplicateConfirm}
+            onCancel={() => setConnectionToDuplicate(null)}
           />
         </div>
       )}
@@ -468,6 +535,21 @@ export default function Sidebar({
             >
               <Pencil className="w-4 h-4 mr-2 text-black" />
               Edit Connection
+            </button>
+            <div className="h-px bg-gray-200 mx-2"></div>
+            <button 
+              onClick={() => {
+                const connection = connections.find(c => c.id === openConnectionMenu);
+                if (connection) {
+                  handleDuplicateConnection(connection);
+                }
+                setOpenConnectionMenu(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-[#FFDB58] transition-colors"
+            >
+              <Copy className="w-4 h-4 mr-2 text-black" />
+              Duplicate Chat
             </button>
             <div className="h-px bg-gray-200 mx-2"></div>
             <button 

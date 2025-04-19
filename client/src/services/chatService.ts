@@ -329,6 +329,32 @@ const chatService = {
         }
     },
 
+      // Add a method to get a single chat
+      async duplicateChat(chatId: string, duplicateMessages: boolean = false): Promise<Chat> {
+        try {
+            const response = await axios.post<{success: boolean, data: Chat}>(
+                `${API_URL}/chats/${chatId}/duplicate?duplicate_messages=${duplicateMessages}`,
+                {},  // Empty body
+                {    // Proper options object with headers
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+
+            if (!response.data.success) {
+                throw new Error('Failed to duplicate chat');
+            }
+
+            return response.data.data;
+        } catch (error: any) {
+            console.error('Duplicate chat error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to duplicate chat');
+        }
+    },
+
     async getTables(chatId: string): Promise<TablesResponse> {
         try {
             console.log(`chatService.getTables called for chatId: ${chatId}`);

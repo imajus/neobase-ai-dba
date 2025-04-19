@@ -180,6 +180,34 @@ func (h *ChatHandler) Delete(c *gin.Context) {
 	})
 }
 
+// @Summary Duplicate a chat
+// @Description Duplicate a chat
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Param duplicate_messages query bool false "Duplicate messages" default(false)
+
+func (h *ChatHandler) Duplicate(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	duplicateMessages := c.Query("duplicate_messages") == "true"
+
+	response, statusCode, err := h.chatService.Duplicate(userID, chatID, duplicateMessages)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
 // @Summary List messages
 // @Description List all messages for a chat
 // @Accept json

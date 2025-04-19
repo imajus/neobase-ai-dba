@@ -1274,6 +1274,55 @@ function AppContent() {
     setShowConnectionModal(true);
   };
 
+  const handleDuplicateConnection = useCallback(async (chatId: string) => {
+    try {
+      console.log('Duplicating chat with ID:', chatId);
+      
+      // First, fetch the duplicated chat
+      const duplicatedChat = await chatService.getChat(chatId);
+      console.log('Retrieved duplicated chat:', duplicatedChat);
+      
+      // Add the duplicated chat to the chats list if it's not already there
+      setChats(prev => {
+        // Check if chat already exists in the list
+        if (prev.some(c => c.id === duplicatedChat.id)) {
+          console.log('Chat already exists in list, not adding duplicate');
+          return prev;
+        }
+        return [...prev, duplicatedChat];
+      });
+      
+      // Select the duplicated chat
+      setSelectedConnection(duplicatedChat);
+      
+      // Show success message
+      setSuccessMessage('Chat duplicated successfully!');
+      
+      // Setup connection for the new chat
+      try {
+        await setupSSEConnection(chatId);
+        
+        // Update connection status
+        handleConnectionStatusChange(chatId, true, 'duplicate-connection');
+      } catch (connectionError) {
+        console.error('Failed to establish connection to duplicated chat:', connectionError);
+        toast('Chat duplicated, but connection could not be established automatically. Try selecting the chat again.', {
+          ...toastStyle,
+          style: {
+            ...toastStyle.style,
+            background: '#ffcc00',
+            color: '#000',
+            border: '4px solid #e6b800'
+          },
+          icon: '⚠️'
+        });
+      }
+      
+    } catch (error: any) {
+      console.error('Failed to handle duplicated chat:', error);
+      toast.error(`Failed to access duplicated chat: ${error.message}`, errorToast);
+    }
+  }, [handleConnectionStatusChange, setupSSEConnection, toastStyle, errorToast, setSuccessMessage]);
 
   if (isLoading) {
     return <LoadingComponent />;
@@ -1321,6 +1370,7 @@ function AppContent() {
         selectedConnection={selectedConnection}
         onDeleteConnection={handleDeleteConnection}
         onEditConnection={handleEditConnectionFromChatWindow}
+        onDuplicateConnection={handleDuplicateConnection}
         onConnectionStatusChange={handleConnectionStatusChange}
         eventSource={eventSource}
       />

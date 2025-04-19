@@ -23,6 +23,7 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.GET("/:id", chatHandler.GetByID)
 		protected.PATCH("/:id", chatHandler.Update)
 		protected.DELETE("/:id", chatHandler.Delete)
+		protected.POST("/:id/duplicate", chatHandler.Duplicate) // Has query param "duplicate_messages"
 
 		// Messages within a chat
 		protected.GET("/:id/messages", chatHandler.ListMessages)
