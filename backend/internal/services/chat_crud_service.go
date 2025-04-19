@@ -443,7 +443,13 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 	if err := s.chatRepo.Delete(chatObjID); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat: %v", err)
 	}
-	// We want to delete messages, except system messages
+
+	// Delete messages
+	if err := s.chatRepo.DeleteMessages(chatObjID); err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
+	}
+
+	// Delete LLM messages
 	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID, false); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
 	}
