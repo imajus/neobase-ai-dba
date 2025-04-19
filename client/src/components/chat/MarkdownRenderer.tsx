@@ -11,11 +11,12 @@ import './MarkdownRenderer.css';
 interface MarkdownRendererProps {
   markdown: string;
   className?: string;
+  isEdited?: boolean;
 }
 
-const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className = '' }) => {
+const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className = '', isEdited = false }) => {
   return (
-    <div className={`markdown-renderer ${className} prose prose-sm max-w-none dark:prose-invert`}>
+    <div className={`markdown-renderer ${className}`}>
       <ReactMarkdown
         rehypePlugins={[
           rehypeRaw,
@@ -52,8 +53,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className
               <a 
                 {...props} 
                 target="_blank" 
-                rel="noopener noreferrer" 
-                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                rel="noopener noreferrer"
               >
                 {children}
               </a>
@@ -110,6 +110,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className
         {markdown}
       </ReactMarkdown>
 
+      {isEdited && (
+        <span className="text-xs text-gray-600 italic">
+          (edited)
+        </span>
+      )}
     </div>
   );
 };
