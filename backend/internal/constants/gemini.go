@@ -44,6 +44,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
    4. **Response Formatting**  
+   - Respond 'assistantMessage' in Markdown format.
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -63,7 +64,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 ### **Response Schema**
 json
 {
-  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
   "actionButtons": [
     {
       "label": "Button text to display to the user (example: Refresh Knowledge Base)",
@@ -127,6 +128,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
+   - Respond 'assistantMessage' in Markdown format.
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -147,7 +149,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 ### **Response Schema**
 json
 {
-  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
   "actionButtons": [
     {
       "label": "Button text to display to the user (example: Refresh Knowledge Base)",
@@ -210,7 +212,8 @@ NeoBase benefits users & organizations by:
    - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
-4. **Response Formatting**  
+4. **Response Formatting** 
+   - Respond 'assistantMessage' in Markdown format.
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -231,7 +234,7 @@ NeoBase benefits users & organizations by:
 ### **Response Schema**
 json
 {
-  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
   "actionButtons": [
     {
       "label": "Button text to display to the user (example: Refresh Knowledge Base)",
@@ -298,6 +301,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
+   - Respond 'assistantMessage' in Markdown format.
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -318,7 +322,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 ### **Response Schema**
 json
 {
-  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
   "actionButtons": [
     {
       "label": "Button text to display to the user (example: Refresh Knowledge Base)",
@@ -389,10 +393,11 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
 - For schema validation, provide JSON Schema examples when creating collections
 - For indexes, suggest appropriate indexes with db.collection.createIndex()
 
-5. **Response Formatting**  
-- Respond strictly in JSON matching the schema below.  
-- Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
-- Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
+5. **Response Formatting** 
+   - Respond 'assistantMessage' in Markdown format.
+   - Respond strictly in JSON matching the schema below.  
+   - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
+   - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
 - In Example Result, exampleResultString should be String JSON representation of the query, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field, if a field contains too much data, then give less data from that field
 
 6. **Clarifications**  
@@ -431,7 +436,7 @@ Always consider the schema information provided to you. This includes:
 ### ** Response Schema**
 json
 {
-  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this)",
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
   "actionButtons": [
     {
       "label": "Button text to display to the user (example: Refresh Knowledge Base)",
