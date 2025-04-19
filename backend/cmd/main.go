@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"neobase-ai/config"
 	"neobase-ai/internal/apis/routes"
@@ -71,8 +72,9 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		log.Printf("Starting server on port %s", config.Env.Port)
+		fmt.Println("✨ Welcome to NeoBase! Running in", config.Env.Environment, "Mode. You can access your client UI at", config.Env.CorsAllowedOrigin)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			log.Fatalf("NeoBase failed to start: %v", err)
 		}
 	}()
 
@@ -81,7 +83,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	log.Println("🔻 NeoBase is shutting down...")
 
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -89,8 +91,8 @@ func main() {
 
 	// Attempt graceful shutdown
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		log.Fatalf("NeoBase forced to shutdown: %v", err)
 	}
 
-	log.Println("Server exiting")
+	log.Println("👋 NeoBase has been shut down successfully")
 }

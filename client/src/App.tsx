@@ -936,7 +936,8 @@ function AppContent() {
                         loading_steps: [],
                         is_streaming: true,
                         user_message_id: response.data.user_message_id,
-                        updated_at: new Date().toISOString()
+                        updated_at: new Date().toISOString(),
+                        action_at: response.data.action_at
                       };
                     }
                     return msg;
@@ -959,7 +960,8 @@ function AppContent() {
                         ...msg,
                         action_buttons: response.data.action_buttons, // Ensure action buttons are preserved
                         is_streaming: false,
-                        updated_at: new Date().toISOString()
+                        updated_at: new Date().toISOString(),
+                        action_at: response.data.action_at
                       };
                     }
                     return msg;
@@ -978,7 +980,8 @@ function AppContent() {
                   loading_steps: [], // Clear loading steps for final message
                   is_streaming: true,
                   created_at: new Date().toISOString(),
-                  user_message_id: response.data.user_message_id
+                  user_message_id: response.data.user_message_id,
+                  action_at: response.data.action_at
                 };
 
                 // Add the new message to the array
@@ -1004,6 +1007,7 @@ function AppContent() {
                         ...msg,
                         is_streaming: false,
                         action_buttons: response.data.action_buttons, // Ensure action buttons are preserved
+                        action_at: response.data.action_at,
                         updated_at: new Date().toISOString()
                       };
                     }

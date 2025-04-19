@@ -9,6 +9,7 @@ import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
 import LoadingSteps from './LoadingSteps';
 import { Message, QueryResult } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
+import { formatActionAt } from '../../utils/message';
 
 interface QueryState {
     isExecuting: boolean;
@@ -345,6 +346,7 @@ export default function MessageTile({
                                 ? null 
                                 : response.data.execution_result,
                             execution_time: response.data.execution_time,
+                            action_at: response.data.action_at,
                             error: response.data.error,
                             total_records_count: response.data.total_records_count,
                             pagination: {
@@ -424,6 +426,7 @@ export default function MessageTile({
                         is_rolled_back: response?.data?.is_rolled_back,
                         execution_result: response?.data?.execution_result,
                         execution_time: response?.data?.execution_time,
+                        action_at: response?.data?.action_at,
                         error: response?.data?.error,
                     } : q),
                     // Always update action buttons, setting to empty array if not in response
@@ -910,11 +913,11 @@ export default function MessageTile({
                             )}
                             {query.is_rolled_back ? (
                                 <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded">
-                                    Rolled Back
+                                    Rolled Back on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
                             ) : query.is_executed ? (
                                 <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
-                                    Executed
+                                    Executed on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
                             ) : (
                                 <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">
