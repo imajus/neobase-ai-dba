@@ -6,17 +6,31 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['lucide-react']
+    include: [
+      'rehype-raw',
+      'rehype-sanitize',
+      'rehype-slug',
+      'rehype-autolink-headings',
+      'rehype-highlight',
+      'highlight.js/styles/github.css',
+      'react',
+      'react-dom',
+      'lucide-react'
+    ]
   },
   build: {
+    commonjsOptions: {
+      include: [/rehype-.*/, /highlight\.js/, /node_modules/],
+      transformMixedEsModules: true
+    },
     rollupOptions: {
-      external: [
-        'rehype-raw',
-        'rehype-sanitize',
-        'rehype-slug',
-        'rehype-autolink-headings',
-        'rehype-highlight',
-      ]
+      onwarn(warning, warn) {
+        // Ignore "Module level directives" warnings from lucide-react
+        if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {
+          return;
+        }
+        warn(warning);
+      }
     }
   },
   publicDir: 'public',

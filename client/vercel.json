@@ -1,12 +1,8 @@
 {
-    "buildCommand": "npm run build",
-    "outputDirectory": "dist",
-    "framework": "vite",
-    "public": true,
     "rewrites": [
-        {
-            "source": "/(.*)",
-            "destination": "/index.html"
-        }
-    ]
+        { "source": "/(.*)", "destination": "/index.html" }
+    ],
+    "buildCommand": "npm install && npm run build",
+    "outputDirectory": "dist",
+    "framework": "vite"
 }

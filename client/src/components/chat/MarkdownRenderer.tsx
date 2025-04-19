@@ -1,30 +1,21 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
-import rehypeSlug from 'rehype-slug';
-import rehypeAutolinkHeadings from 'rehype-autolink-headings';
-import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github.css';
 import './MarkdownRenderer.css';
 
 interface MarkdownRendererProps {
   markdown: string;
   className?: string;
-  isEdited?: boolean;
+
 }
 
-const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className = '', isEdited = false }) => {
+const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className = '' }) => {
+  // Apply a safeguard to ensure markdown is always a string
+  const safeMarkdown = typeof markdown === 'string' ? markdown : '';
+  
   return (
     <div className={`markdown-renderer ${className}`}>
       <ReactMarkdown
-        rehypePlugins={[
-          rehypeRaw,
-          rehypeSanitize,
-          rehypeSlug,
-          [rehypeAutolinkHeadings, { behavior: 'wrap' }],
-          [rehypeHighlight, { ignoreMissing: true }]
-        ]}
         skipHtml={false}
         components={{
           // Override code blocks to enhance styling
@@ -33,7 +24,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className
             const isInline = !match;
             return !isInline ? (
               <div className="code-block-wrapper neo-border">
-                <div className="code-language-indicator">{match[1]}</div>
+                <div className="code-language-indicator">{match ? match[1] : 'code'}</div>
                 <code
                   className={className}
                   {...props}
@@ -107,14 +98,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className
           }
         }}
       >
-        {markdown}
+        {safeMarkdown}
       </ReactMarkdown>
 
-      {isEdited && (
-        <span className="text-xs text-gray-600 italic">
-          (edited)
-        </span>
-      )}
     </div>
   );
 };
