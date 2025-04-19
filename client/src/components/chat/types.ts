@@ -23,6 +23,7 @@ export interface QueryResult {
     rollback_dependent_query?: string;
     is_streaming?: boolean;
     is_edited?: boolean;
+    action_at?: string;
 }
 
 export interface ActionButton {
@@ -45,6 +46,7 @@ export interface Message {
     is_edited?: boolean;
     is_streaming?: boolean;
     user_message_id?: string;
+    action_at?: string;
 }
 
 export interface LoadingStep {

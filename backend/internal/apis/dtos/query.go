@@ -29,6 +29,7 @@ type QueryExecutionResponse struct {
 	Error             *QueryError     `json:"error,omitempty"`
 	TotalRecordsCount *int            `json:"total_records_count"`
 	ActionButtons     *[]ActionButton `json:"action_buttons,omitempty"`
+	ActionAt          *string         `json:"action_at,omitempty"`
 }
 
 type QueryResultsRequest struct {
@@ -46,6 +47,7 @@ type QueryResultsResponse struct {
 	Error             *QueryError     `json:"error,omitempty"`
 	TotalRecordsCount *int            `json:"total_records_count"`
 	ActionButtons     *[]ActionButton `json:"action_buttons,omitempty"`
+	ActionAt          *string         `json:"action_at,omitempty"`
 }
 
 type EditQueryRequest struct {

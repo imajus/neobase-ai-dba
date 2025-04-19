@@ -51,6 +51,7 @@ type Query struct {
 	RollbackDependentQuery *string                `json:"rollback_dependent_query,omitempty"`
 	Pagination             *Pagination            `json:"pagination,omitempty"`
 	IsEdited               bool                   `json:"is_edited"`
+	ActionAt               *string                `json:"action_at,omitempty"` // The timestamp when the action was taken
 }
 
 type Pagination struct {
@@ -143,6 +144,7 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 			RollbackDependentQuery: query.RollbackDependentQuery,
 			Pagination:             pagination,
 			IsEdited:               query.IsEdited,
+			ActionAt:               query.ActionAt,
 		}
 	}
 	return &queriesDto

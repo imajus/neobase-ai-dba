@@ -46,6 +46,7 @@ type Query struct {
 	ExecutionResult        *string            `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
 	IsEdited               bool               `bson:"is_edited" json:"is_edited"`                                   // if the query has been edited
 	Metadata               *string            `bson:"metadata,omitempty" json:"metadata,omitempty"`                 // JSON string for database-specific metadata (e.g., ClickHouse engine type)
+	ActionAt               *string            `bson:"action_at,omitempty" json:"action_at,omitempty"`               // The timestamp when the action was taken
 }
 
 type QueryError struct {

@@ -852,6 +852,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 							Message: queryErr.Message,
 							Details: queryErr.Details,
 						}
+						(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 						break
 					}
 				}
@@ -915,6 +916,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 										"message": queryErr.Message,
 										"details": queryErr.Details,
 									}
+									queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								}
 								queries[i] = queryMap
 							} else {
@@ -938,6 +940,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 										"details": queryErr.Details,
 									}
 									queriesVal[i] = queryMap
+									queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								}
 							} else {
 								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
@@ -970,6 +973,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			Error:             queryErr,
 			TotalRecordsCount: nil,
 			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
+			ActionAt:          query.ActionAt,
 		}, http.StatusOK, nil
 	}
 
@@ -1041,6 +1045,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	query.IsRolledBack = false
 	query.ExecutionTime = &result.ExecutionTime
 	query.ExecutionResult = &result.ResultJSON
+	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 	if totalRecordsCount != nil {
 		if query.Pagination == nil {
 			query.Pagination = &models.Pagination{}
@@ -1066,6 +1071,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
+					(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 					if totalRecordsCount != nil {
 						if (*msg.Queries)[i].Pagination == nil {
 							(*msg.Queries)[i].Pagination = &models.Pagination{}
@@ -1144,6 +1150,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
+								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": "Query executed successfully",
 								}
@@ -1172,6 +1179,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
+								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": "Query executed successfully",
 								}
@@ -1214,6 +1222,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		Error:             result.Error,
 		TotalRecordsCount: totalRecordsCount,
 		ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
+		ActionAt:          query.ActionAt,
 	}, http.StatusOK, nil
 }
 
@@ -1654,6 +1663,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	// We're using same execution time for the rollback as the original query
 	query.IsRolledBack = true
 	query.ExecutionTime = &result.ExecutionTime
+	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 	if result.Error != nil {
 		query.Error = &models.QueryError{
 			Code:    result.Error.Code,
@@ -1672,6 +1682,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				(*msg.Queries)[i].IsExecuted = true
 				(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
 				(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
+				(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 				if result.Error != nil {
 					(*msg.Queries)[i].Error = &models.QueryError{
 						Code:    result.Error.Code,
@@ -1722,6 +1733,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
+							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 							queryMap["executionResult"] = map[string]interface{}{
 								"result": "Rolled back successfully",
 							}
@@ -1750,6 +1762,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
+							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 							queryMap["executionResult"] = map[string]interface{}{
 								"result": "Rolled back successfully",
 							}
@@ -1792,6 +1805,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			"execution_result": result.Result,
 			"error":            query.Error,
 			"action_buttons":   dtos.ToActionButtonDto(msg.ActionButtons),
+			"action_at":        query.ActionAt,
 		},
 	})
 
@@ -1805,6 +1819,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		ExecutionResult: result.Result,
 		Error:           result.Error,
 		ActionButtons:   dtos.ToActionButtonDto(msg.ActionButtons),
+		ActionAt:        query.ActionAt,
 	}, http.StatusOK, nil
 }
 
@@ -1893,7 +1908,7 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 
 						query.IsExecuted = true
 						query.ExecutionTime = executionResult.ExecutionTime
-
+						query.ActionAt = executionResult.ActionAt
 						// Handle different result types (MongoDB returns array, SQL databases return map)
 						switch resultType := executionResult.ExecutionResult.(type) {
 						case map[string]interface{}:

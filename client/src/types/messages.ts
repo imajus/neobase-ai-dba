@@ -37,6 +37,7 @@ export interface BackendMessage {
         };
         example_result: any[];
         execution_result: any[];
+        action_at?: string;
         query_type: string;
         pagination?: {
             total_records_count?: number;
@@ -96,5 +97,6 @@ export interface ExecuteQueryResponse {
             details?: string;
         };
         action_buttons?: ActionButton[];
+        action_at?: string;
     };
 }
