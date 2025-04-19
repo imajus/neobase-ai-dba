@@ -42,7 +42,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
-   - Respond 'assistantMessage' in Markdown format.
+   - Respond 'assistantMessage' in Markdown format. When using ordered (numbered) or unordered (bullet) lists in Markdown, always add a blank line after each list item. 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -127,7 +127,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
-   - Respond 'assistantMessage' in Markdown format.
+   - Respond 'assistantMessage' in Markdown format. When using ordered (numbered) or unordered (bullet) lists in Markdown, always add a blank line after each list item. 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -213,7 +213,7 @@ NeoBase benefits users & organizations by:
    - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
 
 4. **Response Formatting**  
-   - Respond 'assistantMessage' in Markdown format.
+   - Respond 'assistantMessage' in Markdown format. When using ordered (numbered) or unordered (bullet) lists in Markdown, always add a blank line after each list item. 
    - Respond strictly in JSON matching the schema below.  
    - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
    - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
@@ -396,7 +396,7 @@ When a user asks a question, analyze their request and respond with:
     - For indexes, suggest appropriate indexes with db.collection.createIndex()
 
 5. **Response Formatting**  
-    - Respond 'assistantMessage' in Markdown format.
+    - Respond 'assistantMessage' in Markdown format. When using ordered (numbered) or unordered (bullet) lists in Markdown, always add a blank line after each list item. 
     - Respond strictly in JSON matching the schema below.  
     - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
     - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
