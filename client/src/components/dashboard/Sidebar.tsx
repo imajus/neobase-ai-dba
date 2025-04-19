@@ -48,13 +48,77 @@ interface SidebarProps {
   eventSource: EventSourcePolyfill | null;
 }
 
-
+// Date formatting and grouping functions
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric'
+  });
+};
+
+// Function to determine the date group for a connection
+const getDateGroup = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffTime = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) {
+    return 'Today';
+  } else if (diffDays < 7) {
+    return '7 Days';
+  } else if (diffDays < 30) {
+    return '30 Days';
+  } else {
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+  }
+};
+
+// Group connections by date categories
+const groupConnectionsByDate = (connections: Chat[]): Map<string, Chat[]> => {
+  const groups = new Map<string, Chat[]>();
+  
+  // Sort connections by updated_at date (newest first)
+  const sortedConnections = [...connections].sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+  );
+  
+  // Group connections by date
+  sortedConnections.forEach(connection => {
+    const group = getDateGroup(connection.updated_at);
+    if (!groups.has(group)) {
+      groups.set(group, []);
+    }
+    groups.get(group)?.push(connection);
+  });
+  
+  return groups;
+};
+
+// Sort date groups in chronological order
+const getSortedGroups = (groups: Map<string, Chat[]>): Array<[string, Chat[]]> => {
+  const specialOrder: { [key: string]: number } = {
+    'Today': 0,
+    '7 Days': 1,
+    '30 Days': 2
+  };
+  
+  return Array.from(groups.entries()).sort((a, b) => {
+    // Handle special groups first
+    if (a[0] in specialOrder && b[0] in specialOrder) {
+      return specialOrder[a[0]] - specialOrder[b[0]];
+    } else if (a[0] in specialOrder) {
+      return -1;
+    } else if (b[0] in specialOrder) {
+      return 1;
+    }
+    
+    // Sort other groups (months) by date, newest first
+    const dateA = new Date(a[0]);
+    const dateB = new Date(b[0]);
+    return dateB.getTime() - dateA.getTime();
   });
 };
 
@@ -293,6 +357,10 @@ export default function Sidebar({
     }
   };
 
+  // Group connections by date
+  const groupedConnections = groupConnectionsByDate(connections);
+  const sortedGroups = getSortedGroups(groupedConnections);
+
   return (
     <>
       <div
@@ -316,44 +384,78 @@ export default function Sidebar({
           ) : (
             <>
               {connections.length > 0 ? (
-                [...connections].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).map((connection) => (
-                  <div key={connection.id} className="mb-4">
-                    <div className={`relative group ${!isExpanded ? 'md:w-12 md:h-12' : ''}`}>
-                      <button
-                        onClick={() => handleSelectConnection(connection.id)}
-                        className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
-                          }`}
-                        title={connection.connection.database}
-                      >
-                        <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
-                          <DatabaseLogo
-                            type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
-                            size={28}
-                            className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
-                          />
-                          <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
-                            }`}>
-                            <div className="text-left">
-                              <h3 className="font-bold text-lg leading-tight">{connection.connection.is_example_db ? 'Sample Database' : connection.connection.database.length > 20 ? connection.connection.database.slice(0, 20) + '...' : connection.connection.database}</h3>
-                              <p className="text-gray-600 capitalize text-sm">{connection.connection.type === 'postgresql' ? 'PostgreSQL' : connection.connection.type === 'yugabytedb' ? 'YugabyteDB' : connection.connection.type === 'mysql' ? 'MySQL' : connection.connection.type === 'clickhouse' ? 'ClickHouse' : connection.connection.type === 'mongodb' ? 'MongoDB' : connection.connection.type === 'redis' ? 'Redis' : connection.connection.type === 'neo4j' ? 'Neo4j' : 'Unknown'}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                      {isExpanded && onDeleteConnection && (
-                        <div className="connection-menu-container absolute right-2 top-1/2 -translate-y-1/2">
-                          <button
-                            onClick={(e) => handleOpenMenu(e, connection.id)}
-                            className="p-2 opacity-0 group-hover:opacity-100 transition-all neo-border bg-white hover:bg-gray-100"
-                            title="Connection menu"
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </button>
-                        </div>
+                <>
+                  {sortedGroups.map(([groupName, groupConnections]) => (
+                    <div key={groupName} className="mb-6">
+                      {isExpanded && (
+                        <>
+                        <h2 className="text-sm font-semibold text-gray-500 mb-2">{groupName}</h2>
+                        </>
                       )}
+                      <div className="space-y-4">
+                        {groupConnections.map((connection) => (
+                          <div key={connection.id} className="relative group">
+                            <button
+                              onClick={() => handleSelectConnection(connection.id)}
+                              className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
+                                }`}
+                              title={connection.connection.database}
+                            >
+                              <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
+                                <DatabaseLogo
+                                  type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
+                                  size={28}
+                                  className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
+                                />
+                                <div className={`transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'
+                                  }`}>
+                                  <div className="text-left">
+                                    <h3 className="font-bold text-lg leading-tight">
+                                      {connection.connection.is_example_db 
+                                        ? 'Sample Database' 
+                                        : connection.connection.database.length > 20 
+                                          ? connection.connection.database.slice(0, 20) + '...' 
+                                          : connection.connection.database}
+                                    </h3>
+                                    <p className="text-gray-600 capitalize text-sm">
+                                      {connection.connection.type === 'postgresql' 
+                                        ? 'PostgreSQL' 
+                                        : connection.connection.type === 'yugabytedb' 
+                                          ? 'YugabyteDB' 
+                                          : connection.connection.type === 'mysql' 
+                                            ? 'MySQL' 
+                                            : connection.connection.type === 'clickhouse' 
+                                              ? 'ClickHouse' 
+                                              : connection.connection.type === 'mongodb' 
+                                                ? 'MongoDB' 
+                                                : connection.connection.type === 'redis' 
+                                                  ? 'Redis' 
+                                                  : connection.connection.type === 'neo4j' 
+                                                    ? 'Neo4j' 
+                                                    : 'Unknown'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="connection-menu-container absolute right-2 top-1/2 -translate-y-1/2">
+                                <button
+                                  onClick={(e) => handleOpenMenu(e, connection.id)}
+                                  className="p-2 opacity-0 group-hover:opacity-100 transition-all neo-border bg-white hover:bg-gray-100"
+                                  title="Connection menu"
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      {isExpanded && ( <div className="h-px bg-gray-200 mt-2"></div> )}
                     </div>
-                  </div>
-                ))
+                  ))}
+                </>
               ) : (
                 isExpanded && (
                   <div className="flex flex-col items-center justify-center h-full bg-neo-gray rounded-lg p-4">
