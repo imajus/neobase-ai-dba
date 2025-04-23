@@ -202,11 +202,11 @@ export default function SelectTablesModal({ chat, onClose, onSave }: SelectTable
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="w-10 h-10 animate-spin text-gray-400 mb-4" />
-              <span className="text-gray-600 font-medium">Loading tables...</span>
+              <span className="text-gray-600 font-medium">Loading Schema...</span>
               <p className="text-gray-500 text-sm mt-2 text-center max-w-md">
                 This may take a moment depending on the size of your database schema.
                 <br />
-                Large databases with many tables may take longer to load.
+                Large databases with many tables/collections may take longer to load.
               </p>
             </div>
           ) : (
