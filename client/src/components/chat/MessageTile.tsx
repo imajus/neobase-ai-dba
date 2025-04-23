@@ -659,28 +659,6 @@ export default function MessageTile({
         return data.slice(startIndex, startIndex + pageSize);
     };
 
-    const preserveScroll = (callback: () => void) => {
-        // Find the closest scrollable container
-        const scrollContainer = document.querySelector('[data-chat-container]');
-        if (!scrollContainer) return callback();
-
-        const oldHeight = scrollContainer.scrollHeight;
-        const oldScroll = scrollContainer.scrollTop;
-        const wasAtBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 10;
-
-        callback();
-
-        requestAnimationFrame(() => {
-            if (wasAtBottom) {
-                scrollContainer.scrollTop = scrollContainer.scrollHeight;
-            } else {
-                const newHeight = scrollContainer.scrollHeight;
-                const heightDiff = newHeight - oldHeight;
-                scrollContainer.scrollTop = oldScroll + heightDiff;
-            }
-        });
-    };
-
     const handlePageChange = useCallback(async (queryId: string, page: number) => {
         const query = message.queries?.find(q => q.id === queryId);
         if (!query) return;
@@ -845,27 +823,9 @@ export default function MessageTile({
         if (isMessageStreaming && streamingQueryIndex !== -1 && index !== streamingQueryIndex) {
             return null;
         }
-
-        // Instead of using useState hooks inside the render function, use the state from the component level
-        const isExpanded = expandedQueries[query.id] || false;
-        const showExampleResult = showExampleResults[query.id] || false;
-        const currentPage = queryCurrentPages[query.id] || 1;
         const isEditingQuery = editingQueries[query.id] || false;
         const editedQueryText = editedQueryTexts[query.id] || removeDuplicateQueries(query.query || '');
 
-        // Functions to update the state
-        const setIsExpanded = (value: boolean) => {
-            setExpandedQueries(prev => ({ ...prev, [query.id]: value }));
-        };
-        
-        const setShowExampleResult = (value: boolean) => {
-            setShowExampleResults(prev => ({ ...prev, [query.id]: value }));
-        };
-        
-        const setCurrentPage = (value: number) => {
-            setQueryCurrentPages(prev => ({ ...prev, [query.id]: value }));
-        };
-        
         const setIsEditingQuery = (value: boolean) => {
             setEditingQueries(prev => ({ ...prev, [query.id]: value }));
         };
@@ -876,14 +836,6 @@ export default function MessageTile({
 
         // Get query state or initialize it
         const queryState = queryStates[query.id] || { isExecuting: false, isExample: false };
-        const queryResult = queryResults[query.id] || { 
-            data: null, 
-            loading: false, 
-            error: null, 
-            currentPage: 1, 
-            pageSize: DEFAULT_PAGE_SIZE, 
-            totalRecords: null 
-        };
 
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
@@ -904,7 +856,7 @@ export default function MessageTile({
                 </p>
                 <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex justify-between items-center md:justify-centre gap-2">
                             <span>Query {index + 1}:</span>
                             {query.is_edited && (
                                 <span className="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded">
@@ -916,7 +868,7 @@ export default function MessageTile({
                                     Rolled Back on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
                             ) : query.is_executed ? (
-                                <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
+                                <span className="w-[60%] md:w-auto text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
                                     Executed on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
                             ) : (

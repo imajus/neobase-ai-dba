@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"neobase-ai/internal/apis/dtos"
@@ -75,13 +74,17 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
 	if !exists {
 		s.handleError(ctx, chatID, fmt.Errorf("connection info not found"))
-		if !synchronous || allowSSEUpdates {
+		// Let's create a new connection
+		_, err := s.ConnectDB(ctx, userID, chatID, streamID)
+		if err != nil {
+			// Send a error event to the client
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  "Error: " + "Database connection not found, please retry connection",
+				Data:  "Error: " + err.Error(),
 			})
+			return nil, err
 		}
-		return nil, errors.New("database connection not found, please retry connection")
+
 	}
 
 	// Fetch all the messages from the LLM

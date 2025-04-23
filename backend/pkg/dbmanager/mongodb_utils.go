@@ -114,6 +114,45 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	// Log the original string for debugging
 	log.Printf("Original MongoDB query params: %s", paramsStr)
 
+	// Handle JavaScript-style regex patterns like /pattern/flags
+	// Convert to MongoDB Extended JSON format: {"$regex":"pattern","$options":"flags"}
+	regexPattern := regexp.MustCompile(`/([^/]+)/([gimsuy]*)`)
+	paramsStr = regexPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		matches := regexPattern.FindStringSubmatch(match)
+		if len(matches) < 3 {
+			return match
+		}
+
+		pattern := matches[1]
+		options := matches[2]
+
+		// Escape JSON special characters in the pattern
+		pattern = strings.ReplaceAll(pattern, "\\", "\\\\")
+		pattern = strings.ReplaceAll(pattern, "\"", "\\\"")
+
+		// Return MongoDB Extended JSON format for regex
+		return fmt.Sprintf(`{"$regex":"%s","$options":"%s"}`, pattern, options)
+	})
+
+	// Special case for regex patterns inside operators like $not
+	operatorRegexPattern := regexp.MustCompile(`\$not\s*:\s*/([^/]+)/([gimsuy]*)`)
+	paramsStr = operatorRegexPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
+		matches := operatorRegexPattern.FindStringSubmatch(match)
+		if len(matches) < 3 {
+			return match
+		}
+
+		pattern := matches[1]
+		options := matches[2]
+
+		// Escape JSON special characters in the pattern
+		pattern = strings.ReplaceAll(pattern, "\\", "\\\\")
+		pattern = strings.ReplaceAll(pattern, "\"", "\\\"")
+
+		// Return MongoDB Extended JSON format for regex inside $not operator
+		return fmt.Sprintf(`"$not": {"$regex":"%s","$options":"%s"}`, pattern, options)
+	})
+
 	// Special handling for $project stage in aggregation pipelines
 	if strings.Contains(paramsStr, "$project") {
 		// Detect if this is a $project stage
