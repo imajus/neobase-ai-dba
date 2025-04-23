@@ -904,7 +904,7 @@ export default function MessageTile({
                 </p>
                 <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex justify-between items-center md:justify-centre gap-2">
                             <span>Query {index + 1}:</span>
                             {query.is_edited && (
                                 <span className="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded">
@@ -916,7 +916,7 @@ export default function MessageTile({
                                     Rolled Back on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
                             ) : query.is_executed ? (
-                                <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
+                                <span className="w-[60%] md:w-auto text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
                                     Executed on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
                             ) : (
