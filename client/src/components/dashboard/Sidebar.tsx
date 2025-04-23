@@ -10,7 +10,6 @@ import {
   PanelLeftClose,
   Pencil,
   Plus,
-  Settings,
   Trash2,
   X
 } from 'lucide-react';
