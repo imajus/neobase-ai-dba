@@ -12,7 +12,7 @@ interface CreateChatResponse {
 const chatService = {
     // Add a cache for tables
     tablesCache: {} as Record<string, {tables: any[], timestamp: number}>,
-    CACHE_TTL: 300000, // 5 minutes in milliseconds (increased from 1 minute)
+    CACHE_TTL: 600000, // 10 minutes in milliseconds (increased from 1 minute)
     // Track ongoing API requests to prevent duplicates
     pendingRequests: {} as Record<string, Promise<TablesResponse>>,
 
