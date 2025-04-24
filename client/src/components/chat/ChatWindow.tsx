@@ -127,7 +127,7 @@ export default function ChatWindow({
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const pageSize = 20; // Messages per page
+  const pageSize = 25; // Messages per page
   const loadingRef = useRef<HTMLDivElement>(null);
   const [isMessageSending, setIsMessageSending] = useState(false);
   const isLoadingOldMessages = useRef(false);
