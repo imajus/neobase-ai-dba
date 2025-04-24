@@ -57,6 +57,32 @@ const formatDate = (dateString: string) => {
   });
 };
 
+// Function to get a user-friendly relative time (e.g., "2 hours ago")
+const getRelativeTime = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffTime = now.getTime() - date.getTime();
+  const diffMinutes = Math.floor(diffTime / (1000 * 60));
+  
+  if (diffMinutes < 1) {
+    return 'Just now';
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+  } else {
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) {
+      return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    } else {
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays === 1) {
+        return 'Yesterday';
+      } else {
+        return formatDate(dateString);
+      }
+    }
+  }
+};
+
 // Function to determine the date group for a connection
 const getDateGroup = (dateString: string): string => {
   const date = new Date(dateString);
@@ -416,23 +442,26 @@ export default function Sidebar({
                                           ? connection.connection.database.slice(0, 20) + '...' 
                                           : connection.connection.database}
                                     </h3>
-                                    <p className="text-gray-600 capitalize text-sm">
-                                      {connection.connection.type === 'postgresql' 
-                                        ? 'PostgreSQL' 
-                                        : connection.connection.type === 'yugabytedb' 
-                                          ? 'YugabyteDB' 
-                                          : connection.connection.type === 'mysql' 
-                                            ? 'MySQL' 
-                                            : connection.connection.type === 'clickhouse' 
-                                              ? 'ClickHouse' 
-                                              : connection.connection.type === 'mongodb' 
-                                                ? 'MongoDB' 
-                                                : connection.connection.type === 'redis' 
-                                                  ? 'Redis' 
-                                                  : connection.connection.type === 'neo4j' 
-                                                    ? 'Neo4j' 
-                                                    : 'Unknown'}
-                                    </p>
+                                    <div className="flex w-full flex-row justify-between items-center gap-16">
+                                      <p className="text-gray-600 capitalize text-sm truncate">
+                                        {connection.connection.type === 'postgresql' 
+                                          ? 'PostgreSQL' 
+                                          : connection.connection.type === 'yugabytedb' 
+                                            ? 'YugabyteDB' 
+                                            : connection.connection.type === 'mysql' 
+                                              ? 'MySQL' 
+                                              : connection.connection.type === 'clickhouse' 
+                                                ? 'ClickHouse' 
+                                                : connection.connection.type === 'mongodb' 
+                                                  ? 'MongoDB' 
+                                                  : connection.connection.type === 'redis' 
+                                                    ? 'Redis' 
+                                                    : connection.connection.type === 'neo4j' 
+                                                      ? 'Neo4j' 
+                                                      : 'Unknown'}
+                                      </p>
+                                      <p className="text-right text-gray-500 text-xs whitespace-nowrap ml-auto">{getRelativeTime(connection.updated_at)}</p>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
