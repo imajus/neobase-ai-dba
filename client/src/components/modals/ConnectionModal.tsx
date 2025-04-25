@@ -1,17 +1,21 @@
-import { AlertCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, Shield, Table, X } from 'lucide-react';
+import { AlertCircle, Database, KeyRound, Loader2, Monitor, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { Chat, Connection, SSLMode } from '../../types/chat';
+import { Chat, Connection, SSLMode, TableInfo } from '../../types/chat';
 import SelectTablesModal from './SelectTablesModal';
 import chatService from '../../services/chatService';
+import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab } from './components';
 
 // Connection tab type
 type ConnectionType = 'basic' | 'ssh';
 
+// Modal tab type
+type ModalTab = 'connection' | 'schema' | 'settings';
+
 interface ConnectionModalProps {
   initialData?: Chat;
   onClose: () => void;
-  onEdit?: (data: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
-  onSubmit: (data: Connection, autoExecuteQuery: boolean) => Promise<{ 
+  onEdit?: (data: Connection, autoExecuteQuery: boolean, shareWithAI: boolean) => Promise<{ success: boolean, error?: string }>;
+  onSubmit: (data: Connection, autoExecuteQuery: boolean, shareWithAI: boolean) => Promise<{ 
     success: boolean;
     error?: string;
     chatId?: string;
@@ -21,7 +25,7 @@ interface ConnectionModalProps {
   onUpdateAutoExecuteQuery?: (chatId: string, autoExecuteQuery: boolean) => Promise<void>;
 }
 
-interface FormErrors {
+export interface FormErrors {
   host?: string;
   port?: string;
   database?: string;
@@ -43,8 +47,24 @@ export default function ConnectionModal({
   onUpdateSelectedCollections,
   onUpdateAutoExecuteQuery
 }: ConnectionModalProps) {
-  // Add connection type state to toggle between basic and SSH tabs
+  // Modal tab state to toggle between Connection, Schema, and Settings
+  const [activeTab, setActiveTab] = useState<ModalTab>('connection');
+  
+  // Connection type state to toggle between basic and SSH tabs (within Connection tab)
   const [connectionType, setConnectionType] = useState<ConnectionType>('basic');
+  
+  // Schema tab states
+  const [isLoadingTables, setIsLoadingTables] = useState(false);
+  const [tables, setTables] = useState<TableInfo[]>([]);
+  const [selectedTables, setSelectedTables] = useState<string[]>([]);
+  const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
+  const [schemaSearchQuery, setSchemaSearchQuery] = useState('');
+  const [selectAllTables, setSelectAllTables] = useState(true);
+  
+  // Settings tab states
+  const [shareWithAI, setShareWithAI] = useState(false);
+  
+  // Form states
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState<Connection>({
     type: initialData?.connection.type || 'postgresql',
@@ -69,10 +89,30 @@ export default function ConnectionModal({
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [schemaValidationError, setSchemaValidationError] = useState<string | null>(null);
   const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
   const [autoExecuteQuery, setAutoExecuteQuery] = useState<boolean>(
     initialData?.auto_execute_query !== undefined ? initialData.auto_execute_query : true
   );
+
+  // Refs for MongoDB URI inputs
+  const mongoUriInputRef = useRef<HTMLInputElement>(null);
+  const mongoUriSshInputRef = useRef<HTMLInputElement>(null);
+  const credentialsTextAreaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Add these refs to store previous tab states
+  const [tabsVisited, setTabsVisited] = useState<Record<ModalTab, boolean>>({
+    connection: true,
+    schema: false,
+    settings: false
+  });
+  
+  // State for MongoDB URI fields
+  const [mongoUriValue, setMongoUriValue] = useState<string>('');
+  const [mongoUriSshValue, setMongoUriSshValue] = useState<string>('');
+  
+  // State for credentials text area
+  const [credentialsValue, setCredentialsValue] = useState<string>('');
 
   // Update autoExecuteQuery when initialData changes
   useEffect(() => {
@@ -87,8 +127,97 @@ export default function ConnectionModal({
       } else {
         setConnectionType('basic');
       }
+
+      // Initialize the credentials textarea with the connection string format
+      const formattedConnectionString = formatConnectionString(initialData.connection);
+      setCredentialsValue(formattedConnectionString);
+      if (credentialsTextAreaRef.current) {
+        credentialsTextAreaRef.current.value = formattedConnectionString;
+      }
+
+      // For MongoDB connections, also format the MongoDB URI for both tabs
+      if (initialData.connection.type === 'mongodb') {
+        const formatMongoURI = (connection: Connection): string => {
+          const auth = connection.username ? 
+            `${connection.username}${connection.password ? `:${connection.password}` : ''}@` : '';
+          const srv = connection.host.includes('.mongodb.net') ? '+srv' : '';
+          const portPart = srv ? '' : `:${connection.port || '27017'}`;
+          const dbPart = connection.database ? `/${connection.database}` : '';
+          
+          return `mongodb${srv}://${auth}${connection.host}${portPart}${dbPart}`;
+        };
+
+        const mongoUri = formatMongoURI(initialData.connection);
+        
+        // Set the value for both URI inputs (basic and SSH tabs)
+        setMongoUriValue(mongoUri);
+        setMongoUriSshValue(mongoUri);
+        
+        if (mongoUriInputRef.current) {
+          mongoUriInputRef.current.value = mongoUri;
+        }
+        
+        if (mongoUriSshInputRef.current) {
+          mongoUriSshInputRef.current.value = mongoUri;
+        }
+      }
     }
   }, [initialData]);
+
+  // Load tables for Schema tab when editing an existing connection
+  useEffect(() => {
+    // Only load tables when editing and Schema tab is active
+    if (initialData && activeTab === 'schema' && !tables.length) {
+      loadTables();
+    }
+  }, [initialData, activeTab, tables.length]);
+
+  // Use useEffect to update the value of the MongoDB URI inputs when the tab changes
+  useEffect(() => {
+    if (formData.type === 'mongodb') {
+      // Set the MongoDB URI input values
+      if (mongoUriInputRef.current && mongoUriValue) {
+        mongoUriInputRef.current.value = mongoUriValue;
+      }
+      
+      if (mongoUriSshInputRef.current && mongoUriSshValue) {
+        mongoUriSshInputRef.current.value = mongoUriSshValue;
+      }
+    }
+    
+    // Set the credentials textarea value
+    if (credentialsTextAreaRef.current && credentialsValue) {
+      credentialsTextAreaRef.current.value = credentialsValue;
+    }
+  }, [activeTab, formData.type, mongoUriValue, mongoUriSshValue, credentialsValue]);
+
+  // Function to load tables for the Schema tab
+  const loadTables = async () => {
+    if (!initialData) return;
+    
+    try {
+      setIsLoadingTables(true);
+      setError(null);
+      setSchemaValidationError(null);
+      
+      const tablesResponse = await chatService.getTables(initialData.id);
+      setTables(tablesResponse.tables || []);
+      
+      // Initialize selected tables based on is_selected field
+      const selectedTableNames = tablesResponse.tables?.filter((table: TableInfo) => table.is_selected)
+        .map((table: TableInfo) => table.name) || [];
+      
+      setSelectedTables(selectedTableNames);
+      
+      // Check if all tables are selected to set selectAll state correctly
+      setSelectAllTables(selectedTableNames?.length === tablesResponse.tables?.length);
+    } catch (error: any) {
+      console.error('Failed to load tables:', error);
+      setError(error.message || 'Failed to load tables');
+    } finally {
+      setIsLoadingTables(false);
+    }
+  };
 
   const validateField = (name: string, value: Connection) => {
     switch (name) {
@@ -279,7 +408,7 @@ export default function ConnectionModal({
           initialData.connection.port !== updatedFormData.port ||
           initialData.connection.username !== updatedFormData.username;
 
-        const result = await onEdit?.(updatedFormData, autoExecuteQuery);
+        const result = await onEdit?.(updatedFormData, autoExecuteQuery, shareWithAI);
         console.log("edit result in connection modal", result);
         if (result?.success) {
           // Update auto_execute_query if it has changed
@@ -287,31 +416,55 @@ export default function ConnectionModal({
             await onUpdateAutoExecuteQuery(initialData.id, autoExecuteQuery);
           }
 
-          // If credentials changed, show the select tables modal
-          if (credentialsChanged) {
-            setShowSelectTablesModal(true);
-          } else {
-            onClose();
+          // If credentials changed and we're in the connection tab, switch to schema tab
+          if (credentialsChanged && activeTab === 'connection') {
+            setActiveTab('schema');
+            // Load tables
+            loadTables();
           }
         } else if (result?.error) {
           setError(result.error);
         }
       } else {
         // For new connections, pass autoExecuteQuery to onSubmit
-        const result = await onSubmit(updatedFormData, autoExecuteQuery);
+        const result = await onSubmit(updatedFormData, autoExecuteQuery, shareWithAI);
         console.log("submit result in connection modal", result);
         if (result?.success) {
-          // If this is a new connection and the selected_collections is "ALL", refresh the schema
-          if (result.chatId && result.selectedCollections === 'ALL') {
-            try {
-              const abortController = new AbortController();
-              await chatService.refreshSchema(result.chatId, abortController);
-              console.log('Knowledge base refreshed successfully for new connection');
-            } catch (error) {
-              console.error('Failed to refresh knowledge base:', error);
+          // If this is a new connection and successful, switch to schema tab
+          if (result.chatId) {
+            // Switch to schema tab
+            setActiveTab('schema');
+            
+            // Update initialData to have the new connection details
+            if (onUpdateSelectedCollections && onUpdateAutoExecuteQuery) {
+              // Load the tables for the new connection
+              try {
+                const tablesResponse = await chatService.getTables(result.chatId);
+                setTables(tablesResponse.tables || []);
+                
+                // Initialize selected tables based on is_selected field
+                const selectedTableNames = tablesResponse.tables?.filter((table: TableInfo) => table.is_selected)
+                  .map((table: TableInfo) => table.name) || [];
+                
+                setSelectedTables(selectedTableNames);
+                
+                // Check if all tables are selected to set selectAll state correctly
+                setSelectAllTables(selectedTableNames?.length === tablesResponse.tables?.length);
+                
+                // Show success message
+                console.log('Connection created. Now you can select tables to include in your schema.');
+              } catch (error: any) {
+                console.error('Failed to load tables for new connection:', error);
+                setError(error.message || 'Failed to load tables for new connection');
+              } finally {
+                setIsLoading(false);
+              }
+            } else {
+              onClose();
             }
+          } else {
+            onClose();
           }
-          onClose();
         } else if (result?.error) {
           setError(result.error);
         }
@@ -472,76 +625,120 @@ DATABASE_PASSWORD=`; // Mask password
     return result;
   };
 
-  // Add a ref for the textarea
-  const credentialsTextAreaRef = useRef<HTMLTextAreaElement>(null);
+  // Filtered tables based on search query
+  const filteredTables = tables.filter(table => 
+    table.name.toLowerCase().includes(schemaSearchQuery.toLowerCase())
+  );
 
-  // Add a new ref for MongoDB URI input fields
-  const mongoUriInputRef = useRef<HTMLInputElement>(null);
-  const mongoUriSshInputRef = useRef<HTMLInputElement>(null);
-
-  // In the component, modify the useEffect to also populate MongoDB URI fields in edit mode
-  useEffect(() => {
-    if (initialData) {
-      if (credentialsTextAreaRef.current) {
-        credentialsTextAreaRef.current.value = formatConnectionString(initialData.connection);
+  // Schema tab functions
+  const toggleTable = (tableName: string) => {
+    setSchemaValidationError(null);
+    setSelectedTables(prev => {
+      if (prev.includes(tableName)) {
+        // If removing a table, also uncheck "Select All"
+        setSelectAllTables(false);
+        
+        // Prevent removing if it's the last selected table
+        if (prev.length === 1) {
+          setSchemaValidationError("At least one table must be selected");
+          return prev;
+        }
+        
+        return prev.filter(name => name !== tableName);
+      } else {
+        // If all tables are now selected, check "Select All"
+        const newSelected = [...prev, tableName];
+        if (newSelected.length === tables?.length) {
+          setSelectAllTables(true);
+        }
+        return newSelected;
       }
+    });
+  };
+
+  const toggleExpandTable = (tableName: string, forceState?: boolean) => {
+    if (tableName === '') {
+      // This is a special case for toggling all tables
+      const allExpanded = Object.values(expandedTables).every(v => v);
+      const newExpandedState = forceState !== undefined ? forceState : !allExpanded;
       
-      // Populate MongoDB URI field if type is mongodb
-      if (initialData.connection.type === 'mongodb') {
-        const formatMongoURI = (connection: Connection): string => {
-          const auth = connection.username ? 
-            `${connection.username}${connection.password ? `:${connection.password}` : ''}@` : '';
-          const srv = connection.host.includes('.mongodb.net') ? '+srv' : '';
-          const portPart = srv ? '' : `:${connection.port || '27017'}`;
-          const dbPart = connection.database ? `/${connection.database}` : '';
-          
-          return `mongodb${srv}://${auth}${connection.host}${portPart}${dbPart}`;
-        };
-
-        const mongoUri = formatMongoURI(initialData.connection);
-        
-        // Set the value for both URI inputs (basic and SSH tabs)
-        if (mongoUriInputRef.current) {
-          mongoUriInputRef.current.value = mongoUri;
-        }
-        
-        if (mongoUriSshInputRef.current) {
-          mongoUriSshInputRef.current.value = mongoUri;
-        }
-      }
+      const newExpandedTables = tables.reduce((acc, table) => {
+        acc[table.name] = newExpandedState;
+        return acc;
+      }, {} as Record<string, boolean>);
+      
+      setExpandedTables(newExpandedTables);
+    } else {
+      // Toggle a single table
+      setExpandedTables(prev => ({
+        ...prev,
+        [tableName]: forceState !== undefined ? forceState : !prev[tableName]
+      }));
     }
-  }, [initialData]);
+  };
 
-  return (
-    <>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
-        <div className="bg-white neo-border rounded-lg w-full max-w-xl max-h-[90vh] overflow-y-auto relative z-[201]">
-          <div className="flex justify-between items-center p-6 border-b-4 border-black mb-2">
-            <div className="flex items-center gap-2">
-              <Database className="w-6 h-6" />
-              <div className="flex flex-col gap-1 mt-2">
-                <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
-                <p className="text-gray-500 text-sm">Your database credentials are stored in encrypted form.</p>
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
+  const toggleSelectAllTables = () => {
+    setSchemaValidationError(null);
+    if (selectAllTables) {
+      // Prevent deselecting all tables
+      setSchemaValidationError("At least one table must be selected");
+      return;
+    } else {
+      // Select all
+      setSelectedTables(tables?.map(table => table.name) || []);
+      setSelectAllTables(true);
+    }
+  };
 
-          <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {error && (
-              <div className="p-4 bg-red-50 border-2 border-red-500 rounded-lg">
-                <div className="flex items-center gap-2 text-red-600">
-                  <AlertCircle className="w-5 h-5" />
-                  <p className="font-medium">{error}</p>
-                </div>
-              </div>
-            )}
+  const handleUpdateSchema = async () => {
+    if (!initialData) return;
+    
+    // Validate that at least one table is selected
+    if (selectedTables?.length === 0) {
+      setSchemaValidationError("At least one table must be selected");
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      setError(null);
+      setSchemaValidationError(null);
+      
+      // Format selected tables as "ALL" or comma-separated list
+      const formattedSelection = selectAllTables ? 'ALL' : selectedTables.join(',');
+      
+      // Check if the selection has changed
+      if (formattedSelection !== initialData.selected_collections) {
+        // Only save if the selection has changed
+        await onUpdateSelectedCollections?.(initialData.id, formattedSelection);
+        
+        // Show success message or automatically refresh schema
+        console.log('Schema selection updated successfully');
+      } else {
+        console.log('Selection unchanged, skipping save');
+      }
+    } catch (error: any) {
+      console.error('Failed to update selected tables:', error);
+      setError(error.message || 'Failed to update selected tables');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  // Handle tab changes
+  const handleTabChange = (tab: ModalTab) => {
+    setTabsVisited(prev => ({
+      ...prev,
+      [tab]: true
+    }));
+    setActiveTab(tab);
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'connection':
+        return (
+          <>
             <div>
               <label className="block font-bold mb-2 text-lg">Paste Credentials</label>
               <p className="text-gray-600 text-sm mb-2">
@@ -550,6 +747,7 @@ DATABASE_PASSWORD=`; // Mask password
               <textarea
                 ref={credentialsTextAreaRef}
                 className="neo-input w-full font-mono text-sm"
+                defaultValue={credentialsValue}
                 placeholder={`DATABASE_TYPE=postgresql
 DATABASE_HOST=your-host.example.com
 DATABASE_PORT=5432
@@ -568,6 +766,7 @@ SSH_USERNAME=ssh_user
 SSH_PRIVATE_KEY=your_private_key`}
                 rows={6}
                 onChange={(e) => {
+                  setCredentialsValue(e.target.value);
                   const parsed = parseConnectionString(e.target.value);
                   setFormData(prev => ({
                     ...prev,
@@ -633,875 +832,151 @@ SSH_PRIVATE_KEY=your_private_key`}
               </button>
             </div>
 
-            <div className="my-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="block font-bold mb-1 text-lg">Auto Fetch Results</label>
-                  <p className="text-gray-600 text-sm">Automatically fetches results from the database upon a user request. However, the critical queries still need to be executed manually by the user.</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer" 
-                    checked={autoExecuteQuery}
-                    onChange={(e) => {
-                      const newValue = e.target.checked;
-                      setAutoExecuteQuery(newValue);
-                      if (initialData && onUpdateAutoExecuteQuery) {
-                        onUpdateAutoExecuteQuery(initialData.id, newValue);
-                      }
-                    }}
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
+            {/* Connection Tabs Content */}
+            {connectionType === 'basic' ? (
+              <BasicConnectionTab
+                formData={formData}
+                errors={errors}
+                touched={touched}
+                handleChange={handleChange}
+                handleBlur={handleBlur}
+                validateField={(name, value) => validateField(name, value)}
+                mongoUriInputRef={mongoUriInputRef}
+                onMongoUriChange={(uri) => setMongoUriValue(uri)}
+              />
+            ) : (
+              <SSHConnectionTab
+                formData={formData}
+                errors={errors}
+                touched={touched}
+                handleChange={handleChange}
+                handleBlur={handleBlur}
+                validateField={(name, value) => validateField(name, value)}
+                mongoUriSshInputRef={mongoUriSshInputRef}
+                onMongoUriChange={(uri) => setMongoUriSshValue(uri)}
+              />
+            )}
+          </>
+        );
+      case 'schema':
+        return (
+          <SchemaTab
+            isLoadingTables={isLoadingTables}
+            tables={tables}
+            selectedTables={selectedTables}
+            expandedTables={expandedTables}
+            schemaSearchQuery={schemaSearchQuery}
+            selectAllTables={selectAllTables}
+            schemaValidationError={schemaValidationError}
+            isLoading={isLoading}
+            setSchemaSearchQuery={setSchemaSearchQuery}
+            toggleSelectAllTables={toggleSelectAllTables}
+            toggleExpandTable={toggleExpandTable}
+            toggleTable={toggleTable}
+            handleUpdateSchema={handleUpdateSchema}
+          />
+        );
+      case 'settings':
+        return (
+          <SettingsTab
+            autoExecuteQuery={autoExecuteQuery}
+            shareWithAI={shareWithAI}
+            setAutoExecuteQuery={setAutoExecuteQuery}
+            setShareWithAI={setShareWithAI}
+            onUpdateAutoExecuteQuery={onUpdateAutoExecuteQuery}
+            initialDataId={initialData?.id}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
+        <div className="bg-white neo-border rounded-lg w-full max-w-[40rem] max-h-[90vh] flex flex-col relative z-[201]">
+          <div className="flex justify-between items-center p-6 border-b-4 border-black mb-2.5 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <Database className="w-6 h-6" />
+              <div className="flex flex-col gap-1 mt-2">
+                <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
+                <p className="text-gray-500 text-sm">Your database credentials are stored in encrypted form.</p>
               </div>
             </div>
-
-            {/* Add Select Tables button for edit mode */}
-            {initialData && onUpdateSelectedCollections && (
-              <div className="my-6 pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setShowSelectTablesModal(true)}
-                  className="neo-button-secondary w-full flex items-center justify-center gap-2"
-                >
-                  <Table className="w-5 h-5" />
-                  <span>Select Tables/Collections</span>
-                </button>
-                <p className="text-gray-500 text-xs mt-2 text-center">
-                  Choose which tables to include in your database schema
-                </p>
+            <button
+              onClick={onClose}
+              className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        
+        {/* Main Tabs Navigation */}
+        <div className="flex border-b border-gray-200 px-2 flex-shrink-0">
+          <button
+            type="button"
+            className={`py-2 px-4 font-semibold border-b-2 ${
+              activeTab === 'connection'
+                ? 'border-black text-black'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => handleTabChange('connection')}
+          >
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4" />
+              <span>Connection</span>
+            </div>
+          </button>
+          
+          {initialData && (
+            <button
+              type="button"
+              className={`py-2 px-4 font-semibold border-b-2 ${
+                activeTab === 'schema'
+                  ? 'border-black text-black'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => handleTabChange('schema')}
+            >
+              <div className="flex items-center gap-2">
+                <Table className="w-4 h-4" />
+                <span>Schema</span>
               </div>
-            )}
+            </button>
+          )}
+          
+          <button
+            type="button"
+            className={`py-2 px-4 font-semibold border-b-2 ${
+              activeTab === 'settings'
+                ? 'border-black text-black'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => handleTabChange('settings')}
+          >
+            <div className="flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              <span>Settings</span>
+            </div>
+          </button>
+        </div>
 
-            {/* Basic Connection Tab */}
-            {connectionType === 'basic' && (
-              <>
-                <div>
-                  <label className="block font-bold mb-2 text-lg">Database Type</label>
-                  <p className="text-gray-600 text-sm mb-2">Select your database system</p>
-                  <div className="relative">
-                    <select
-                      name="type"
-                      value={formData.type}
-                      onChange={handleChange}
-                      className="neo-input w-full appearance-none pr-12"
-                    >
-                      {[
-                        { value: 'postgresql', label: 'PostgreSQL' },
-                        { value: 'yugabytedb', label: 'YugabyteDB' },
-                        { value: 'mysql', label: 'MySQL' },
-                        { value: 'clickhouse', label: 'ClickHouse' },
-                        { value: 'mongodb', label: 'MongoDB' },
-                        { value: 'cassandra', label: 'Cassandra (Coming Soon)' },
-                        { value: 'redis', label: 'Redis (Coming Soon)' },
-                        { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
-                      ].map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
-                      <ChevronDown className="w-5 h-5 text-gray-400" />
-                    </div>
-                  </div>
-                </div>
+        <div className="overflow-y-auto thin-scrollbar flex-1 p-6">
+          {renderTabContent()}
+        </div>
 
-                {/* MongoDB Connection URI Field - Only show when MongoDB is selected */}
-                {formData.type === 'mongodb' && (
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">MongoDB Connection URI</label>
-                    <p className="text-gray-600 text-sm mb-2">Paste your MongoDB connection string to auto-fill fields</p>
-                    <input
-                      type="text"
-                      name="mongo_uri"
-                      ref={mongoUriInputRef}
-                      className="neo-input w-full"
-                      placeholder="mongodb://username:password@host:port/database or mongodb+srv://username:password@host/database"
-                      onChange={(e) => {
-                        const uri = e.target.value;
-                        try {
-                          // Better parsing logic for MongoDB URIs that can handle special characters in credentials
-                          const srvFormat = uri.startsWith('mongodb+srv://');
-                          
-                          // Extract the protocol and the rest
-                          const protocolMatch = uri.match(/^(mongodb(?:\+srv)?:\/\/)(.*)/);
-                          if (!protocolMatch) {
-                            console.log("Invalid MongoDB URI format: Missing protocol");
-                            return;
-                          }
-                          
-                          const [, protocol, remainder] = protocolMatch;
-                          
-                          // Check if credentials are provided (look for @ after the protocol)
-                          const hasCredentials = remainder.includes('@');
-                          let username = '';
-                          let password = '';
-                          let hostPart = remainder;
-                          
-                          if (hasCredentials) {
-                            // Find the last @ which separates credentials from host
-                            const lastAtIndex = remainder.lastIndexOf('@');
-                            const credentialsPart = remainder.substring(0, lastAtIndex);
-                            hostPart = remainder.substring(lastAtIndex + 1);
-                            
-                            // Find the first : which separates username from password
-                            const firstColonIndex = credentialsPart.indexOf(':');
-                            if (firstColonIndex !== -1) {
-                              username = credentialsPart.substring(0, firstColonIndex);
-                              password = credentialsPart.substring(firstColonIndex + 1);
-                            } else {
-                              username = credentialsPart;
-                            }
-                          }
-                          
-                          // Parse host, port and database
-                          let host = '';
-                          let port = srvFormat ? '27017' : ''; // Default for SRV format
-                          let database = 'test'; // Default database name
-                          
-                          // Check if there's a / after the host[:port] part
-                          const pathIndex = hostPart.indexOf('/');
-                          if (pathIndex !== -1) {
-                            const hostPortPart = hostPart.substring(0, pathIndex);
-                            const pathPart = hostPart.substring(pathIndex + 1);
-                            
-                            // Extract database name (everything before ? or end of string)
-                            const dbEndIndex = pathPart.indexOf('?');
-                            if (dbEndIndex !== -1) {
-                              database = pathPart.substring(0, dbEndIndex);
-                            } else {
-                              database = pathPart;
-                            }
-                            
-                            // Parse host and port
-                            const portIndex = hostPortPart.indexOf(':');
-                            if (portIndex !== -1) {
-                              host = hostPortPart.substring(0, portIndex);
-                              port = hostPortPart.substring(portIndex + 1);
-                            } else {
-                              host = hostPortPart;
-                            }
-                          } else {
-                            // No database specified in the URI
-                            const portIndex = hostPart.indexOf(':');
-                            if (portIndex !== -1) {
-                              host = hostPart.substring(0, portIndex);
-                              port = hostPart.substring(portIndex + 1);
-                            } else {
-                              host = hostPart;
-                            }
-                          }
-                          
-                          if (host) {
-                            console.log("MongoDB URI parsed successfully", { username, host, port, database });
-                            
-                            setFormData(prev => ({
-                              ...prev,
-                              host: host,
-                              port: port || (srvFormat ? '27017' : prev.port),
-                              database: database || 'test',
-                              username: username || prev.username,
-                              password: password || prev.password
-                            }));
-                            
-                            // Mark fields as touched
-                            setTouched(prev => ({
-                              ...prev,
-                              host: true,
-                              port: !!port,
-                              database: !!database,
-                              username: !!username
-                            }));
-                          } else {
-                            console.log("MongoDB URI parsing failed: could not extract host");
-                          }
-                        } catch (err) {
-                          // Invalid URI format, just continue
-                          console.log("Invalid MongoDB URI format", err);
-                        }
-                      }}
-                    />
-                    <p className="text-gray-500 text-xs mt-2">
-                      Connection URI will be used to auto-fill the fields below. Both standard and Atlas SRV formats supported.
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block font-bold mb-2 text-lg">Host</label>
-                  <p className="text-gray-600 text-sm mb-2">The hostname or IP address of your database server</p>
-                  <input
-                    type="text"
-                    name="host"
-                    value={formData.host}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                    className={`neo-input w-full ${errors.host && touched.host ? 'border-neo-error' : ''}`}
-                    placeholder="e.g., localhost, db.example.com, 192.168.1.1"
-                    required
-                  />
-                  {errors.host && touched.host && (
-                    <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                      <AlertCircle className="w-4 h-4" />
-                      <span>{errors.host}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-2 text-lg">Port</label>
-                  <p className="text-gray-600 text-sm mb-2">The port number your database is listening on</p>
-                  <input
-                    type="text"
-                    name="port"
-                    value={formData.port}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                    className={`neo-input w-full ${errors.port && touched.port ? 'border-neo-error' : ''}`}
-                    placeholder="e.g., 5432 (PostgreSQL), 3306 (MySQL), 27017 (MongoDB)"
-                  />
-                  {errors.port && touched.port && (
-                    <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                      <AlertCircle className="w-4 h-4" />
-                      <span>{errors.port}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-2 text-lg">Database Name</label>
-                  <p className="text-gray-600 text-sm mb-2">The name of the specific database to connect to</p>
-                  <input
-                    type="text"
-                    name="database"
-                    value={formData.database}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                    className={`neo-input w-full ${errors.database && touched.database ? 'border-neo-error' : ''}`}
-                    placeholder="e.g., myapp_production, users_db"
-                    required
-                  />
-                  {errors.database && touched.database && (
-                    <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                      <AlertCircle className="w-4 h-4" />
-                      <span>{errors.database}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-2 text-lg">Username</label>
-                  <p className="text-gray-600 text-sm mb-2">Database user with appropriate permissions</p>
-                  <input
-                    type="text"
-                    name="username"
-                    value={formData.username}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                    className={`neo-input w-full ${errors.username && touched.username ? 'border-neo-error' : ''}`}
-                    placeholder="e.g., db_user, assistant"
-                    required
-                  />
-                  {errors.username && touched.username && (
-                    <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                      <AlertCircle className="w-4 h-4" />
-                      <span>{errors.username}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mb-4">
-                  <label className="block font-bold mb-2 text-lg">Password</label>
-                  <p className="text-gray-600 text-sm mb-2">Password for the database user</p>
-                  <input
-                    type="password"
-                    name="password"
-                    value={formData.password || ''}
-                    onChange={handleChange}
-                    className="neo-input w-full"
-                    placeholder="Enter your database password"
-                  />
-                  <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
-                </div>
- 
-                {/* Divider line */}
-                <div className="border-t border-gray-200"></div>
-
-                {/* SSL Toggle */}
-                <div className="mb-4">
-                  <label className="block font-bold mb-2 text-lg">SSL/TLS Security</label>
-                  <p className="text-gray-600 text-sm mb-2">Enable secure connection to your database</p>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="use_ssl"
-                      name="use_ssl"
-                      checked={formData.use_ssl || false}
-                      onChange={(e) => {
-                        const useSSL = e.target.checked;
-                        setFormData((prev) => ({
-                          ...prev,
-                          use_ssl: useSSL,
-                          // Reset SSL mode to disable if SSL is turned off
-                          ssl_mode: useSSL ? prev.ssl_mode || 'disable' : 'disable'
-                        }));
-                        
-                        // If enabling SSL, validate the SSL fields
-                        if (useSSL) {
-                          const newErrors = { ...errors };
-                          const newTouched = { ...touched };
-                          
-                          if (formData.ssl_mode === 'verify-ca' || formData.ssl_mode === 'verify-full') {
-                            ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
-                              newTouched[field] = true;
-                              const error = validateField(field, {
-                                ...formData,
-                                use_ssl: true
-                              });
-                              if (error) {
-                                newErrors[field as keyof FormErrors] = error;
-                              } else {
-                                delete newErrors[field as keyof FormErrors];
-                              }
-                            });
-                          }
-                          
-                          setErrors(newErrors);
-                          setTouched(newTouched);
-                        } else {
-                          // If disabling SSL, clear SSL field errors
-                          const newErrors = { ...errors };
-                          ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
-                            delete newErrors[field as keyof FormErrors];
-                          });
-                          setErrors(newErrors);
-                        }
-                      }}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="use_ssl" className="ml-2 block text-sm font-medium text-gray-700">
-                      Use SSL/TLS encryption
-                    </label>
-                  </div>
-                </div>
-
-                {/* SSL Mode Selector - Only show when SSL is enabled */}
-                {formData.use_ssl && (
-                  <div className="mb-4">
-                    <label className="block font-medium mb-2">SSL Mode</label>
-                    <div className="relative">
-                      <select
-                        name="ssl_mode"
-                        value={formData.ssl_mode || 'disable'}
-                        onChange={(e) => {
-                          const newMode = e.target.value as SSLMode;
-                          setFormData(prev => ({
-                            ...prev,
-                            ssl_mode: newMode
-                          }));
-                          
-                          // Validate certificate fields for verify-ca and verify-full modes
-                          if (newMode === 'verify-ca' || newMode === 'verify-full') {
-                            const newErrors = { ...errors };
-                            const newTouched = { ...touched };
-                            
-                            ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
-                              newTouched[field] = true;
-                              const error = validateField(field, {
-                                ...formData,
-                                ssl_mode: newMode,
-                                use_ssl: true
-                              });
-                              if (error) {
-                                newErrors[field as keyof FormErrors] = error;
-                              } else {
-                                delete newErrors[field as keyof FormErrors];
-                              }
-                            });
-                            
-                            setErrors(newErrors);
-                            setTouched(newTouched);
-                          } else {
-                            // For other modes, clear certificate field errors
-                            const newErrors = { ...errors };
-                            ['ssl_cert_url', 'ssl_key_url', 'ssl_root_cert_url'].forEach(field => {
-                              delete newErrors[field as keyof FormErrors];
-                            });
-                            setErrors(newErrors);
-                          }
-                        }}
-                        className="neo-input w-full appearance-none pr-12"
-                      >
-                        <option value="disable">Disable - No SSL</option>
-                        <option value="require">Require - Encrypted only</option>
-                        <option value="verify-ca">Verify CA - Verify certificate authority</option>
-                        <option value="verify-full">Verify Full - Verify CA and hostname</option>
-                      </select>
-                      <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
-                        <ChevronDown className="w-5 h-5 text-gray-400" />
-                      </div>
-                    </div>
-                    <p className="text-gray-500 text-xs mt-2">
-                      {formData.ssl_mode === 'disable' && 'SSL will not be used.'}
-                      {formData.ssl_mode === 'require' && 'Connection must be encrypted, but certificates are not verified.'}
-                      {formData.ssl_mode === 'verify-ca' && 'Connection must be encrypted and the server certificate must be verified.'}
-                      {formData.ssl_mode === 'verify-full' && 'Connection must be encrypted and both the server certificate and hostname must be verified.'}
-                    </p>
-                  </div>
-                )}
-
-                {/* SSL Certificate Fields - Only show when SSL is enabled and mode requires verification */}
-                {formData.use_ssl && (formData.ssl_mode === 'verify-ca' || formData.ssl_mode === 'verify-full') && (
-                  <div className="mb-4 p-4 border border-gray-200 rounded-md bg-gray-50">
-                    <h4 className="font-bold mb-3 text-md">SSL/TLS Certificate Configuration</h4>
-                    
-                    <div className="mb-4">
-                      <label className="block font-medium mb-1 text-sm">SSL Certificate URL</label>
-                      <p className="text-gray-600 text-xs mb-1">URL to your client certificate file (.pem or .crt)</p>
-                      <input
-                        type="text"
-                        name="ssl_cert_url"
-                        value={formData.ssl_cert_url || ''}
-                        onChange={handleChange}
-                        onBlur={handleBlur}
-                        className={`neo-input w-full ${errors.ssl_cert_url && touched.ssl_cert_url ? 'border-red-500' : ''}`}
-                        placeholder="https://example.com/cert.pem"
-                      />
-                      {errors.ssl_cert_url && touched.ssl_cert_url && (
-                        <p className="text-red-500 text-xs mt-1">{errors.ssl_cert_url}</p>
-                      )}
-                    </div>
-                    
-                    <div className="mb-4">
-                      <label className="block font-medium mb-1 text-sm">SSL Key URL</label>
-                      <p className="text-gray-600 text-xs mb-1">URL to your private key file (.pem or .key)</p>
-                      <input
-                        type="text"
-                        name="ssl_key_url"
-                        value={formData.ssl_key_url || ''}
-                        onChange={handleChange}
-                        onBlur={handleBlur}
-                        className={`neo-input w-full ${errors.ssl_key_url && touched.ssl_key_url ? 'border-red-500' : ''}`}
-                        placeholder="https://example.com/key.pem"
-                      />
-                      {errors.ssl_key_url && touched.ssl_key_url && (
-                        <p className="text-red-500 text-xs mt-1">{errors.ssl_key_url}</p>
-                      )}
-                    </div>
-                    
-                    <div className="mb-2">
-                      <label className="block font-medium mb-1 text-sm">SSL Root Certificate URL</label>
-                      <p className="text-gray-600 text-xs mb-1">URL to the CA certificate file (.pem or .crt)</p>
-                      <input
-                        type="text"
-                        name="ssl_root_cert_url"
-                        value={formData.ssl_root_cert_url || ''}
-                        onChange={handleChange}
-                        onBlur={handleBlur}
-                        className={`neo-input w-full ${errors.ssl_root_cert_url && touched.ssl_root_cert_url ? 'border-red-500' : ''}`}
-                        placeholder="https://example.com/ca.pem"
-                      />
-                      {errors.ssl_root_cert_url && touched.ssl_root_cert_url && (
-                        <p className="text-red-500 text-xs mt-1">{errors.ssl_root_cert_url}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* SSH Tab */}
-            {connectionType === 'ssh' && (
-              <div className="relative">
-                {/* SSH Coming Soon Overlay */}
-                <div className="absolute inset-0 -right-2 flex items-center justify-center bg-white/80 z-10 rounded-lg -bottom-2">
-                  <div className="text-center max-w-xs p-4">
-                    <KeyRound className="w-12 h-12 mx-auto text-yellow-500 mb-2" />
-                    <h3 className="text-lg font-bold">SSH Coming Soon</h3>
-                    <p className="text-gray-600 mt-2">
-                      We're currently working on SSH tunnel support for secure database connections. Stay tuned!
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="space-y-6">
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">SSH Host</label>
-                    <p className="text-gray-600 text-sm mb-2">The hostname or IP address of your SSH server</p>
-                    <input
-                      type="text"
-                      name="ssh_host"
-                      value={formData.ssh_host || ''}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.ssh_host && touched.ssh_host ? 'border-neo-error' : ''}`}
-                      placeholder="e.g., ssh.example.com"
-                    />
-                    {errors.ssh_host && touched.ssh_host && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.ssh_host}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">SSH Port</label>
-                    <p className="text-gray-600 text-sm mb-2">The port number your SSH server is listening on</p>
-                    <input
-                      type="text"
-                      name="ssh_port"
-                      value={formData.ssh_port || '22'}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.ssh_port && touched.ssh_port ? 'border-neo-error' : ''}`}
-                      placeholder="e.g., 22"
-                    />
-                    {errors.ssh_port && touched.ssh_port && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.ssh_port}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">SSH Username</label>
-                    <p className="text-gray-600 text-sm mb-2">SSH user with appropriate permissions</p>
-                    <input
-                      type="text"
-                      name="ssh_username"
-                      value={formData.ssh_username || ''}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.ssh_username && touched.ssh_username ? 'border-neo-error' : ''}`}
-                      placeholder="SSH username"
-                    />
-                    {errors.ssh_username && touched.ssh_username && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.ssh_username}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">SSH Private Key</label>
-                    <p className="text-gray-600 text-sm mb-2">Private key for SSH authentication</p>
-                    <textarea
-                      name="ssh_private_key"
-                      value={formData.ssh_private_key || ''}
-                      onChange={(e) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          ssh_private_key: e.target.value,
-                        }));
-                        
-                        if (touched.ssh_private_key) {
-                          const error = validateField('ssh_private_key', {
-                            ...formData,
-                            ssh_private_key: e.target.value,
-                          });
-                          setErrors(prev => ({
-                            ...prev,
-                            ssh_private_key: error,
-                          }));
-                        }
-                      }}
-                      onBlur={() => {
-                        setTouched(prev => ({
-                          ...prev,
-                          ssh_private_key: true,
-                        }));
-                        const error = validateField('ssh_private_key', formData);
-                        setErrors(prev => ({
-                          ...prev,
-                          ssh_private_key: error,
-                        }));
-                      }}
-                      className={`neo-input w-full h-32 font-mono text-sm ${errors.ssh_private_key && touched.ssh_private_key ? 'border-neo-error' : ''}`}
-                      placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-                    />
-                    {errors.ssh_private_key && touched.ssh_private_key && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.ssh_private_key}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">SSH Passphrase (Optional)</label>
-                    <p className="text-gray-600 text-sm mb-2">Passphrase for your private key if it's protected</p>
-                    <input
-                      type="password"
-                      name="ssh_passphrase"
-                      value={formData.ssh_passphrase || ''}
-                      onChange={handleChange}
-                      className="neo-input w-full"
-                      placeholder="Private key passphrase"
-                    />
-                    <p className="text-gray-500 text-xs mt-2">
-                      Leave blank if your private key is not protected with a passphrase
-                    </p>
-                  </div>
-                  
-                  <div className="my-6 border-t border-gray-200 pt-4">
-                    <label className="block font-bold mb-2 text-lg">Database Settings</label>
-                    <p className="text-gray-600 text-sm mb-2">Configure your database through SSH tunnel</p>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">Database Type</label>
-                    <p className="text-gray-600 text-sm mb-2">Select your database system</p>
-                    <div className="relative">
-                      <select
-                        name="type"
-                        value={formData.type}
-                        onChange={handleChange}
-                        className="neo-input w-full appearance-none pr-12"
-                      >
-                        {[
-                          { value: 'postgresql', label: 'PostgreSQL' },
-                          { value: 'yugabytedb', label: 'YugabyteDB' },
-                          { value: 'mysql', label: 'MySQL' },
-                          { value: 'clickhouse', label: 'ClickHouse' },
-                          { value: 'mongodb', label: 'MongoDB' },
-                          { value: 'cassandra', label: 'Cassandra (Coming Soon)' },
-                          { value: 'redis', label: 'Redis (Coming Soon)' },
-                          { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
-                        ].map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
-                        <ChevronDown className="w-5 h-5 text-gray-400" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* MongoDB Connection URI Field - Only show when MongoDB is selected */}
-                  {formData.type === 'mongodb' && (
-                    <div>
-                      <label className="block font-bold mb-2 text-lg">MongoDB Connection URI</label>
-                      <p className="text-gray-600 text-sm mb-2">Paste your MongoDB connection string to auto-fill fields</p>
-                      <input
-                        type="text"
-                        name="mongo_uri_ssh"
-                        ref={mongoUriSshInputRef}
-                        className="neo-input w-full"
-                        placeholder="mongodb://username:password@host:port/database or mongodb+srv://username:password@host/database"
-                        onChange={(e) => {
-                          const uri = e.target.value;
-                          try {
-                            // Better parsing logic for MongoDB URIs that can handle special characters in credentials
-                            const srvFormat = uri.startsWith('mongodb+srv://');
-                            
-                            // Extract the protocol and the rest
-                            const protocolMatch = uri.match(/^(mongodb(?:\+srv)?:\/\/)(.*)/);
-                            if (!protocolMatch) {
-                              console.log("Invalid MongoDB URI format: Missing protocol");
-                              return;
-                            }
-                            
-                            const [, protocol, remainder] = protocolMatch;
-                            
-                            // Check if credentials are provided (look for @ after the protocol)
-                            const hasCredentials = remainder.includes('@');
-                            let username = '';
-                            let password = '';
-                            let hostPart = remainder;
-                            
-                            if (hasCredentials) {
-                              // Find the last @ which separates credentials from host
-                              const lastAtIndex = remainder.lastIndexOf('@');
-                              const credentialsPart = remainder.substring(0, lastAtIndex);
-                              hostPart = remainder.substring(lastAtIndex + 1);
-                              
-                              // Find the first : which separates username from password
-                              const firstColonIndex = credentialsPart.indexOf(':');
-                              if (firstColonIndex !== -1) {
-                                username = credentialsPart.substring(0, firstColonIndex);
-                                password = credentialsPart.substring(firstColonIndex + 1);
-                              } else {
-                                username = credentialsPart;
-                              }
-                            }
-                            
-                            // Parse host, port and database
-                            let host = '';
-                            let port = srvFormat ? '27017' : ''; // Default for SRV format
-                            let database = 'test'; // Default database name
-                            
-                            // Check if there's a / after the host[:port] part
-                            const pathIndex = hostPart.indexOf('/');
-                            if (pathIndex !== -1) {
-                              const hostPortPart = hostPart.substring(0, pathIndex);
-                              const pathPart = hostPart.substring(pathIndex + 1);
-                              
-                              // Extract database name (everything before ? or end of string)
-                              const dbEndIndex = pathPart.indexOf('?');
-                              if (dbEndIndex !== -1) {
-                                database = pathPart.substring(0, dbEndIndex);
-                              } else {
-                                database = pathPart;
-                              }
-                              
-                              // Parse host and port
-                              const portIndex = hostPortPart.indexOf(':');
-                              if (portIndex !== -1) {
-                                host = hostPortPart.substring(0, portIndex);
-                                port = hostPortPart.substring(portIndex + 1);
-                              } else {
-                                host = hostPortPart;
-                              }
-                            } else {
-                              // No database specified in the URI
-                              const portIndex = hostPart.indexOf(':');
-                              if (portIndex !== -1) {
-                                host = hostPart.substring(0, portIndex);
-                                port = hostPart.substring(portIndex + 1);
-                              } else {
-                                host = hostPart;
-                              }
-                            }
-                            
-                            if (host) {
-                              console.log("MongoDB URI parsed successfully", { username, host, port, database });
-                              
-                              setFormData(prev => ({
-                                ...prev,
-                                host: host,
-                                port: port || (srvFormat ? '27017' : prev.port),
-                                database: database || 'test',
-                                username: username || prev.username,
-                                password: password || prev.password
-                              }));
-                              
-                              // Mark fields as touched
-                              setTouched(prev => ({
-                                ...prev,
-                                host: true,
-                                port: !!port,
-                                database: !!database,
-                                username: !!username
-                              }));
-                            } else {
-                              console.log("MongoDB URI parsing failed: could not extract host");
-                            }
-                          } catch (err) {
-                            // Invalid URI format, just continue
-                            console.log("Invalid MongoDB URI format", err);
-                          }
-                        }}
-                      />
-                      <p className="text-gray-500 text-xs mt-2">
-                        Connection URI will be used to auto-fill the fields below. Both standard and Atlas SRV formats supported.
-                      </p>
-                    </div>
-                  )}
-                    
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">Host</label>
-                    <p className="text-gray-600 text-sm mb-2">The hostname or IP address of your database server</p>
-                    <input
-                      type="text"
-                      name="host"
-                      value={formData.host}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.host && touched.host ? 'border-neo-error' : ''}`}
-                      placeholder="e.g., localhost, db.example.com, 192.168.1.1"
-                    />
-                    {errors.host && touched.host && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.host}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">Port</label>
-                    <p className="text-gray-600 text-sm mb-2">The port number your database is listening on</p>
-                    <input
-                      type="text"
-                      name="port"
-                      value={formData.port}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.port && touched.port ? 'border-neo-error' : ''}`}
-                      placeholder="e.g., 5432 (PostgreSQL), 3306 (MySQL), 27017 (MongoDB)"
-                    />
-                    {errors.port && touched.port && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.port}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">Database Name</label>
-                    <p className="text-gray-600 text-sm mb-2">The name of the specific database to connect to</p>
-                    <input
-                      type="text"
-                      name="database"
-                      value={formData.database}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.database && touched.database ? 'border-neo-error' : ''}`}
-                      placeholder="e.g., myapp_production, users_db"
-                    />
-                    {errors.database && touched.database && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.database}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">Username</label>
-                    <p className="text-gray-600 text-sm mb-2">Database user with appropriate permissions</p>
-                    <input
-                      type="text"
-                      name="username"
-                      value={formData.username}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      className={`neo-input w-full ${errors.username && touched.username ? 'border-neo-error' : ''}`}
-                      placeholder="e.g., db_user, assistant"
-                    />
-                    {errors.username && touched.username && (
-                      <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{errors.username}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold mb-2 text-lg">Password</label>
-                    <p className="text-gray-600 text-sm mb-2">Password for the database user</p>
-                    <input
-                      type="password"
-                      name="password"
-                      value={formData.password || ''}
-                      onChange={handleChange}
-                      className="neo-input w-full"
-                      placeholder="Enter your database password"
-                    />
-                    <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
-                  </div>
-                </div>
+        <form onSubmit={handleSubmit} className="p-6 pt-2 space-y-6 flex-shrink-0 border-t border-gray-200">
+          {error && (
+            <div className="p-4 bg-red-50 border-2 border-red-500 rounded-lg">
+              <div className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="w-5 h-5" />
+                <p className="font-medium">{error}</p>
               </div>
-            )}
+            </div>
+          )}
 
+          {/* Form Submit and Cancel Buttons - Only show in Connection and Settings tabs */}
+          {(activeTab === 'connection' || activeTab === 'settings') && (
             <div className="flex gap-4 pt-4">
               <button
                 type="submit"
@@ -1526,8 +1001,8 @@ SSH_PRIVATE_KEY=your_private_key`}
                 Cancel
               </button>
             </div>
-          </form>
-        </div>
+          )}
+        </form>
       </div>
 
       {/* Select Tables Modal */}
@@ -1541,6 +1016,6 @@ SSH_PRIVATE_KEY=your_private_key`}
           onSave={handleUpdateSelectedCollections}
         />
       )}
-    </>
+    </div>
   );
 }

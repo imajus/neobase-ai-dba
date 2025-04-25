@@ -1274,7 +1274,6 @@ function AppContent() {
         setSelectedConnection(prev => prev ? { ...prev, auto_execute_query: autoExecuteQuery } : prev);
       }
       
-      toast.success('Auto execute query setting updated!', toastStyle);
     } catch (error: any) {
       console.error('Failed to update auto execute query setting:', error);
       toast.error(error.message, errorToast);
