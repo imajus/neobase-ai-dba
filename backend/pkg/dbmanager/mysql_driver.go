@@ -52,63 +52,87 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 
 	// Configure SSL/TLS
 	if config.UseSSL {
-		// Create a unique TLS config name
-		tlsConfigName := fmt.Sprintf("custom-%d", time.Now().UnixNano())
-
-		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
-		if err != nil {
-			return nil, err
+		sslMode := "require"
+		if config.SSLMode != nil {
+			sslMode = *config.SSLMode
 		}
 
-		// Track temporary files for cleanup
-		tempFiles = certTempFiles
+		if sslMode == "disable" {
+			// Do nothing
+		} else {
+			// Create a unique TLS config name
+			tlsConfigName := fmt.Sprintf("custom-%d", time.Now().UnixNano())
 
-		// Create TLS config
-		tlsConfig := &tls.Config{
-			ServerName: config.Host,
-			MinVersion: tls.VersionTLS12,
-		}
-
-		// Add client certificates if provided
-		if certPath != "" && keyPath != "" {
-			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			// Fetch certificates from URLs
+			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to load client certificates: %v", err)
+				return nil, err
 			}
-			tlsConfig.Certificates = []tls.Certificate{cert}
+
+			// Track temporary files for cleanup
+			tempFiles = certTempFiles
+
+			// Create TLS config
+			tlsConfig := &tls.Config{
+				ServerName: config.Host,
+				MinVersion: tls.VersionTLS12,
+			}
+
+			// Set verification mode based on SSL mode
+			switch sslMode {
+			case "require":
+				// Require encryption but don't verify certificates
+				tlsConfig.InsecureSkipVerify = true
+			case "verify-ca", "verify-full":
+				// Verify certificates
+				tlsConfig.InsecureSkipVerify = false
+
+				// For verify-full, ensure ServerName is set for hostname verification
+				if sslMode == "verify-full" {
+					// ServerName is already set above
+				}
+			}
+
+			// Add client certificates if provided
+			if certPath != "" && keyPath != "" {
+				cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return nil, fmt.Errorf("failed to load client certificates: %v", err)
+				}
+				tlsConfig.Certificates = []tls.Certificate{cert}
+			}
+
+			// Add CA certificate if provided
+			if rootCertPath != "" {
+				rootCertPool := x509.NewCertPool()
+				pem, err := ioutil.ReadFile(rootCertPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return nil, fmt.Errorf("failed to read CA certificate: %v", err)
+				}
+				if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return nil, fmt.Errorf("failed to append CA certificate")
+				}
+				tlsConfig.RootCAs = rootCertPool
+			}
+
+			// Register TLS config
+			mysqldriver.RegisterTLSConfig(tlsConfigName, tlsConfig)
+
+			// Add TLS config to DSN
+			dsn += "&tls=" + tlsConfigName
 		}
-
-		// Add CA certificate if provided
-		if rootCertPath != "" {
-			rootCertPool := x509.NewCertPool()
-			pem, err := ioutil.ReadFile(rootCertPath)
-			if err != nil {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to read CA certificate: %v", err)
-			}
-			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to append CA certificate")
-			}
-			tlsConfig.RootCAs = rootCertPool
-		}
-
-		// Register TLS config
-		mysqldriver.RegisterTLSConfig(tlsConfigName, tlsConfig)
-
-		// Add TLS config to DSN
-		dsn += "&tls=" + tlsConfigName
 	}
 
 	// Open connection

@@ -15,6 +15,7 @@ type Connection struct {
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `bson:"use_ssl" json:"use_ssl"`
+	SSLMode        *string `bson:"ssl_mode,omitempty" json:"ssl_mode,omitempty"` // type: disable, require, verify-ca, verify-full
 	SSLCertURL     *string `bson:"ssl_cert_url,omitempty" json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `bson:"ssl_key_url,omitempty" json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `bson:"ssl_root_cert_url,omitempty" json:"ssl_root_cert_url,omitempty"`

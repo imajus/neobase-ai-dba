@@ -2,6 +2,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   ArrowRight,
   Boxes,
+  Clock,
   Copy,
   HelpCircle,
   Loader2,
@@ -411,7 +412,7 @@ export default function Sidebar({
               {connections.length > 0 ? (
                 <>
                   {sortedGroups.map(([groupName, groupConnections]) => (
-                    <div key={groupName} className="mb-6">
+                    <div key={groupName} className={`${isExpanded ? 'mb-6' : 'mb-2'}`}>
                       {isExpanded && (
                         <>
                         <h2 className="text-sm font-semibold text-gray-500 mb-2">{groupName}</h2>
@@ -442,7 +443,7 @@ export default function Sidebar({
                                           ? connection.connection.database.slice(0, 20) + '...' 
                                           : connection.connection.database}
                                     </h3>
-                                    <div className="flex w-full flex-row justify-between items-center gap-16">
+                                    <div className="flex w-full flex-row justify-between items-center gap-4">
                                       <p className="text-gray-600 capitalize text-sm truncate">
                                         {connection.connection.type === 'postgresql' 
                                           ? 'PostgreSQL' 
@@ -460,7 +461,11 @@ export default function Sidebar({
                                                       ? 'Neo4j' 
                                                       : 'Unknown'}
                                       </p>
-                                      <p className="text-right text-gray-500 text-xs whitespace-nowrap ml-auto">{getRelativeTime(connection.updated_at)}</p>
+                                      <div className="flex flex-row items-center gap-1.5">
+                                        <Clock className="w-3.5 h-3.5 text-gray-500" />
+                                        <p className="text-right text-gray-500 text-xs whitespace-nowrap ml-auto">
+                                          {getRelativeTime(connection.updated_at)}</p>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>

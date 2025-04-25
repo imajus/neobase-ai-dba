@@ -41,15 +41,6 @@ interface QueryState {
 
 type UpdateSource = 'api' | 'new' | 'query' | null;
 
-const formatMessageTime = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: true
-  });
-};
-
 const formatDateDivider = (dateString: string) => {
   const date = new Date(dateString);
   const today = new Date();
@@ -609,7 +600,8 @@ export default function ChatWindow({
     }
   };
 
-  const handleFixErrorAction = (message: Message) => {
+  // @Deprecated the below logic for now & testing the new one
+  const _handleFixErrorAction = (message: Message) => {
     // Find the user message that this AI response is replying to
     const userMessageId = message.user_message_id;
     if (!userMessageId) {
@@ -651,7 +643,8 @@ export default function ChatWindow({
     onEditMessage(userMessageId, fixErrorContent);
   };
 
-  const handleFixRollbackErrorAction = (message: Message) => {
+  // @Deprecated the below logic for now & testing the new one
+  const _handleFixRollbackErrorAction = (message: Message) => {
     // Find the user message that this AI response is replying to
     const userMessageId = message.user_message_id;
     if (!userMessageId) {
@@ -692,6 +685,42 @@ export default function ChatWindow({
     // Edit the user message to include the error message
     onEditMessage(userMessageId, fixRollbackErrorContent);
   }
+
+  const handleFixErrorAction = (message: Message) => {
+
+    const queriesWithErrors = message.queries?.filter(q => q.error) || [];
+    if (queriesWithErrors.length === 0) {
+      toast.error("No errors found to fix");
+      return;
+    }
+
+    // Create the error message content
+    let fixErrorContent = "Fix Errors:\n";
+    queriesWithErrors.forEach(query => {
+      fixErrorContent += `Query: '${query.query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
+    });
+
+    // Edit the user message to include the error message
+    onSendMessage(fixErrorContent);
+  };
+
+   // New logic for fixing rollback errors
+  const handleFixRollbackErrorAction = (message: Message) => {
+  
+      const queriesWithErrors = message.queries?.filter(q => q.error) || [];
+      if (queriesWithErrors.length === 0) {
+        toast.error("No errors found to fix");
+        return;
+      }
+      // Create the error message content
+      let fixRollbackErrorContent = "Fix Rollback Errors:";
+      queriesWithErrors.forEach(query => {
+        fixRollbackErrorContent += `Query: '${query.rollback_query != null && query.rollback_query != "" ? query.rollback_query : query.rollback_dependent_query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
+      });
+  
+      // Edit the user message to include the error message
+      onSendMessage(fixRollbackErrorContent);
+    }
 
   const handleConfirmClearChat = useCallback(async () => {
     // Track chat cleared event

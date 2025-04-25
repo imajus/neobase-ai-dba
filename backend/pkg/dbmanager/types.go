@@ -48,6 +48,7 @@ type ConnectionConfig struct {
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`
+	SSLMode        *string `json:"ssl_mode,omitempty"`          // type: disable, require, verify-ca, verify-full
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`      // URL to client certificate
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`       // URL to client key
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"` // URL to CA certificate

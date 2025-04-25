@@ -10,6 +10,7 @@ type CreateConnectionRequest struct {
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`
+	SSLMode        *string `json:"ssl_mode,omitempty"` // type: disable, require, verify-ca, verify-full
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
@@ -27,6 +28,7 @@ type ConnectionResponse struct {
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`
+	SSLMode        *string `json:"ssl_mode,omitempty"` // type: disable, require, verify-ca, verify-full
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`

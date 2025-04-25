@@ -796,6 +796,12 @@ function AppContent() {
       await new Promise(resolve => setTimeout(resolve, 100));
       const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
 
+      // Update the chat updated_at field of the selected connection
+      if (selectedConnection) {
+        selectedConnection.updated_at = new Date().toISOString();
+        chats.find(chat => chat.id === selectedConnection.id)!.updated_at = new Date().toISOString();
+      }
+
       if (response.success) {
         const userMessage: Message = {
           id: response.data.id,
@@ -1120,6 +1126,12 @@ function AppContent() {
       );
 
       if (response.data.success) {
+        // Update the chat updated_at field of the selected connection
+        if (selectedConnection) {
+          selectedConnection.updated_at = new Date().toISOString();
+          chats.find(chat => chat.id === selectedConnection.id)!.updated_at = new Date().toISOString();
+        }
+
         // Set is_edited to true
         setMessages(prev => prev.map(msg => {
           if (msg.id === id) {

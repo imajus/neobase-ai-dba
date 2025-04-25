@@ -18,8 +18,16 @@ const chatService = {
 
     async createChat(connection: Connection, autoExecuteQuery: boolean = false): Promise<Chat> {
         try {
+            // Ensure we send the ssl_mode when it's present
+            const connectionToSend = { ...connection };
+            
+            // Make sure ssl_mode is included if present
+            if (connection.use_ssl && connection.ssl_mode) {
+                connectionToSend.ssl_mode = connection.ssl_mode;
+            }
+            
             const response = await axios.post<CreateChatResponse>(`${API_URL}/chats`, {
-                connection,
+                connection: connectionToSend,
                 auto_execute_query: autoExecuteQuery
             });
 
@@ -35,7 +43,15 @@ const chatService = {
     },
     async editChat(chatId: string, connection: Connection, autoExecuteQuery?: boolean): Promise<Chat> {
         try {
-            const payload: any = { connection };
+            // Ensure we send the ssl_mode when it's present
+            const connectionToSend = { ...connection };
+            
+            // Make sure ssl_mode is included if present
+            if (connection.use_ssl && connection.ssl_mode) {
+                connectionToSend.ssl_mode = connection.ssl_mode;
+            }
+            
+            const payload: any = { connection: connectionToSend };
             
             // Only include auto_execute_query if it's explicitly provided
             if (typeof autoExecuteQuery === 'boolean') {

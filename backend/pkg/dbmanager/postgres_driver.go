@@ -42,8 +42,16 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 
 	// Configure SSL/TLS
 	if config.UseSSL {
-		// Always use verify-full mode for maximum security
-		baseParams += " sslmode=verify-full"
+		sslMode := "require"
+		if config.SSLMode != nil {
+			sslMode = *config.SSLMode
+		}
+
+		if sslMode == "disable" {
+			// Do nothing
+		} else {
+			baseParams += fmt.Sprintf(" sslmode=%s", sslMode)
+		}
 
 		// Fetch certificates from URLs
 		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)

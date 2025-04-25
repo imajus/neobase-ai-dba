@@ -490,62 +490,70 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 
 	// Configure SSL/TLS
 	if config.UseSSL {
-		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
-		if err != nil {
-			return nil, err
+		sslMode := "require"
+		if config.SSLMode != nil {
+			sslMode = *config.SSLMode
 		}
 
-		// Track temporary files for cleanup
-		tempFiles = certTempFiles
-
-		// Configure TLS
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: false, // Always verify certificates
-		}
-
-		// Add client certificates if provided
-		if certPath != "" && keyPath != "" {
-			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if sslMode == "disable" {
+			// Do nothing
+		} else {
+			// Fetch certificates from URLs
+			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to load client certificates: %v", err)
+				return nil, err
 			}
-			tlsConfig.Certificates = []tls.Certificate{cert}
+
+			// Track temporary files for cleanup
+			tempFiles = certTempFiles
+
+			// Configure TLS
+			tlsConfig := &tls.Config{
+				InsecureSkipVerify: false, // Always verify certificates
+			}
+
+			// Add client certificates if provided
+			if certPath != "" && keyPath != "" {
+				cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return nil, fmt.Errorf("failed to load client certificates: %v", err)
+				}
+				tlsConfig.Certificates = []tls.Certificate{cert}
+			}
+
+			// Add root CA if provided
+			if rootCertPath != "" {
+				rootCA, err := os.ReadFile(rootCertPath)
+				if err != nil {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return nil, fmt.Errorf("failed to read root CA: %v", err)
+				}
+
+				rootCertPool := x509.NewCertPool()
+				if ok := rootCertPool.AppendCertsFromPEM(rootCA); !ok {
+					// Clean up temporary files
+					for _, file := range tempFiles {
+						os.Remove(file)
+					}
+					return nil, fmt.Errorf("failed to parse root CA certificate")
+				}
+
+				tlsConfig.RootCAs = rootCertPool
+			}
+
+			clientOptions.SetTLSConfig(tlsConfig)
 		}
-
-		// Add root CA if provided
-		if rootCertPath != "" {
-			rootCA, err := os.ReadFile(rootCertPath)
-			if err != nil {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to read root CA: %v", err)
-			}
-
-			rootCertPool := x509.NewCertPool()
-			if ok := rootCertPool.AppendCertsFromPEM(rootCA); !ok {
-				// Clean up temporary files
-				for _, file := range tempFiles {
-					os.Remove(file)
-				}
-				return nil, fmt.Errorf("failed to parse root CA certificate")
-			}
-
-			tlsConfig.RootCAs = rootCertPool
-		}
-
-		clientOptions.SetTLSConfig(tlsConfig)
 	} else {
 		// Disable SSL verification for encrypted connections
 		clientOptions.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
 	}
-
 	// Configure connection pool
 	clientOptions.SetMaxPoolSize(25)
 	clientOptions.SetMinPoolSize(5)

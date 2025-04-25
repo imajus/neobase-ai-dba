@@ -242,7 +242,11 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		// Configure SSL/TLS
 		if config.UseSSL {
 			// Always use verify-full mode for maximum security
-			baseParams += " sslmode=verify-full"
+			if config.SSLMode != nil {
+				baseParams += fmt.Sprintf(" sslmode=%s", *config.SSLMode)
+			} else {
+				baseParams += " sslmode=require"
+			}
 
 			// Fetch certificates from URLs
 			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
@@ -575,7 +579,30 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 
 			// Configure TLS
 			tlsConfig := &tls.Config{
-				InsecureSkipVerify: false, // Always verify certificates
+				InsecureSkipVerify: false, // Default: verify certificates
+			}
+
+			// Apply SSL mode if specified
+			if config.SSLMode != nil {
+				switch *config.SSLMode {
+				case "disable":
+					// Don't use TLS at all
+					// MongoDB driver doesn't have a direct SetTLS(nil) method,
+					// so we'll skip setting TLS config at all
+					goto skipTLSConfig
+				case "require":
+					// Require encryption but don't verify server certificates
+					tlsConfig.InsecureSkipVerify = true
+				case "verify-ca":
+					// Verify server certificate but not hostname
+					tlsConfig.InsecureSkipVerify = false
+					// Clear ServerName to skip hostname verification
+					tlsConfig.ServerName = ""
+				case "verify-full":
+					// Full verification including hostname
+					tlsConfig.InsecureSkipVerify = false
+					tlsConfig.ServerName = config.Host
+				}
 			}
 
 			// Add client certificates if provided
@@ -617,6 +644,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 			clientOptions.SetTLSConfig(tlsConfig)
 		}
 
+	skipTLSConfig:
 		// Connect to MongoDB with timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
