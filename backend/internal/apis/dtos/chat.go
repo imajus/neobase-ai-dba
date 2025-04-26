@@ -1,5 +1,14 @@
 package dtos
 
+type CreateChatSettings struct {
+	AutoExecuteQuery *bool `json:"auto_execute_query"`
+	ShareDataWithAI  *bool `json:"share_data_with_ai"`
+}
+
+type ChatSettingsResponse struct {
+	AutoExecuteQuery bool `json:"auto_execute_query"`
+	ShareDataWithAI  bool `json:"share_data_with_ai"`
+}
 type CreateConnectionRequest struct {
 	Type     string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra"`
 	Host     string  `json:"host" binding:"required"`
@@ -10,6 +19,7 @@ type CreateConnectionRequest struct {
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`
+	SSLMode        *string `json:"ssl_mode,omitempty"` // type: disable, require, verify-ca, verify-full
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
@@ -27,30 +37,31 @@ type ConnectionResponse struct {
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`
+	SSLMode        *string `json:"ssl_mode,omitempty"` // type: disable, require, verify-ca, verify-full
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
 }
 
 type CreateChatRequest struct {
-	Connection       CreateConnectionRequest `json:"connection" binding:"required"`
-	AutoExecuteQuery bool                    `json:"auto_execute_query" binding:"required"`
+	Connection CreateConnectionRequest `json:"connection" binding:"required"`
+	Settings   CreateChatSettings      `json:"settings,omitempty"`
 }
 
 type UpdateChatRequest struct {
 	Connection          *CreateConnectionRequest `json:"connection"`
 	SelectedCollections *string                  `json:"selected_collections"` // "ALL" or comma-separated table names
-	AutoExecuteQuery    *bool                    `json:"auto_execute_query"`
+	Settings            *CreateChatSettings      `json:"settings"`
 }
 
 type ChatResponse struct {
-	ID                  string             `json:"id"`
-	UserID              string             `json:"user_id"`
-	Connection          ConnectionResponse `json:"connection"`
-	SelectedCollections string             `json:"selected_collections"`
-	CreatedAt           string             `json:"created_at"`
-	UpdatedAt           string             `json:"updated_at"`
-	AutoExecuteQuery    bool               `json:"auto_execute_query"`
+	ID                  string               `json:"id"`
+	UserID              string               `json:"user_id"`
+	Connection          ConnectionResponse   `json:"connection"`
+	SelectedCollections string               `json:"selected_collections"`
+	CreatedAt           string               `json:"created_at"`
+	UpdatedAt           string               `json:"updated_at"`
+	Settings            ChatSettingsResponse `json:"settings"`
 }
 
 type ChatListResponse struct {

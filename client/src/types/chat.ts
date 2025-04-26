@@ -1,4 +1,6 @@
 // Create a new file for chat types
+export type SSLMode = 'disable' | 'require' | 'verify-ca' | 'verify-full';
+
 export interface Connection {
     type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
     host: string;
@@ -8,9 +10,17 @@ export interface Connection {
     database: string;
     is_example_db: boolean;
     use_ssl?: boolean;
+    ssl_mode?: SSLMode;
     ssl_cert_url?: string;
     ssl_key_url?: string;
     ssl_root_cert_url?: string;
+    // SSH tunnel fields
+    ssh_enabled?: boolean;
+    ssh_host?: string;
+    ssh_port?: string;
+    ssh_username?: string;
+    ssh_private_key?: string;
+    ssh_passphrase?: string;
 }
 
 export interface Chat {
@@ -18,7 +28,7 @@ export interface Chat {
     user_id: string;
     connection: Connection;
     selected_collections?: string; // "ALL" or comma-separated table names
-    auto_execute_query?: boolean; // Whether to automatically execute queries when a new message is created
+    settings: ChatSettings;
     created_at: string;
     updated_at: string;
 }
@@ -52,3 +62,8 @@ export interface TableInfo {
 export interface TablesResponse {
     tables: TableInfo[];
 } 
+
+export interface ChatSettings {
+    auto_execute_query: boolean;
+    share_data_with_ai: boolean;
+}

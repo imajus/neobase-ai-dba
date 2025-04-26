@@ -2,6 +2,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   ArrowRight,
   Boxes,
+  Clock,
   Copy,
   HelpCircle,
   Loader2,
@@ -55,6 +56,32 @@ const formatDate = (dateString: string) => {
     day: 'numeric',
     year: 'numeric'
   });
+};
+
+// Function to get a user-friendly relative time (e.g., "2 hours ago")
+const getRelativeTime = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffTime = now.getTime() - date.getTime();
+  const diffMinutes = Math.floor(diffTime / (1000 * 60));
+  
+  if (diffMinutes < 1) {
+    return 'Just now';
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+  } else {
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) {
+      return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    } else {
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays === 1) {
+        return 'Yesterday';
+      } else {
+        return formatDate(dateString);
+      }
+    }
+  }
 };
 
 // Function to determine the date group for a connection
@@ -385,7 +412,7 @@ export default function Sidebar({
               {connections.length > 0 ? (
                 <>
                   {sortedGroups.map(([groupName, groupConnections]) => (
-                    <div key={groupName} className="mb-6">
+                    <div key={groupName} className={`${isExpanded ? 'mb-6' : 'mb-2'}`}>
                       {isExpanded && (
                         <>
                         <h2 className="text-sm font-semibold text-gray-500 mb-2">{groupName}</h2>
@@ -416,23 +443,30 @@ export default function Sidebar({
                                           ? connection.connection.database.slice(0, 20) + '...' 
                                           : connection.connection.database}
                                     </h3>
-                                    <p className="text-gray-600 capitalize text-sm">
-                                      {connection.connection.type === 'postgresql' 
-                                        ? 'PostgreSQL' 
-                                        : connection.connection.type === 'yugabytedb' 
-                                          ? 'YugabyteDB' 
-                                          : connection.connection.type === 'mysql' 
-                                            ? 'MySQL' 
-                                            : connection.connection.type === 'clickhouse' 
-                                              ? 'ClickHouse' 
-                                              : connection.connection.type === 'mongodb' 
-                                                ? 'MongoDB' 
-                                                : connection.connection.type === 'redis' 
-                                                  ? 'Redis' 
-                                                  : connection.connection.type === 'neo4j' 
-                                                    ? 'Neo4j' 
-                                                    : 'Unknown'}
-                                    </p>
+                                    <div className="flex w-full flex-row justify-between items-center gap-4">
+                                      <p className="text-gray-600 capitalize text-sm truncate">
+                                        {connection.connection.type === 'postgresql' 
+                                          ? 'PostgreSQL' 
+                                          : connection.connection.type === 'yugabytedb' 
+                                            ? 'YugabyteDB' 
+                                            : connection.connection.type === 'mysql' 
+                                              ? 'MySQL' 
+                                              : connection.connection.type === 'clickhouse' 
+                                                ? 'ClickHouse' 
+                                                : connection.connection.type === 'mongodb' 
+                                                  ? 'MongoDB' 
+                                                  : connection.connection.type === 'redis' 
+                                                    ? 'Redis' 
+                                                    : connection.connection.type === 'neo4j' 
+                                                      ? 'Neo4j' 
+                                                      : 'Unknown'}
+                                      </p>
+                                      <div className="flex flex-row items-center gap-1.5">
+                                        <Clock className="w-3.5 h-3.5 text-gray-500" />
+                                        <p className="text-right text-gray-500 text-xs whitespace-nowrap ml-auto">
+                                          {getRelativeTime(connection.updated_at)}</p>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                               </div>

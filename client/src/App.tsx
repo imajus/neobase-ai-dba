@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { EventSourcePolyfill } from 'event-source-polyfill';
-import { Boxes, Database, LineChart, MessageSquare, Loader2, Sparkles } from 'lucide-react';
+import { Boxes } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import AuthForm from './components/auth/AuthForm';
@@ -10,7 +10,6 @@ import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
 import ConnectionModal from './components/modals/ConnectionModal';
-import SelectTablesModal from './components/modals/SelectTablesModal';
 import { StreamProvider, useStream } from './contexts/StreamContext';
 import { UserProvider, useUser } from './contexts/UserContext';
 import authService from './services/authService';
@@ -18,7 +17,7 @@ import './services/axiosConfig';
 import chatService from './services/chatService';
 import analyticsService from './services/analyticsService';
 import { LoginFormData, SignupFormData } from './types/auth';
-import { Chat, ChatsResponse, Connection } from './types/chat';
+import { Chat, ChatSettings, ChatsResponse, Connection } from './types/chat';
 import { SendMessageResponse } from './types/messages';
 import { StreamResponse } from './types/stream';
 import WelcomeSection from './components/app/WelcomeSection';
@@ -29,7 +28,7 @@ function AppContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [isEditingConnection, setIsEditingConnection] = useState(false);
-  const [showSelectTablesModal, setShowSelectTablesModal] = useState(false);
+  const [, setShowSelectTablesModal] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<Chat>();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -233,19 +232,15 @@ function AppContent() {
     }
   };
 
-  const handleAddConnection = async (connection: Connection, autoExecuteQuery: boolean = false): Promise<{ success: boolean, error?: string }> => {
+  const handleAddConnection = async (connection: Connection, settings: ChatSettings): Promise<{ success: boolean, error?: string, chatId?: string }> => {
     try {
-      const newChat = await chatService.createChat(connection, autoExecuteQuery);
+      const newChat = await chatService.createChat(connection, settings);
       setChats(prev => [...prev, newChat]);
       setSuccessMessage('Connection added successfully!');
-      setShowConnectionModal(false);
       
-      // Set the newly created chat and show the select tables modal
-      setSelectedConnection(newChat);
-      setNewlyCreatedChat(newChat);
-      setShowSelectTablesModal(true);
       
-      return { success: true };
+      // Return the newly created chat ID so ConnectionModal can fetch tables
+      return { success: true, chatId: newChat.id };
     } catch (error: any) {
       console.error('Failed to add connection:', error);
       toast.error(error.message, errorToast);
@@ -339,7 +334,7 @@ function AppContent() {
     }
   };
 
-  const handleEditConnection = async (id: string, data: Connection, autoExecuteQuery: boolean): Promise<{ success: boolean; error?: string }> => {
+  const handleEditConnection = async (id: string, data: Connection, settings: ChatSettings): Promise<{ success: boolean; error?: string }> => {
     let loadingToastId: string | undefined;
     loadingToastId = toast.loading('Updating connection...', {
       style: {
@@ -359,7 +354,7 @@ function AppContent() {
         selectedConnection.connection.username !== data.username);
 
       // Update the connection
-      const response = await chatService.editChat(id, data, autoExecuteQuery);
+      const response = await chatService.editChat(id, data, settings);
       console.log("handleEditConnection response", response);
 
       if (response) {
@@ -796,6 +791,12 @@ function AppContent() {
       await new Promise(resolve => setTimeout(resolve, 100));
       const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
 
+      // Update the chat updated_at field of the selected connection
+      if (selectedConnection) {
+        selectedConnection.updated_at = new Date().toISOString();
+        chats.find(chat => chat.id === selectedConnection.id)!.updated_at = new Date().toISOString();
+      }
+
       if (response.success) {
         const userMessage: Message = {
           id: response.data.id,
@@ -1120,6 +1121,12 @@ function AppContent() {
       );
 
       if (response.data.success) {
+        // Update the chat updated_at field of the selected connection
+        if (selectedConnection) {
+          selectedConnection.updated_at = new Date().toISOString();
+          chats.find(chat => chat.id === selectedConnection.id)!.updated_at = new Date().toISOString();
+        }
+
         // Set is_edited to true
         setMessages(prev => prev.map(msg => {
           if (msg.id === id) {
@@ -1180,23 +1187,8 @@ function AppContent() {
     let loadingToast: string | null = null;
     
     try {
-      // Find the chat to check if selected_collections have changed
-      const chat = chats.find(c => c.id === chatId);
-      
-      // If the selected collections haven't changed, don't make the API call
-      if (chat && chat.selected_collections === selectedCollections) {
-        console.log('Selected collections unchanged, skipping API call');
-        
-        // Close the modal if this was a newly created chat
-        if (newlyCreatedChat && newlyCreatedChat.id === chatId) {
-          setShowSelectTablesModal(false);
-          setNewlyCreatedChat(null);
-          await handleSelectConnection(chatId);
-        }
-        
-        return;
-      }
-      
+    
+      // Always make the API call regardless of whether the selection has changed
       loadingToast = toast.loading('Updating selected tables...', {
         style: {
           background: '#000',
@@ -1205,6 +1197,9 @@ function AppContent() {
           border: '4px solid #000',
         },
       });
+      
+      // Call the API to update the selected collections
+      await chatService.updateSelectedCollections(chatId, selectedCollections);
       
       // Update the chat in the local state
       setChats(prev => prev.map(chat => 
@@ -1262,7 +1257,6 @@ function AppContent() {
         setSelectedConnection(prev => prev ? { ...prev, auto_execute_query: autoExecuteQuery } : prev);
       }
       
-      toast.success('Auto execute query setting updated!', toastStyle);
     } catch (error: any) {
       console.error('Failed to update auto execute query setting:', error);
       toast.error(error.message, errorToast);
@@ -1407,11 +1401,10 @@ function AppContent() {
           }}
           onSubmit={handleAddConnection}
           onUpdateSelectedCollections={handleUpdateSelectedCollections}
-          onUpdateAutoExecuteQuery={handleUpdateAutoExecuteQuery}
           initialData={isEditingConnection ? selectedConnection : undefined}
-          onEdit={isEditingConnection ? async (connection) => {
+          onEdit={isEditingConnection ? async (connection, settings) => {
             try {
-              const updatedChat = await chatService.editChat(selectedConnection!.id, connection);
+              const updatedChat = await chatService.editChat(selectedConnection!.id, connection, settings);
               
               // Update the chat in the state
               setChats(prev => prev.map(chat => 
@@ -1431,20 +1424,6 @@ function AppContent() {
               return { success: false, error: error.message };
             }
           } : undefined}
-        />
-      )}
-
-      {/* Add SelectTablesModal for newly created connections */}
-      {showSelectTablesModal && newlyCreatedChat && (
-        <SelectTablesModal
-          chat={newlyCreatedChat}
-          onClose={() => {
-            setShowSelectTablesModal(false);
-            setNewlyCreatedChat(null);
-            // Select the newly created chat
-            handleSelectConnection(newlyCreatedChat.id);
-          }}
-          onSave={(selectedCollections) => handleUpdateSelectedCollections(newlyCreatedChat.id, selectedCollections)}
         />
       )}
 

@@ -586,6 +586,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		Password:       chat.Connection.Password,
 		Database:       chat.Connection.Database,
 		UseSSL:         chat.Connection.UseSSL,
+		SSLMode:        chat.Connection.SSLMode,
 		SSLCertURL:     chat.Connection.SSLCertURL,
 		SSLKeyURL:      chat.Connection.SSLKeyURL,
 		SSLRootCertURL: chat.Connection.SSLRootCertURL,
@@ -622,7 +623,7 @@ func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, s
 // ExecuteQuery executes a query, runs realtime query to connected database, stores the result in execution_result etc...
 func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error) {
 	// Verify message and query ownership
-	msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
+	chat, msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
 	if err != nil {
 		return nil, http.StatusForbidden, err
 	}
@@ -1154,8 +1155,15 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
 								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
-								queryMap["executionResult"] = map[string]interface{}{
-									"result": "Query executed successfully",
+								// If share data with AI is true, then we need to share the result with AI
+								if chat.Settings.ShareDataWithAI {
+									queryMap["executionResult"] = map[string]interface{}{
+										"result": result.ResultJSON,
+									}
+								} else {
+									queryMap["executionResult"] = map[string]interface{}{
+										"result": "Query executed successfully",
+									}
 								}
 								if result.Error != nil {
 									queryMap["error"] = map[string]interface{}{
@@ -1183,8 +1191,15 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
 								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
-								queryMap["executionResult"] = map[string]interface{}{
-									"result": "Query executed successfully",
+								// If share data with AI is true, then we need to share the result with AI
+								if chat.Settings.ShareDataWithAI {
+									queryMap["executionResult"] = map[string]interface{}{
+										"result": result.ResultJSON,
+									}
+								} else {
+									queryMap["executionResult"] = map[string]interface{}{
+										"result": "Query executed successfully",
+									}
 								}
 								if result.Error != nil {
 									queryMap["error"] = map[string]interface{}{
@@ -1231,7 +1246,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, req *dtos.RollbackQueryRequest) (*dtos.QueryExecutionResponse, uint32, error) {
 	// Verify message and query ownership
-	msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
+	chat, msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
 	if err != nil {
 		return nil, http.StatusForbidden, err
 	}
@@ -1737,8 +1752,15 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
 							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
-							queryMap["executionResult"] = map[string]interface{}{
-								"result": "Rolled back successfully",
+							// If share data with AI is true, then we need to share the result with AI
+							if chat.Settings.ShareDataWithAI {
+								queryMap["executionResult"] = map[string]interface{}{
+									"result": result.ResultJSON,
+								}
+							} else {
+								queryMap["executionResult"] = map[string]interface{}{
+									"result": "Rolled back successfully",
+								}
 							}
 							if result.Error != nil {
 								queryMap["error"] = map[string]interface{}{
@@ -1766,8 +1788,15 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
 							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
-							queryMap["executionResult"] = map[string]interface{}{
-								"result": "Rolled back successfully",
+							// If share data with AI is true, then we need to share the result with AI
+							if chat.Settings.ShareDataWithAI {
+								queryMap["executionResult"] = map[string]interface{}{
+									"result": result.ResultJSON,
+								}
+							} else {
+								queryMap["executionResult"] = map[string]interface{}{
+									"result": "Rolled back successfully",
+								}
 							}
 							if result.Error != nil {
 								queryMap["error"] = map[string]interface{}{
@@ -1865,6 +1894,9 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 	// Use llmCtx for LLM processing
 	go func() {
 		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("ProcessLLMResponseAndRunQuery -> recovered from panic: %v", r)
+			}
 			log.Printf("ProcessLLMResponseAndRunQuery -> activeProcesses: %v", s.activeProcesses)
 			s.processesMu.Lock()
 			delete(s.activeProcesses, streamID)
@@ -2140,7 +2172,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 // Fetches paginated results for a query, default first 50 records of a large result are stored in execution_result so it fetches records after first 50 recordds
 func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error) {
 	log.Printf("ChatService -> GetQueryResults -> userID: %s, chatID: %s, messageID: %s, queryID: %s, streamID: %s, offset: %d", userID, chatID, messageID, queryID, streamID, offset)
-	_, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	_, _, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
