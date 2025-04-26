@@ -113,15 +113,14 @@ export default function MessageTile({
     const abortControllerRef = useRef<Record<string, AbortController>>({});
     const [queryResults, setQueryResults] = useState<Record<string, QueryResultState>>({});
     const pageDataCacheRef = useRef<Record<string, Record<number, PageData>>>({});
-    
-    // Add these state hooks at the component level to fix the hooks order issue
-    const [expandedQueries, setExpandedQueries] = useState<Record<string, boolean>>({});
-    const [showExampleResults, setShowExampleResults] = useState<Record<string, boolean>>({});
-    const [queryCurrentPages, setQueryCurrentPages] = useState<Record<string, number>>({});
     const [editingQueries, setEditingQueries] = useState<Record<string, boolean>>({});
     const [editedQueryTexts, setEditedQueryTexts] = useState<Record<string, string>>({});
     // Add state for tracking which download dropdown is open
     const [openDownloadMenu, setOpenDownloadMenu] = useState<string | null>(null);
+    // Add state for date format preference - initialize as empty object
+    const [dateColumns, setDateColumns] = useState<Record<string, boolean>>({});
+    // Store expanded state for nested JSON fields
+    const expandedNodesRef = useRef<Record<string, boolean>>({});
     
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -501,12 +500,354 @@ export default function MessageTile({
         }
     };
 
+    // Format date string in a user-friendly way
+    const formatDateString = (dateStr: string, useFriendlyFormat: boolean): string => {
+        if (!useFriendlyFormat) return dateStr; // Return raw ISO format
+        
+        try {
+            const date = new Date(dateStr);
+            // Check if date is valid
+            if (isNaN(date.getTime())) return dateStr;
+            
+            // Format as "Apr 26, 2025, 06:46 PM"
+            return date.toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch (e) {
+            // Fallback to original string if parsing fails
+            return dateStr;
+        }
+    };
+    
+    // Small toggle component for date format switching
+    const DateFormatToggle = ({ column, className = "" }: { column: string, className?: string }) => {
+        return (
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setDateColumns(prev => ({
+                        ...prev,
+                        [column]: !prev[column]
+                    }));
+                }}
+                className={`inline-flex items-center text-xs px-1.5 py-0.5 ml-2 bg-gray-700 hover:bg-gray-600 rounded-sm text-gray-300 ${className}`}
+                title="Toggle date format"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                {dateColumns[column] ? "ISO" : "Human"}
+            </button>
+        );
+    };
+
+    // Check if a value is a date string
+    const isDateString = (value: any): boolean => {
+        return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+    };
+
+    // Initialize date columns to true (human format) by default
+    // This needs to be at component level, not inside the render function
+    useEffect(() => {
+        const initializeDateColumns = () => {
+            if (!message.queries || message.queries.length === 0) return;
+            
+            // Find all date columns across all queries
+            const newDateColumns: Record<string, boolean> = {};
+            
+            message.queries.forEach(query => {
+                if (!query.execution_result && !query.example_result) return;
+                
+                const result = query.execution_result || query.example_result;
+                const data = parseResults(result);
+                if (!data || data.length === 0 || !data[0]) return;
+                
+                const columns = Object.keys(data[0]);
+                columns.forEach(column => {
+                    // Check if this is a date column by examining first few rows
+                    for (let i = 0; i < Math.min(data.length, 5); i++) {
+                        if (isDateString(data[i][column])) {
+                            // Only set if not already set by user
+                            if (dateColumns[column] === undefined) {
+                                newDateColumns[column] = true; // Default to human format
+                            }
+                            break;
+                        }
+                    }
+                });
+            });
+            
+            // Set all the new date columns if any found
+            if (Object.keys(newDateColumns).length > 0) {
+                setDateColumns(prev => ({
+                    ...prev,
+                    ...newDateColumns
+                }));
+            }
+        };
+        
+        initializeDateColumns();
+    }, [message.queries]); // Only re-run when queries change
+
+    // Component to render nested JSON data in a collapsible/expandable way
+    const NestedJsonCell = ({ data }: { data: any }) => {
+        // Generate a stable ID for this field to track its expanded state
+        const getFieldId = (): string => {
+            let idString = '';
+            if (typeof data === 'object' && data !== null) {
+                // Try to use id field if available
+                if ('id' in data) {
+                    idString = `obj-${data.id}`;
+                } else if (Array.isArray(data)) {
+                    // For arrays, use length and hash of first few items
+                    idString = `arr-${data.length}-${JSON.stringify(data.slice(0, 2)).split('').reduce((a, b) => (a * 31 + b.charCodeAt(0)) & 0xFFFFFFFF, 0)}`;
+                } else {
+                    // For other objects, use hash of keys and some values
+                    const keys = Object.keys(data).sort().join(',');
+                    const firstFewValues = Object.keys(data).slice(0, 2).map(key => data[key]);
+                    idString = `obj-${keys}-${JSON.stringify(firstFewValues).split('').reduce((a, b) => (a * 31 + b.charCodeAt(0)) & 0xFFFFFFFF, 0)}`;
+                }
+            }
+            return `field-${idString.replace(/[^a-zA-Z0-9-]/g, '')}`;
+        };
+        
+        const fieldId = getFieldId();
+        const [isExpanded, setIsExpanded] = useState(() => {
+            // Initialize from the ref if available
+            return expandedNodesRef.current[fieldId] || false;
+        });
+        const expandButtonRef = useRef<HTMLDivElement>(null);
+        const expandedContentRef = useRef<HTMLDivElement>(null);
+        
+        // Ensure expansion state persists across renders
+        useEffect(() => {
+            // Update the ref when state changes
+            expandedNodesRef.current[fieldId] = isExpanded;
+            
+            // Use a data attribute on the DOM element for extra persistence
+            if (expandButtonRef.current) {
+                expandButtonRef.current.setAttribute('data-expanded', isExpanded ? 'true' : 'false');
+            }
+            
+            // Set display style directly to ensure it stays
+            if (expandedContentRef.current) {
+                expandedContentRef.current.style.display = isExpanded ? 'block' : 'none';
+            }
+        }, [isExpanded, fieldId]);
+        
+        // When the component mounts, check for saved expansion state
+        useEffect(() => {
+            const savedExpanded = expandedNodesRef.current[fieldId];
+            if (savedExpanded !== undefined && savedExpanded !== isExpanded) {
+                setIsExpanded(savedExpanded);
+            }
+            
+            // Also check the DOM attribute as a fallback
+            if (expandButtonRef.current) {
+                const domExpanded = expandButtonRef.current.getAttribute('data-expanded') === 'true';
+                if (domExpanded !== isExpanded) {
+                    setIsExpanded(domExpanded);
+                }
+            }
+        }, [fieldId]);
+        
+        // Determine if the data is expandable (object or array with items)
+        const isExpandable = 
+            (typeof data === 'object' && data !== null) && 
+            (Array.isArray(data) ? data.length > 0 : Object.keys(data).length > 0);
+        
+        // If not expandable, render as simple value
+        if (!isExpandable) {
+            if (data === null) return <span className="text-gray-400">null</span>;
+            if (data === undefined) return <span className="text-gray-400">undefined</span>;
+            if (typeof data === 'boolean') return <span className="text-purple-400">{String(data)}</span>;
+            if (typeof data === 'number') return <span className="text-cyan-400">{data}</span>;
+            if (typeof data === 'string') {
+                // Check if it's a date string
+                if (isDateString(data)) {
+                    return <span className="text-yellow-300">{data}</span>;
+                }
+                return <span className="text-green-400">"{data}"</span>;
+            }
+            // Fallback
+            return <span>{String(data)}</span>;
+        }
+        
+        // Handle toggle with persistence
+        const handleToggleClick = () => {
+            const newExpandedState = !isExpanded;
+            console.log('toggleExpand called, current state:', isExpanded, 'new state:', newExpandedState, 'fieldId:', fieldId);
+            
+            // Update both React state and the ref
+            setIsExpanded(newExpandedState);
+            expandedNodesRef.current[fieldId] = newExpandedState;
+            
+            // Also update DOM directly
+            if (expandedContentRef.current) {
+                expandedContentRef.current.style.display = newExpandedState ? 'block' : 'none';
+            }
+            if (expandButtonRef.current) {
+                expandButtonRef.current.setAttribute('data-expanded', newExpandedState ? 'true' : 'false');
+            }
+        };
+        
+        const renderExpandedContent = () => {
+            if (Array.isArray(data)) {
+                return (
+                    <div className="pl-4 mt-2 space-y-1 border-l-2 border-gray-700 pt-1">
+                        {data.map((item, index) => (
+                            <div key={index} className="mb-2">
+                                <span className="text-gray-400 mr-1">[{index}]:</span>
+                                <NestedJsonCell data={item} />
+                            </div>
+                        ))}
+                    </div>
+                );
+            } else {
+                return (
+                    <div className="pl-4 mt-2 space-y-1 border-l-2 border-gray-700 pt-1">
+                        {Object.entries(data).map(([key, value]) => (
+                            <div key={key} className="mb-2">
+                                <span className="text-gray-400 mr-1">{key}:</span>
+                                <NestedJsonCell data={value} />
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
+        };
+        
+        // Get a more user-friendly preview content
+        const getPreviewContent = () => {
+            if (Array.isArray(data)) {
+                const itemCount = data.length;
+                return `${itemCount} item${itemCount !== 1 ? 's' : ''} in list`;
+            } else {
+                // For objects, try to show a more descriptive preview
+                const keys = Object.keys(data);
+                const keyCount = keys.length;
+                
+                // Try to detect what kind of object this might be
+                if ('id' in data && ('name' in data || 'title' in data)) {
+                    const nameField = data.name || data.title;
+                    return typeof nameField === 'string' 
+                        ? `${nameField} (${keyCount} properties)` 
+                        : `Details with ${keyCount} properties`;
+                }
+                
+                // Show some of the keys as a preview
+                const previewKeys = keys.slice(0, 2);
+                if (previewKeys.length > 0) {
+                    return `View: ${previewKeys.join(', ')}${keys.length > 2 ? '...' : ''}`;
+                }
+                
+                return `${keyCount} propert${keyCount !== 1 ? 'ies' : 'y'}`;
+            }
+        };
+        
+        return (
+            <div 
+                className={`nested-json min-w-[160px] ${isExpanded ? 'mt-2' : ''}`} 
+                style={{ position: 'relative', zIndex: 5 }}
+                data-field-id={fieldId}
+            >
+                <div 
+                    ref={expandButtonRef}
+                    className="cursor-pointer flex items-center transition-colors"
+                    tabIndex={0}
+                    role="button"
+                    aria-expanded={isExpanded}
+                    data-expanded={isExpanded ? 'true' : 'false'}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleToggleClick();
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleToggleClick();
+                        }
+                    }}
+                >
+                    <span className="mr-2 text-white font-medium">
+                        {isExpanded ? 
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block">
+                                <path d="m18 15-6-6-6 6"/>
+                            </svg> : 
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block">
+                                <path d="m6 9 6 6 6-6"/>
+                            </svg>
+                        }
+                    </span>
+                    <span className="text-blue-400 font-medium">{getPreviewContent()}</span>
+                </div>
+                <div 
+                    ref={expandedContentRef} 
+                    style={{ display: isExpanded ? 'block' : 'none' }}
+                    data-expanded-content={fieldId}
+                >
+                    {renderExpandedContent()}
+                </div>
+            </div>
+        );
+    };
+    
+    const renderCellValue = (value: any, column: string) => {
+        if (value === null) return <span className="text-yellow-400">null</span>;
+        if (value === undefined) return <span className="text-yellow-400">undefined</span>;
+
+        if (typeof value === 'object' && value !== null) {
+            return <NestedJsonCell data={value} />;
+        }
+        
+        // Handle primitive types with appropriate styling
+        if (typeof value === 'number') {
+            return <span className="text-cyan-400">{value}</span>;
+        } else if (typeof value === 'boolean') {
+            return <span className="text-purple-400">{String(value)}</span>;
+        } else if (typeof value === 'string') {
+            // Check if it's a date string
+            if (isDateString(value)) {
+                return (
+                    <span className="text-yellow-300">
+                        {formatDateString(value, dateColumns[column] !== false)}
+                    </span>
+                );
+            }
+            return <span className="text-green-400">"{value}"</span>;
+        }
+        
+        // Fallback
+        return <span>{String(value)}</span>;
+    };
+
     const renderTableView = (data: any[]) => {
         if (!data || data.length === 0) {
             return <div className="text-gray-500">No data to display</div>;
         }
 
         const columns = Object.keys(data[0]);
+        
+        // Detect date columns
+        const dateColumnList = columns.filter(column => {
+            // Check the first few rows to see if this column contains date strings
+            for (let i = 0; i < Math.min(data.length, 5); i++) {
+                if (isDateString(data[i][column])) {
+                    return true;
+                }
+            }
+            return false;
+        });
 
         return (
             <div className="overflow-x-auto">
@@ -515,7 +856,12 @@ export default function MessageTile({
                         <tr>
                             {columns.map(column => (
                                 <th key={column} className="py-2 px-4 bg-gray-800 border-b border-gray-700 text-gray-300 font-mono">
-                                    {column}
+                                    <div className="flex items-center">
+                                        <span>{column}</span>
+                                        {dateColumnList.includes(column) && (
+                                            <DateFormatToggle column={column} />
+                                        )}
+                                    </div>
                                 </th>
                             ))}
                         </tr>
@@ -523,20 +869,23 @@ export default function MessageTile({
                     <tbody>
                         {data.map((row, i) => (
                             <tr key={i} className="border-b border-gray-700">
-                                {columns.map(column => (
-                                    <td key={column} className="py-2 px-4">
-                                        <span className={`${typeof row[column] === 'number'
-                                            ? 'text-cyan-400'
-                                            : typeof row[column] === 'boolean'
-                                                ? 'text-purple-400'
-                                                : column.includes('time') || column.includes('date')
-                                                    ? 'text-yellow-300'
-                                                    : 'text-green-400'
-                                            }`}>
-                                            {JSON.stringify(row[column])}
-                                        </span>
-                                    </td>
-                                ))}
+                                {columns.map(column => {
+                                    const isComplexObject = 
+                                        typeof row[column] === 'object' && 
+                                        row[column] !== null && 
+                                        Object.keys(row[column]).length > 0;
+                                    
+                                    const isDateColumn = dateColumnList.includes(column);
+                                    
+                                    return (
+                                        <td 
+                                            key={column} 
+                                            className={`py-2 px-4 ${isComplexObject ? 'min-w-[280px]' : ''} ${isDateColumn ? 'min-w-[200px] whitespace-nowrap' : ''}`}
+                                        >
+                                            {renderCellValue(row[column], column)}
+                                        </td>
+                                    );
+                                })}
                             </tr>
                         ))}
                     </tbody>
@@ -592,7 +941,7 @@ export default function MessageTile({
                             )
                         ) : (
                             <pre className="overflow-x-auto whitespace-pre-wrap">
-                                {JSON.stringify(currentPageData, null, 2)}
+                                {renderColoredJson(currentPageData)}
                             </pre>
                         )}
 
@@ -811,6 +1160,83 @@ export default function MessageTile({
         return [result];
     };
 
+    // Function to render colored JSON syntax highlighting
+    const renderColoredJson = (data: any, indent = 0): JSX.Element => {
+        const indentStr = '  '.repeat(indent);
+        
+        if (data === null) {
+            return <span className="text-yellow-400">null</span>;
+        }
+        
+        if (data === undefined) {
+            return <span className="text-yellow-400">undefined</span>;
+        }
+        
+        if (typeof data === 'boolean') {
+            return <span className="text-purple-400">{String(data)}</span>;
+        }
+        
+        if (typeof data === 'number') {
+            return <span className="text-cyan-400">{data}</span>;
+        }
+        
+        if (typeof data === 'string') {
+            // Check if it's a date string
+            if (isDateString(data)) {
+                return <span className="text-yellow-300">"{data}"</span>;
+            }
+            return <span className="text-green-400">"{data}"</span>;
+        }
+        
+        if (Array.isArray(data)) {
+            if (data.length === 0) {
+                return <span>[]</span>;
+            }
+            
+            return (
+                <span>
+                    <span>[</span>
+                    <div style={{ marginLeft: 20 }}>
+                        {data.map((item, index) => (
+                            <div key={index}>
+                                {renderColoredJson(item, indent + 1)}
+                                {index < data.length - 1 && <span>,</span>}
+                            </div>
+                        ))}
+                    </div>
+                    <span>{indentStr}]</span>
+                </span>
+            );
+        }
+        
+        if (typeof data === 'object') {
+            const keys = Object.keys(data);
+            
+            if (keys.length === 0) {
+                return <span>{'{}'}</span>;
+            }
+            
+            return (
+                <span>
+                    <span>{'{'}</span>
+                    <div style={{ marginLeft: 20 }}>
+                        {keys.map((key, index) => (
+                            <div key={key}>
+                                <span className="text-blue-400">"{key}"</span>
+                                <span>: </span>
+                                {renderColoredJson(data[key], indent + 1)}
+                                {index < keys.length - 1 && <span>,</span>}
+                            </div>
+                        ))}
+                    </div>
+                    <span>{indentStr}{'}'}</span>
+                </span>
+            );
+        }
+        
+        return <span>{String(data)}</span>;
+    };
+
     const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
         // Ensure query is valid before proceeding
         if (!query) {
@@ -818,8 +1244,6 @@ export default function MessageTile({
             return null;
         }
 
-        // Only skip rendering if we're actively streaming a specific query
-        // and this isn't that query
         if (isMessageStreaming && streamingQueryIndex !== -1 && index !== streamingQueryIndex) {
             return null;
         }
@@ -1246,8 +1670,8 @@ export default function MessageTile({
                                                     <div className="w-full">
                                                         {shouldShowExampleResult ? (
                                                             resultToShow ? (
-                                                                <pre className="overflow-x-auto whitespace-pre-wrap">
-                                                                    {JSON.stringify(parseResults(resultToShow), null, 2)}
+                                                                <pre className="overflow-x-auto whitespace-pre-wrap rounded-md">
+                                                                    {renderColoredJson(parseResults(resultToShow))}
                                                                 </pre>
                                                             ) : (
                                                                 <div className="text-gray-500">No example data available</div>
@@ -1429,6 +1853,7 @@ export default function MessageTile({
                 py-4 md:py-6
                 ${isFirstMessage ? 'first:pt-0' : ''}
                 w-full
+                relative
               `}>
             <div className={`
         group flex items-center relative
