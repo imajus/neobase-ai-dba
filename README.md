@@ -6,7 +6,7 @@
 
 ## Screenshots
 <img width="1708" alt="Screenshot 2025-03-14 at 1 08 09 PM" src="https://github.com/user-attachments/assets/413a2a91-98a3-4bda-b12f-46fb8c826f4a" />
-<img width="1708" alt="Screenshot 2025-02-26 at 6 50 05 PM" src="https://github.com/user-attachments/assets/573926e4-df31-4ef7-ab8b-4dae6d2d1219" />
+<img width="1697" alt="Screenshot 2025-04-26 at 3 44 23 PM" src="https://github.com/user-attachments/assets/42828bb6-7725-4e5c-831a-8e4dc3990b19" />
 
 
 ## Features
