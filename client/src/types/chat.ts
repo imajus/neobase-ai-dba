@@ -28,7 +28,7 @@ export interface Chat {
     user_id: string;
     connection: Connection;
     selected_collections?: string; // "ALL" or comma-separated table names
-    auto_execute_query?: boolean; // Whether to automatically execute queries when a new message is created
+    settings: ChatSettings;
     created_at: string;
     updated_at: string;
 }
@@ -62,3 +62,8 @@ export interface TableInfo {
 export interface TablesResponse {
     tables: TableInfo[];
 } 
+
+export interface ChatSettings {
+    auto_execute_query: boolean;
+    share_data_with_ai: boolean;
+}

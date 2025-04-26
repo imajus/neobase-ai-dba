@@ -13,7 +13,7 @@ import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
 import { Message } from './types';
-
+import { ChatSettings } from '../../types/chat';
 interface ChatWindowProps {
   chat: Chat;
   isExpanded: boolean;
@@ -23,7 +23,7 @@ interface ChatWindowProps {
   onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
-  onEditConnection?: (id: string, connection: Connection, autoExecuteQuery: boolean) => Promise<{ success: boolean, error?: string }>;
+  onEditConnection?: (id: string, connection: Connection, settings: ChatSettings) => Promise<{ success: boolean, error?: string }>;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
   onCancelStream: () => void;

@@ -15,3 +15,7 @@ func ToFloat64Ptr(f float64) *float64 {
 func ToInt32Ptr(i int32) *int32 {
 	return &i
 }
+
+func ToBoolPtr(b bool) *bool {
+	return &b
+}

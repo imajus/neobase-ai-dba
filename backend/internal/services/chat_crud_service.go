@@ -203,8 +203,15 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to secure connection details: %v", err)
 	}
 
+	settings := models.DefaultChatSettings()
+	if req.Settings.AutoExecuteQuery != nil {
+		settings.AutoExecuteQuery = *req.Settings.AutoExecuteQuery
+	}
+	if req.Settings.ShareDataWithAI != nil {
+		settings.ShareDataWithAI = *req.Settings.ShareDataWithAI
+	}
 	// Create chat with connection
-	chat := models.NewChat(userObjID, connection, req.AutoExecuteQuery)
+	chat := models.NewChat(userObjID, connection, settings)
 	if err := s.chatRepo.Create(chat); err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
@@ -264,8 +271,16 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to secure connection details: %v", err)
 	}
 
+	settings := models.DefaultChatSettings()
+
+	if req.Settings.AutoExecuteQuery != nil {
+		settings.AutoExecuteQuery = *req.Settings.AutoExecuteQuery
+	}
+	if req.Settings.ShareDataWithAI != nil {
+		settings.ShareDataWithAI = *req.Settings.ShareDataWithAI
+	}
 	// Create chat with connection
-	chat := models.NewChat(userObjID, connection, req.AutoExecuteQuery)
+	chat := models.NewChat(userObjID, connection, settings)
 	if err := s.chatRepo.Create(chat); err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
@@ -390,9 +405,15 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	}
 
 	// Update auto execute query if provided
-	if req.AutoExecuteQuery != nil {
-		log.Printf("ChatService -> Update -> AutoExecuteQuery: %v", *req.AutoExecuteQuery)
-		chat.AutoExecuteQuery = *req.AutoExecuteQuery
+	if req.Settings != nil {
+		if req.Settings.AutoExecuteQuery != nil {
+			log.Printf("ChatService -> Update -> AutoExecuteQuery: %v", *req.Settings.AutoExecuteQuery)
+			chat.Settings.AutoExecuteQuery = *req.Settings.AutoExecuteQuery
+		}
+		if req.Settings.ShareDataWithAI != nil {
+			log.Printf("ChatService -> Update -> ShareDataWithAI: %v", *req.Settings.ShareDataWithAI)
+			chat.Settings.ShareDataWithAI = *req.Settings.ShareDataWithAI
+		}
 	}
 
 	// Update the chat
@@ -568,9 +589,9 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to save LLM message: %v", err)
 	}
 
-	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.AutoExecuteQuery)
+	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.Settings.AutoExecuteQuery)
 	// If auto execute query is true, we need to process LLM response & run query automatically
-	if chat.AutoExecuteQuery {
+	if chat.Settings.AutoExecuteQuery {
 		if err := s.processLLMResponseAndRunQuery(ctx, userID, chatID, msg.ID.Hex(), streamID); err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
 		}
@@ -675,7 +696,7 @@ func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, message
 	}
 
 	// If auto execute query is true, we need to process LLM response & run query automatically
-	if chat.AutoExecuteQuery {
+	if chat.Settings.AutoExecuteQuery {
 		if err := s.processLLMResponseAndRunQuery(ctx, userID, chatID, messageID, streamID); err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to process message: %v", err)
 		}
@@ -753,7 +774,7 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 		UserID:              userObjID,
 		Connection:          chat.Connection,
 		SelectedCollections: chat.SelectedCollections,
-		AutoExecuteQuery:    chat.AutoExecuteQuery,
+		Settings:            chat.Settings,
 		Base:                models.NewBase(), // Create a new Base with new ID and timestamps
 	}
 
@@ -1008,7 +1029,7 @@ func (s *chatService) ListMessages(userID, chatID string, page, pageSize int) (*
 func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error) {
 	log.Printf("ChatService -> EditQuery -> userID: %s, chatID: %s, messageID: %s, queryID: %s, query: %s", userID, chatID, messageID, queryID, query)
 
-	message, queryData, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	_, message, queryData, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
@@ -1280,7 +1301,10 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 		SelectedCollections: chat.SelectedCollections,
 		CreatedAt:           chat.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:           chat.UpdatedAt.Format(time.RFC3339),
-		AutoExecuteQuery:    chat.AutoExecuteQuery,
+		Settings: dtos.ChatSettingsResponse{
+			AutoExecuteQuery: chat.Settings.AutoExecuteQuery,
+			ShareDataWithAI:  chat.Settings.ShareDataWithAI,
+		},
 	}
 }
 
@@ -1309,30 +1333,38 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 }
 
 // Verify query ownership checks if the query belongs to the message and the message belongs to the chat
-func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string) (*models.Message, *models.Query, error) {
+func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string) (*models.Chat, *models.Message, *models.Query, error) {
+
+	// Get chat
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid chat ID format")
+	}
+	chat, err := s.chatRepo.FindByID(chatObjID)
+
 	// Convert IDs to ObjectIDs
 	msgObjID, err := primitive.ObjectIDFromHex(messageID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid message ID format")
+		return nil, nil, nil, fmt.Errorf("invalid message ID format")
 	}
 
 	queryObjID, err := primitive.ObjectIDFromHex(queryID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid query ID format")
+		return nil, nil, nil, fmt.Errorf("invalid query ID format")
 	}
 
 	// Get message
 	msg, err := s.chatRepo.FindMessageByID(msgObjID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to fetch message: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to fetch message: %v", err)
 	}
 	if msg == nil {
-		return nil, nil, fmt.Errorf("message not found")
+		return nil, nil, nil, fmt.Errorf("message not found")
 	}
 
 	// Verify chat ownership
 	if msg.ChatID.Hex() != chatID {
-		return nil, nil, fmt.Errorf("message does not belong to this chat")
+		return nil, nil, nil, fmt.Errorf("message does not belong to this chat")
 	}
 
 	log.Printf("ChatService -> verifyQueryOwnership -> msgObjID: %+v", msgObjID)
@@ -1351,10 +1383,10 @@ func (s *chatService) verifyQueryOwnership(_, chatID, messageID, queryID string)
 		}
 	}
 	if targetQuery == nil {
-		return nil, nil, fmt.Errorf("query not found in message")
+		return nil, nil, nil, fmt.Errorf("query not found in message")
 	}
 
-	return msg, targetQuery, nil
+	return chat, msg, targetQuery, nil
 }
 
 // GetSelectedCollections retrieves the selected collections for a chat

@@ -110,6 +110,7 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 		}
 	}()
 
+	// Create a default chat for the user in development mode
 	if config.Env.Environment == "DEVELOPMENT" {
 		chat, _, err := s.chatService.CreateWithoutConnectionPing(user.ID.Hex(), &dtos.CreateChatRequest{
 			Connection: dtos.CreateConnectionRequest{
@@ -120,7 +121,10 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 				Username: config.Env.ExampleDatabaseUsername,
 				Password: utils.ToStringPtr(config.Env.ExampleDatabasePassword),
 			},
-			AutoExecuteQuery: true,
+			Settings: dtos.CreateChatSettings{
+				AutoExecuteQuery: utils.ToBoolPtr(true),
+				ShareDataWithAI:  utils.ToBoolPtr(false), // Disable sharing data with AI by default.
+			},
 		})
 		if err != nil {
 			log.Println("failed to create chat:" + err.Error())

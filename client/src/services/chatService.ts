@@ -1,4 +1,4 @@
-import { Chat, Connection, TablesResponse } from '../types/chat';
+import { Chat, Connection, TablesResponse, ChatSettings } from '../types/chat';
 import { ExecuteQueryResponse, MessagesResponse, SendMessageResponse } from '../types/messages';
 import axios from './axiosConfig';
 
@@ -16,7 +16,7 @@ const chatService = {
     // Track ongoing API requests to prevent duplicates
     pendingRequests: {} as Record<string, Promise<TablesResponse>>,
 
-    async createChat(connection: Connection, autoExecuteQuery: boolean = false): Promise<Chat> {
+    async createChat(connection: Connection, settings: ChatSettings): Promise<Chat> {
         try {
             // Ensure we send the ssl_mode when it's present
             const connectionToSend = { ...connection };
@@ -28,7 +28,10 @@ const chatService = {
             
             const response = await axios.post<CreateChatResponse>(`${API_URL}/chats`, {
                 connection: connectionToSend,
-                auto_execute_query: autoExecuteQuery
+                settings: {
+                    auto_execute_query: settings.auto_execute_query,
+                    share_data_with_ai: settings.share_data_with_ai
+                }
             });
 
             if (!response.data.success) {
@@ -41,22 +44,21 @@ const chatService = {
             throw new Error(error.response?.data?.error || 'Failed to create chat');
         }
     },
-    async editChat(chatId: string, connection: Connection, autoExecuteQuery?: boolean): Promise<Chat> {
+    
+    async editChat(chatId: string, connection?: Connection, settings?: ChatSettings): Promise<Chat> {
         try {
             // Ensure we send the ssl_mode when it's present
             const connectionToSend = { ...connection };
             
             // Make sure ssl_mode is included if present
-            if (connection.use_ssl && connection.ssl_mode) {
+            if (connection?.use_ssl && connection?.ssl_mode) {
                 connectionToSend.ssl_mode = connection.ssl_mode;
             }
             
-            const payload: any = { connection: connectionToSend };
-            
-            // Only include auto_execute_query if it's explicitly provided
-            if (typeof autoExecuteQuery === 'boolean') {
-                payload.auto_execute_query = autoExecuteQuery;
-            }
+            const payload: any = { connection: connection ? connectionToSend : undefined, settings: {
+                auto_execute_query: settings?.auto_execute_query,
+                share_data_with_ai: settings?.share_data_with_ai
+            } };
             
             const response = await axios.patch<CreateChatResponse>(
                 `${API_URL}/chats/${chatId}`,

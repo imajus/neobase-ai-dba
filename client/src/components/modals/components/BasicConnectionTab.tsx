@@ -397,7 +397,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
 
       {/* SSL Certificate Fields - Only show when SSL is enabled and mode requires verification */}
       {formData.use_ssl && (formData.ssl_mode === 'verify-ca' || formData.ssl_mode === 'verify-full') && (
-        <div className="mb-6 p-4 border border-gray-200 rounded-md bg-gray-50">
+        <div className="mb-6 p-4 border-dashed border-2 border-gray-200 rounded-md bg-gray-50">
           <h4 className="font-bold mb-3 text-md">SSL/TLS Certificate Configuration</h4>
           
           <div className="mb-4">

@@ -1,5 +1,5 @@
-import React from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, Loader2, Search, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Loader2, Search, X } from 'lucide-react';
 import { TableInfo } from '../../../types/chat';
 
 interface SchemaTabProps {
@@ -10,12 +10,10 @@ interface SchemaTabProps {
   schemaSearchQuery: string;
   selectAllTables: boolean;
   schemaValidationError: string | null;
-  isLoading: boolean;
   setSchemaSearchQuery: (query: string) => void;
   toggleSelectAllTables: () => void;
   toggleExpandTable: (tableName: string, forceState?: boolean) => void;
   toggleTable: (tableName: string) => void;
-  handleUpdateSchema: () => void;
 }
 
 const SchemaTab: React.FC<SchemaTabProps> = ({
@@ -26,13 +24,13 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
   schemaSearchQuery,
   selectAllTables,
   schemaValidationError,
-  isLoading,
   setSchemaSearchQuery,
   toggleSelectAllTables,
   toggleExpandTable,
   toggleTable,
-  handleUpdateSchema
 }) => {
+  
+
   // Filter tables based on search query
   const filteredTables = tables.filter(table => 
     table.name.toLowerCase().includes(schemaSearchQuery.toLowerCase())
@@ -77,7 +75,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
           </div>
 
           <div className="mt-4">
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex flex-col md:flex-row gap-2 md:gap-0 justify-between items-start md:items-center mt-6 mb-2">
               <h3 className="font-bold text-lg">Individual Tables/Collections</h3>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-600">
@@ -114,7 +112,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
               <input
                 type="text"
                 placeholder="Search tables..."
-                className="neo-input pl-10 w-full"
+                className="neo-input pl-8 w-full"
                 value={schemaSearchQuery}
                 onChange={(e) => setSchemaSearchQuery(e.target.value)}
               />
@@ -183,22 +181,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
           </div>
 
           <div className="mt-6">
-            <button
-              type="button"
-              onClick={handleUpdateSchema}
-              className="neo-button w-full relative"
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Updating Schema...</span>
-                </div>
-              ) : (
-                <span>Update Schema</span>
-              )}
-            </button>
-            <p className="text-gray-500 text-sm mt-4 text-center">
+            <p className="text-gray-500 text-sm text-center">
               When schema selection is updated, knowledge base will be automatically refreshed in the background which may take time depending on the size of the database.
             </p>
           </div>
