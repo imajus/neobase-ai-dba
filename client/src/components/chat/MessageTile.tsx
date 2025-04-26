@@ -941,7 +941,7 @@ export default function MessageTile({
                             )
                         ) : (
                             <pre className="overflow-x-auto whitespace-pre-wrap">
-                                {JSON.stringify(currentPageData, null, 2)}
+                                {renderColoredJson(currentPageData)}
                             </pre>
                         )}
 
@@ -1160,6 +1160,83 @@ export default function MessageTile({
         return [result];
     };
 
+    // Function to render colored JSON syntax highlighting
+    const renderColoredJson = (data: any, indent = 0): JSX.Element => {
+        const indentStr = '  '.repeat(indent);
+        
+        if (data === null) {
+            return <span className="text-yellow-400">null</span>;
+        }
+        
+        if (data === undefined) {
+            return <span className="text-yellow-400">undefined</span>;
+        }
+        
+        if (typeof data === 'boolean') {
+            return <span className="text-purple-400">{String(data)}</span>;
+        }
+        
+        if (typeof data === 'number') {
+            return <span className="text-cyan-400">{data}</span>;
+        }
+        
+        if (typeof data === 'string') {
+            // Check if it's a date string
+            if (isDateString(data)) {
+                return <span className="text-yellow-300">"{data}"</span>;
+            }
+            return <span className="text-green-400">"{data}"</span>;
+        }
+        
+        if (Array.isArray(data)) {
+            if (data.length === 0) {
+                return <span>[]</span>;
+            }
+            
+            return (
+                <span>
+                    <span>[</span>
+                    <div style={{ marginLeft: 20 }}>
+                        {data.map((item, index) => (
+                            <div key={index}>
+                                {renderColoredJson(item, indent + 1)}
+                                {index < data.length - 1 && <span>,</span>}
+                            </div>
+                        ))}
+                    </div>
+                    <span>{indentStr}]</span>
+                </span>
+            );
+        }
+        
+        if (typeof data === 'object') {
+            const keys = Object.keys(data);
+            
+            if (keys.length === 0) {
+                return <span>{'{}'}</span>;
+            }
+            
+            return (
+                <span>
+                    <span>{'{'}</span>
+                    <div style={{ marginLeft: 20 }}>
+                        {keys.map((key, index) => (
+                            <div key={key}>
+                                <span className="text-blue-400">"{key}"</span>
+                                <span>: </span>
+                                {renderColoredJson(data[key], indent + 1)}
+                                {index < keys.length - 1 && <span>,</span>}
+                            </div>
+                        ))}
+                    </div>
+                    <span>{indentStr}{'}'}</span>
+                </span>
+            );
+        }
+        
+        return <span>{String(data)}</span>;
+    };
+
     const renderQuery = (isMessageStreaming: boolean, query: QueryResult, index: number) => {
         // Ensure query is valid before proceeding
         if (!query) {
@@ -1167,8 +1244,6 @@ export default function MessageTile({
             return null;
         }
 
-        // Only skip rendering if we're actively streaming a specific query
-        // and this isn't that query
         if (isMessageStreaming && streamingQueryIndex !== -1 && index !== streamingQueryIndex) {
             return null;
         }
@@ -1595,8 +1670,8 @@ export default function MessageTile({
                                                     <div className="w-full">
                                                         {shouldShowExampleResult ? (
                                                             resultToShow ? (
-                                                                <pre className="overflow-x-auto whitespace-pre-wrap">
-                                                                    {JSON.stringify(parseResults(resultToShow), null, 2)}
+                                                                <pre className="overflow-x-auto whitespace-pre-wrap rounded-md">
+                                                                    {renderColoredJson(parseResults(resultToShow))}
                                                                 </pre>
                                                             ) : (
                                                                 <div className="text-gray-500">No example data available</div>
