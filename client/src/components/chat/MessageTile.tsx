@@ -119,6 +119,8 @@ export default function MessageTile({
     const [openDownloadMenu, setOpenDownloadMenu] = useState<string | null>(null);
     // Add state for date format preference - initialize as empty object
     const [dateColumns, setDateColumns] = useState<Record<string, boolean>>({});
+    // Store expanded state for nested JSON fields
+    const expandedNodesRef = useRef<Record<string, boolean>>({});
     
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -598,7 +600,65 @@ export default function MessageTile({
 
     // Component to render nested JSON data in a collapsible/expandable way
     const NestedJsonCell = ({ data }: { data: any }) => {
-        const [isExpanded, setIsExpanded] = useState(false);
+        // Generate a stable ID for this field to track its expanded state
+        const getFieldId = (): string => {
+            let idString = '';
+            if (typeof data === 'object' && data !== null) {
+                // Try to use id field if available
+                if ('id' in data) {
+                    idString = `obj-${data.id}`;
+                } else if (Array.isArray(data)) {
+                    // For arrays, use length and hash of first few items
+                    idString = `arr-${data.length}-${JSON.stringify(data.slice(0, 2)).split('').reduce((a, b) => (a * 31 + b.charCodeAt(0)) & 0xFFFFFFFF, 0)}`;
+                } else {
+                    // For other objects, use hash of keys and some values
+                    const keys = Object.keys(data).sort().join(',');
+                    const firstFewValues = Object.keys(data).slice(0, 2).map(key => data[key]);
+                    idString = `obj-${keys}-${JSON.stringify(firstFewValues).split('').reduce((a, b) => (a * 31 + b.charCodeAt(0)) & 0xFFFFFFFF, 0)}`;
+                }
+            }
+            return `field-${idString.replace(/[^a-zA-Z0-9-]/g, '')}`;
+        };
+        
+        const fieldId = getFieldId();
+        const [isExpanded, setIsExpanded] = useState(() => {
+            // Initialize from the ref if available
+            return expandedNodesRef.current[fieldId] || false;
+        });
+        const expandButtonRef = useRef<HTMLDivElement>(null);
+        const expandedContentRef = useRef<HTMLDivElement>(null);
+        
+        // Ensure expansion state persists across renders
+        useEffect(() => {
+            // Update the ref when state changes
+            expandedNodesRef.current[fieldId] = isExpanded;
+            
+            // Use a data attribute on the DOM element for extra persistence
+            if (expandButtonRef.current) {
+                expandButtonRef.current.setAttribute('data-expanded', isExpanded ? 'true' : 'false');
+            }
+            
+            // Set display style directly to ensure it stays
+            if (expandedContentRef.current) {
+                expandedContentRef.current.style.display = isExpanded ? 'block' : 'none';
+            }
+        }, [isExpanded, fieldId]);
+        
+        // When the component mounts, check for saved expansion state
+        useEffect(() => {
+            const savedExpanded = expandedNodesRef.current[fieldId];
+            if (savedExpanded !== undefined && savedExpanded !== isExpanded) {
+                setIsExpanded(savedExpanded);
+            }
+            
+            // Also check the DOM attribute as a fallback
+            if (expandButtonRef.current) {
+                const domExpanded = expandButtonRef.current.getAttribute('data-expanded') === 'true';
+                if (domExpanded !== isExpanded) {
+                    setIsExpanded(domExpanded);
+                }
+            }
+        }, [fieldId]);
         
         // Determine if the data is expandable (object or array with items)
         const isExpandable = 
@@ -622,15 +682,22 @@ export default function MessageTile({
             return <span>{String(data)}</span>;
         }
         
-        // For expandable content
-        const toggleExpand = (e: React.MouseEvent) => {
-            // Explicitly stop all propagation and prevent default
-            if (e && e.stopPropagation) e.stopPropagation();
-            if (e && e.preventDefault) e.preventDefault();
-            console.log('toggleExpand called, current state:', isExpanded);
-            // Toggle the expanded state
-            setIsExpanded(!isExpanded);
-            return false; // Ensure the event doesn't continue
+        // Handle toggle with persistence
+        const handleToggleClick = () => {
+            const newExpandedState = !isExpanded;
+            console.log('toggleExpand called, current state:', isExpanded, 'new state:', newExpandedState, 'fieldId:', fieldId);
+            
+            // Update both React state and the ref
+            setIsExpanded(newExpandedState);
+            expandedNodesRef.current[fieldId] = newExpandedState;
+            
+            // Also update DOM directly
+            if (expandedContentRef.current) {
+                expandedContentRef.current.style.display = newExpandedState ? 'block' : 'none';
+            }
+            if (expandButtonRef.current) {
+                expandButtonRef.current.setAttribute('data-expanded', newExpandedState ? 'true' : 'false');
+            }
         };
         
         const renderExpandedContent = () => {
@@ -688,10 +755,29 @@ export default function MessageTile({
         };
         
         return (
-            <div className={`nested-json min-w-[160px] ${isExpanded ? 'mt-2' : ''}`} style={{ position: 'relative', zIndex: 5 }}>
+            <div 
+                className={`nested-json min-w-[160px] ${isExpanded ? 'mt-2' : ''}`} 
+                style={{ position: 'relative', zIndex: 5 }}
+                data-field-id={fieldId}
+            >
                 <div 
-                    onClick={toggleExpand} 
+                    ref={expandButtonRef}
                     className="cursor-pointer flex items-center transition-colors"
+                    tabIndex={0}
+                    role="button"
+                    aria-expanded={isExpanded}
+                    data-expanded={isExpanded ? 'true' : 'false'}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleToggleClick();
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleToggleClick();
+                        }
+                    }}
                 >
                     <span className="mr-2 text-white font-medium">
                         {isExpanded ? 
@@ -705,7 +791,13 @@ export default function MessageTile({
                     </span>
                     <span className="text-blue-400 font-medium">{getPreviewContent()}</span>
                 </div>
-                {isExpanded && renderExpandedContent()}
+                <div 
+                    ref={expandedContentRef} 
+                    style={{ display: isExpanded ? 'block' : 'none' }}
+                    data-expanded-content={fieldId}
+                >
+                    {renderExpandedContent()}
+                </div>
             </div>
         );
     };
