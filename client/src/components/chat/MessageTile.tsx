@@ -117,7 +117,7 @@ export default function MessageTile({
     const [editedQueryTexts, setEditedQueryTexts] = useState<Record<string, string>>({});
     // Add state for tracking which download dropdown is open
     const [openDownloadMenu, setOpenDownloadMenu] = useState<string | null>(null);
-    // Add state for date format preference
+    // Add state for date format preference - initialize as empty object
     const [dateColumns, setDateColumns] = useState<Record<string, boolean>>({});
     
     // Close dropdown when clicking outside
@@ -534,7 +534,7 @@ export default function MessageTile({
                         [column]: !prev[column]
                     }));
                 }}
-                className={`mt-1 text-xs px-1.5 py-0.5 ml-1.5 bg-gray-700 hover:bg-gray-600 rounded-sm text-gray-300 inline-flex items-center ${className}`}
+                className={`inline-flex items-center text-xs px-1.5 py-0.5 ml-2 bg-gray-700 hover:bg-gray-600 rounded-sm text-gray-300 ${className}`}
                 title="Toggle date format"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
@@ -552,6 +552,49 @@ export default function MessageTile({
     const isDateString = (value: any): boolean => {
         return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
     };
+
+    // Initialize date columns to true (human format) by default
+    // This needs to be at component level, not inside the render function
+    useEffect(() => {
+        const initializeDateColumns = () => {
+            if (!message.queries || message.queries.length === 0) return;
+            
+            // Find all date columns across all queries
+            const newDateColumns: Record<string, boolean> = {};
+            
+            message.queries.forEach(query => {
+                if (!query.execution_result && !query.example_result) return;
+                
+                const result = query.execution_result || query.example_result;
+                const data = parseResults(result);
+                if (!data || data.length === 0 || !data[0]) return;
+                
+                const columns = Object.keys(data[0]);
+                columns.forEach(column => {
+                    // Check if this is a date column by examining first few rows
+                    for (let i = 0; i < Math.min(data.length, 5); i++) {
+                        if (isDateString(data[i][column])) {
+                            // Only set if not already set by user
+                            if (dateColumns[column] === undefined) {
+                                newDateColumns[column] = true; // Default to human format
+                            }
+                            break;
+                        }
+                    }
+                });
+            });
+            
+            // Set all the new date columns if any found
+            if (Object.keys(newDateColumns).length > 0) {
+                setDateColumns(prev => ({
+                    ...prev,
+                    ...newDateColumns
+                }));
+            }
+        };
+        
+        initializeDateColumns();
+    }, [message.queries]); // Only re-run when queries change
 
     // Component to render nested JSON data in a collapsible/expandable way
     const NestedJsonCell = ({ data }: { data: any }) => {
@@ -581,10 +624,13 @@ export default function MessageTile({
         
         // For expandable content
         const toggleExpand = (e: React.MouseEvent) => {
-            // Log for debugging
+            // Explicitly stop all propagation and prevent default
+            if (e && e.stopPropagation) e.stopPropagation();
+            if (e && e.preventDefault) e.preventDefault();
             console.log('toggleExpand called, current state:', isExpanded);
-            e.stopPropagation(); // Prevent event from bubbling up to parent elements
+            // Toggle the expanded state
             setIsExpanded(!isExpanded);
+            return false; // Ensure the event doesn't continue
         };
         
         const renderExpandedContent = () => {
@@ -602,7 +648,7 @@ export default function MessageTile({
             } else {
                 return (
                     <div className="pl-4 mt-2 space-y-1 border-l-2 border-gray-700 pt-1">
-                        {Object.entries(data).map(([key, value], index) => (
+                        {Object.entries(data).map(([key, value]) => (
                             <div key={key} className="mb-2">
                                 <span className="text-gray-400 mr-1">{key}:</span>
                                 <NestedJsonCell data={value} />
@@ -642,13 +688,10 @@ export default function MessageTile({
         };
         
         return (
-            <div className={`nested-json min-w-[160px] ${isExpanded ? 'mt-2' : ''}`}>
+            <div className={`nested-json min-w-[160px] ${isExpanded ? 'mt-2' : ''}`} style={{ position: 'relative', zIndex: 5 }}>
                 <div 
                     onClick={toggleExpand} 
-                    className={`
-                        cursor-pointer flex items-center                        
-                        transition-colors
-                    `}
+                    className="cursor-pointer flex items-center transition-colors"
                 >
                     <span className="mr-2 text-white font-medium">
                         {isExpanded ? 
@@ -668,8 +711,8 @@ export default function MessageTile({
     };
     
     const renderCellValue = (value: any, column: string) => {
-        if (value === null) return <span className="text-gray-400">null</span>;
-        if (value === undefined) return <span className="text-gray-400">undefined</span>;
+        if (value === null) return <span className="text-yellow-400">null</span>;
+        if (value === undefined) return <span className="text-yellow-400">undefined</span>;
 
         if (typeof value === 'object' && value !== null) {
             return <NestedJsonCell data={value} />;
@@ -685,7 +728,7 @@ export default function MessageTile({
             if (isDateString(value)) {
                 return (
                     <span className="text-yellow-300">
-                        {formatDateString(value, !!dateColumns[column])}
+                        {formatDateString(value, dateColumns[column] !== false)}
                     </span>
                 );
             }
@@ -721,10 +764,12 @@ export default function MessageTile({
                         <tr>
                             {columns.map(column => (
                                 <th key={column} className="py-2 px-4 bg-gray-800 border-b border-gray-700 text-gray-300 font-mono">
-                                    {column}
-                                    {dateColumnList.includes(column) && (
-                                        <DateFormatToggle column={column} />
-                                    )}
+                                    <div className="flex items-center">
+                                        <span>{column}</span>
+                                        {dateColumnList.includes(column) && (
+                                            <DateFormatToggle column={column} />
+                                        )}
+                                    </div>
                                 </th>
                             ))}
                         </tr>
@@ -738,8 +783,13 @@ export default function MessageTile({
                                         row[column] !== null && 
                                         Object.keys(row[column]).length > 0;
                                     
+                                    const isDateColumn = dateColumnList.includes(column);
+                                    
                                     return (
-                                        <td key={column} className={`py-2 px-4 ${isComplexObject ? 'min-w-[280px]' : ''}`}>
+                                        <td 
+                                            key={column} 
+                                            className={`py-2 px-4 ${isComplexObject ? 'min-w-[280px]' : ''} ${isDateColumn ? 'min-w-[200px] whitespace-nowrap' : ''}`}
+                                        >
                                             {renderCellValue(row[column], column)}
                                         </td>
                                     );
@@ -1636,6 +1686,7 @@ export default function MessageTile({
                 py-4 md:py-6
                 ${isFirstMessage ? 'first:pt-0' : ''}
                 w-full
+                relative
               `}>
             <div className={`
         group flex items-center relative
