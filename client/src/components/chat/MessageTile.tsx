@@ -113,15 +113,12 @@ export default function MessageTile({
     const abortControllerRef = useRef<Record<string, AbortController>>({});
     const [queryResults, setQueryResults] = useState<Record<string, QueryResultState>>({});
     const pageDataCacheRef = useRef<Record<string, Record<number, PageData>>>({});
-    
-    // Add these state hooks at the component level to fix the hooks order issue
-    const [expandedQueries, setExpandedQueries] = useState<Record<string, boolean>>({});
-    const [showExampleResults, setShowExampleResults] = useState<Record<string, boolean>>({});
-    const [queryCurrentPages, setQueryCurrentPages] = useState<Record<string, number>>({});
     const [editingQueries, setEditingQueries] = useState<Record<string, boolean>>({});
     const [editedQueryTexts, setEditedQueryTexts] = useState<Record<string, string>>({});
     // Add state for tracking which download dropdown is open
     const [openDownloadMenu, setOpenDownloadMenu] = useState<string | null>(null);
+    // Add state for date format preference
+    const [dateColumns, setDateColumns] = useState<Record<string, boolean>>({});
     
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -501,12 +498,221 @@ export default function MessageTile({
         }
     };
 
+    // Format date string in a user-friendly way
+    const formatDateString = (dateStr: string, useFriendlyFormat: boolean): string => {
+        if (!useFriendlyFormat) return dateStr; // Return raw ISO format
+        
+        try {
+            const date = new Date(dateStr);
+            // Check if date is valid
+            if (isNaN(date.getTime())) return dateStr;
+            
+            // Format as "Apr 26, 2025, 06:46 PM"
+            return date.toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch (e) {
+            // Fallback to original string if parsing fails
+            return dateStr;
+        }
+    };
+    
+    // Small toggle component for date format switching
+    const DateFormatToggle = ({ column, className = "" }: { column: string, className?: string }) => {
+        return (
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setDateColumns(prev => ({
+                        ...prev,
+                        [column]: !prev[column]
+                    }));
+                }}
+                className={`mt-1 text-xs px-1.5 py-0.5 ml-1.5 bg-gray-700 hover:bg-gray-600 rounded-sm text-gray-300 inline-flex items-center ${className}`}
+                title="Toggle date format"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                {dateColumns[column] ? "ISO" : "Human"}
+            </button>
+        );
+    };
+
+    // Check if a value is a date string
+    const isDateString = (value: any): boolean => {
+        return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+    };
+
+    // Component to render nested JSON data in a collapsible/expandable way
+    const NestedJsonCell = ({ data }: { data: any }) => {
+        const [isExpanded, setIsExpanded] = useState(false);
+        
+        // Determine if the data is expandable (object or array with items)
+        const isExpandable = 
+            (typeof data === 'object' && data !== null) && 
+            (Array.isArray(data) ? data.length > 0 : Object.keys(data).length > 0);
+        
+        // If not expandable, render as simple value
+        if (!isExpandable) {
+            if (data === null) return <span className="text-gray-400">null</span>;
+            if (data === undefined) return <span className="text-gray-400">undefined</span>;
+            if (typeof data === 'boolean') return <span className="text-purple-400">{String(data)}</span>;
+            if (typeof data === 'number') return <span className="text-cyan-400">{data}</span>;
+            if (typeof data === 'string') {
+                // Check if it's a date string
+                if (isDateString(data)) {
+                    return <span className="text-yellow-300">{data}</span>;
+                }
+                return <span className="text-green-400">"{data}"</span>;
+            }
+            // Fallback
+            return <span>{String(data)}</span>;
+        }
+        
+        // For expandable content
+        const toggleExpand = (e: React.MouseEvent) => {
+            // Log for debugging
+            console.log('toggleExpand called, current state:', isExpanded);
+            e.stopPropagation(); // Prevent event from bubbling up to parent elements
+            setIsExpanded(!isExpanded);
+        };
+        
+        const renderExpandedContent = () => {
+            if (Array.isArray(data)) {
+                return (
+                    <div className="pl-4 mt-2 space-y-1 border-l-2 border-gray-700 pt-1">
+                        {data.map((item, index) => (
+                            <div key={index} className="mb-2">
+                                <span className="text-gray-400 mr-1">[{index}]:</span>
+                                <NestedJsonCell data={item} />
+                            </div>
+                        ))}
+                    </div>
+                );
+            } else {
+                return (
+                    <div className="pl-4 mt-2 space-y-1 border-l-2 border-gray-700 pt-1">
+                        {Object.entries(data).map(([key, value], index) => (
+                            <div key={key} className="mb-2">
+                                <span className="text-gray-400 mr-1">{key}:</span>
+                                <NestedJsonCell data={value} />
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
+        };
+        
+        // Get a more user-friendly preview content
+        const getPreviewContent = () => {
+            if (Array.isArray(data)) {
+                const itemCount = data.length;
+                return `${itemCount} item${itemCount !== 1 ? 's' : ''} in list`;
+            } else {
+                // For objects, try to show a more descriptive preview
+                const keys = Object.keys(data);
+                const keyCount = keys.length;
+                
+                // Try to detect what kind of object this might be
+                if ('id' in data && ('name' in data || 'title' in data)) {
+                    const nameField = data.name || data.title;
+                    return typeof nameField === 'string' 
+                        ? `${nameField} (${keyCount} properties)` 
+                        : `Details with ${keyCount} properties`;
+                }
+                
+                // Show some of the keys as a preview
+                const previewKeys = keys.slice(0, 2);
+                if (previewKeys.length > 0) {
+                    return `View: ${previewKeys.join(', ')}${keys.length > 2 ? '...' : ''}`;
+                }
+                
+                return `${keyCount} propert${keyCount !== 1 ? 'ies' : 'y'}`;
+            }
+        };
+        
+        return (
+            <div className={`nested-json min-w-[160px] ${isExpanded ? 'mt-2' : ''}`}>
+                <div 
+                    onClick={toggleExpand} 
+                    className={`
+                        cursor-pointer flex items-center                        
+                        transition-colors
+                    `}
+                >
+                    <span className="mr-2 text-white font-medium">
+                        {isExpanded ? 
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block">
+                                <path d="m18 15-6-6-6 6"/>
+                            </svg> : 
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block">
+                                <path d="m6 9 6 6 6-6"/>
+                            </svg>
+                        }
+                    </span>
+                    <span className="text-blue-400 font-medium">{getPreviewContent()}</span>
+                </div>
+                {isExpanded && renderExpandedContent()}
+            </div>
+        );
+    };
+    
+    const renderCellValue = (value: any, column: string) => {
+        if (value === null) return <span className="text-gray-400">null</span>;
+        if (value === undefined) return <span className="text-gray-400">undefined</span>;
+
+        if (typeof value === 'object' && value !== null) {
+            return <NestedJsonCell data={value} />;
+        }
+        
+        // Handle primitive types with appropriate styling
+        if (typeof value === 'number') {
+            return <span className="text-cyan-400">{value}</span>;
+        } else if (typeof value === 'boolean') {
+            return <span className="text-purple-400">{String(value)}</span>;
+        } else if (typeof value === 'string') {
+            // Check if it's a date string
+            if (isDateString(value)) {
+                return (
+                    <span className="text-yellow-300">
+                        {formatDateString(value, !!dateColumns[column])}
+                    </span>
+                );
+            }
+            return <span className="text-green-400">"{value}"</span>;
+        }
+        
+        // Fallback
+        return <span>{String(value)}</span>;
+    };
+
     const renderTableView = (data: any[]) => {
         if (!data || data.length === 0) {
             return <div className="text-gray-500">No data to display</div>;
         }
 
         const columns = Object.keys(data[0]);
+        
+        // Detect date columns
+        const dateColumnList = columns.filter(column => {
+            // Check the first few rows to see if this column contains date strings
+            for (let i = 0; i < Math.min(data.length, 5); i++) {
+                if (isDateString(data[i][column])) {
+                    return true;
+                }
+            }
+            return false;
+        });
 
         return (
             <div className="overflow-x-auto">
@@ -516,6 +722,9 @@ export default function MessageTile({
                             {columns.map(column => (
                                 <th key={column} className="py-2 px-4 bg-gray-800 border-b border-gray-700 text-gray-300 font-mono">
                                     {column}
+                                    {dateColumnList.includes(column) && (
+                                        <DateFormatToggle column={column} />
+                                    )}
                                 </th>
                             ))}
                         </tr>
@@ -523,20 +732,18 @@ export default function MessageTile({
                     <tbody>
                         {data.map((row, i) => (
                             <tr key={i} className="border-b border-gray-700">
-                                {columns.map(column => (
-                                    <td key={column} className="py-2 px-4">
-                                        <span className={`${typeof row[column] === 'number'
-                                            ? 'text-cyan-400'
-                                            : typeof row[column] === 'boolean'
-                                                ? 'text-purple-400'
-                                                : column.includes('time') || column.includes('date')
-                                                    ? 'text-yellow-300'
-                                                    : 'text-green-400'
-                                            }`}>
-                                            {JSON.stringify(row[column])}
-                                        </span>
-                                    </td>
-                                ))}
+                                {columns.map(column => {
+                                    const isComplexObject = 
+                                        typeof row[column] === 'object' && 
+                                        row[column] !== null && 
+                                        Object.keys(row[column]).length > 0;
+                                    
+                                    return (
+                                        <td key={column} className={`py-2 px-4 ${isComplexObject ? 'min-w-[280px]' : ''}`}>
+                                            {renderCellValue(row[column], column)}
+                                        </td>
+                                    );
+                                })}
                             </tr>
                         ))}
                     </tbody>

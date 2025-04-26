@@ -1896,6 +1896,10 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("ProcessLLMResponseAndRunQuery -> recovered from panic: %v", r)
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-error",
+					Data:  "Error: Failed to complete the request, seems like the database connection issue, try reconnecting the database.",
+				})
 			}
 			log.Printf("ProcessLLMResponseAndRunQuery -> activeProcesses: %v", s.activeProcesses)
 			s.processesMu.Lock()

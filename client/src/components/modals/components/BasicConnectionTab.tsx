@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertCircle, ChevronDown } from 'lucide-react';
-import { Connection, SSLMode } from '../../../types/chat';
+import { Connection } from '../../../types/chat';
 
 // Define FormErrors interface locally instead of importing it
 interface FormErrors {
