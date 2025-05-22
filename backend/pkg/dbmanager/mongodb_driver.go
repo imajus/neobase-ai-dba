@@ -488,7 +488,10 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		log.Printf("MongoDBDriver -> Connect -> Using shorter timeouts for encrypted connection")
 	}
 
-	// Configure SSL/TLS
+	// Explicitly disable SSL/TLS since the server doesn't support it
+	// clientOptions.SetTLSConfig(nil)
+
+	// Configure SSL/TLS only if explicitly enabled and server supports it
 	if config.UseSSL {
 		sslMode := "require"
 		if config.SSLMode != nil {
@@ -552,7 +555,7 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		}
 	} else {
 		// Disable SSL verification for encrypted connections
-		clientOptions.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
+		// clientOptions.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
 	}
 	// Configure connection pool
 	clientOptions.SetMaxPoolSize(25)
