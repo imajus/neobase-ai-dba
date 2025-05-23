@@ -463,13 +463,6 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		}
 	}
 
-	// Log the final URI (with sensitive parts masked)
-	maskedUri := uri
-	if config.Password != nil && *config.Password != "" {
-		maskedUri = strings.Replace(maskedUri, *config.Password, "********", -1)
-	}
-	log.Printf("MongoDBDriver -> Connect -> Connection URI: %s", maskedUri)
-
 	// Add connection options
 	if isSRV {
 		uri += "?retryWrites=true&w=majority"
@@ -477,6 +470,23 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		// For non-SRV connections, add a shorter server selection timeout
 		uri += "?serverSelectionTimeoutMS=5000"
 	}
+
+	// Add authSource parameter if specified
+	if config.AuthDatabase != nil && *config.AuthDatabase != "" {
+		if strings.Contains(uri, "?") {
+			uri += "&authSource=" + url.QueryEscape(*config.AuthDatabase)
+		} else {
+			uri += "?authSource=" + url.QueryEscape(*config.AuthDatabase)
+		}
+		log.Printf("MongoDBDriver -> Connect -> Using authentication database: %s", *config.AuthDatabase)
+	}
+
+	// Log the final URI (with sensitive parts masked)
+	maskedUri := uri
+	if config.Password != nil && *config.Password != "" {
+		maskedUri = strings.Replace(maskedUri, *config.Password, "********", -1)
+	}
+	log.Printf("MongoDBDriver -> Connect -> Connection URI: %s", maskedUri)
 
 	// Configure client options
 	clientOptions := options.Client().ApplyURI(uri)
